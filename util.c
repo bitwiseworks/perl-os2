@@ -2030,7 +2030,7 @@ Perl_new_warnings_bitfield(pTHX_ STRLEN *buffer, const char *const bits,
 
 #ifdef USE_ENVIRON_ARRAY
        /* VMS' my_setenv() is in vms.c */
-#if !defined(WIN32) && !defined(NETWARE)
+#if !defined(WIN32) && !defined(NETWARE) 
 void
 Perl_my_setenv(pTHX_ const char *nam, const char *val)
 {

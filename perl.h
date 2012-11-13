@@ -121,7 +121,7 @@
  * (The -DPERL_DARWIN comes from the hints/darwin.sh.)
  * __bsdi__ for BSD/OS
  */
-#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(PERL_DARWIN) || defined(__bsdi__) || defined(BSD41) || defined(BSD42) || defined(BSD43) || defined(BSD44)
+#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__) || defined(PERL_DARWIN) || defined(__bsdi__) || defined(BSD41) || defined(BSD42) || defined(BSD43) || defined(BSD44) 
 #   ifndef BSDish
 #       define BSDish
 #   endif
