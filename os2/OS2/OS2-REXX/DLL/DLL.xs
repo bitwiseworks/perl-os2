@@ -1,10 +1,10 @@
-#include "EXTERN.h"
-#include "perl.h"
-#include "XSUB.h"
-
 #define INCL_BASE
 #define INCL_REXXSAA
 #include <os2emx.h>
+
+#include "EXTERN.h"
+#include "perl.h"
+#include "XSUB.h"
 
 static RXSTRING * strs;
 static int	  nstrs;

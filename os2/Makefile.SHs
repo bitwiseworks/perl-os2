@@ -116,16 +116,20 @@ depend: os2/os2ish.h os2/os2thread.h
 
 # Deal with os2/* stuff
 os2$(OBJ_EXT): os2.c os2ish.h os2thread.h
+
 os2.c:
 	ln -s os2/$@ $@
+
 dl_os2.c: os2/dl_os2.c
 	ln -s os2/$@ $@
+
 perlrexx$(OBJ_EXT): perlrexx.c os2ish.h os2thread.h
+
 perlrexx.c: 
 	ln -s os2/$@ $@
 
 os2ish.h: os2/os2ish.h
-	ln -s $< $@
+	ln -s os2/$@ $@
 
 os2thread.h: os2/os2thread.h
 	ln -s os2/$@ $@
@@ -163,6 +167,10 @@ SO_CLDFLAGS = -Zdll -Zomf
 
 $(PERLREXX_DLL): perlrexx$(OBJ_EXT) perlrexx.def $(DYNALOADER) ext.libs
 	$(SHRPENV) $(CC) $(SO_CLDFLAGS) $(CCDLFLAGS) -o $@ perlrexx$(OBJ_EXT) $(DYNALOADER) $(static_ext) $(LIBPERL) `cat ext.libs` $(libs) perlrexx.def
+
+lib/re.pm: ext/re/re.pm
+	@-rm -f $@
+	cp ext/re/re.pm lib/re.pm
 
 perlrexx.def: miniperl$(EXE_EXT) $(_preplibrary)
 	echo	"LIBRARY 'perlrexx' INITINSTANCE TERMINSTANCE"	> $@

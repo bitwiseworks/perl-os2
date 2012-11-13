@@ -370,7 +370,7 @@ my_sleep(unsigned sec)
 
 #define sleep		my_sleep
 
-#ifndef INCL_DOS
+#ifndef INCL_DOSPROCESS
 unsigned long DosSleep(unsigned long);
 unsigned long DosAllocThreadLocalMemory (unsigned long cb, unsigned long **p);
 #endif
@@ -525,13 +525,14 @@ extern OS2_Perl_data_t OS2_Perl_data;
 #define Perl_HAB_set_f	1
 #define Perl_HAB_set	(OS2_Perl_flags & Perl_HAB_set_f)
 #define set_Perl_HAB_f	(OS2_Perl_flags |= Perl_HAB_set_f)
-#define set_Perl_HAB(h) (set_Perl_HAB_f, Perl_hab = h)
+#define set_Perl_HAB(h) (set_Perl_HAB_f, OS2_Perl_data.phab = h)
 #define _obtain_Perl_HAB (init_PMWIN_entries(),				\
-			  Perl_hab = (*PMWIN_entries.Initialize)(0),	\
+			  OS2_Perl_data.phab = (*PMWIN_entries.Initialize)(0),	\
 			  set_Perl_HAB_f, Perl_hab)
 #define perl_hab_GET()	(Perl_HAB_set ? Perl_hab : _obtain_Perl_HAB)
 #define Acquire_hab()	perl_hab_GET()
-#define Perl_hmq	((HMQ)OS2_Perl_data.phmq)
+/* #define Perl_hmq	((HMQ)OS2_Perl_data.phmq) */
+#define Perl_hmq	(OS2_Perl_data.phmq)
 #define Perl_hmq_refcnt	(OS2_Perl_data.phmq_refcnt)
 #define Perl_hmq_servers	(OS2_Perl_data.phmq_servers)
 #define Perl_os2_initial_mode	(OS2_Perl_data.initial_mode)
@@ -845,7 +846,7 @@ int setpriority(int which, int pid, int val);
 int getpriority(int which /* ignored */, int pid);
 #endif
 
-void croak_with_os2error(char *s) __attribute__((noreturn));
+void croak_with_os2error(const char *s) __attribute__((noreturn));
 
 /* void return value */
 #define os2cp_croak(rc,msg)	(CheckOSError(rc) && (croak_with_os2error(msg),0))

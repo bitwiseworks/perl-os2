@@ -1,10 +1,11 @@
-#include "EXTERN.h"
-#include "perl.h"
-#include "XSUB.h"
 
 #define INCL_BASE
 #define INCL_REXXSAA
 #include <os2emx.h>
+
+#include "EXTERN.h"
+#include "perl.h"
+#include "XSUB.h"
 
 #if 0
 #define INCL_REXXSAA
@@ -36,7 +37,7 @@ static RXSTRING   rxfunction   = { 11, "RXFUNCTION" };
 static ULONG PERLCALL(PCSZ name, ULONG argc, PRXSTRING argv, PCSZ queue, PRXSTRING ret);
 static ULONG PERLCALLcv(PCSZ name, SV *cv, ULONG argc, PRXSTRING argv, PCSZ queue, PRXSTRING ret);
 static ULONG PERLSTART(PCSZ name, ULONG argc, PRXSTRING argv, PCSZ queue, PRXSTRING ret);
-static RexxSubcomHandler SubCommandPerlEval;
+//static RexxSubcomHandler SubCommandPerlEval;
 
 #if 1
  #define Set	RXSHV_SET
@@ -170,7 +171,7 @@ PERLCALLcv(PCSZ name, SV *cv, ULONG argc, PRXSTRING argv, PCSZ queue, PRXSTRING 
 
 #ifndef __KLIBC__
     DosSetExceptionHandler(&xreg);
-endif
+#endif
 
     ENTER;
     SAVETMPS;

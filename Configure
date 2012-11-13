@@ -5048,7 +5048,7 @@ checkccflag='check=$1; flag=$2; callback=$3;
 echo " ";
 echo "Checking if your compiler accepts $flag" 2>&1;
 echo "int main(void) { return 0; }" > gcctest.c;
-if $cc -O2 $flag -o gcctest gcctest.c 2>gcctest.out && ./gcctest; then
+if $cc -O2 $flag -Zexe -o gcctest gcctest.c 2>gcctest.out && ./gcctest; then
     echo "Yes, it does." 2>&1;
     if $test -s gcctest.out ; then
         echo "But your platform does not like it:";
@@ -5098,7 +5098,7 @@ default|recommended)
 	# some assemblers can't read from stdin.  (It also slows down compilations
 	# in other cases, but those are apparently rarer these days.)  AD 5/2004.
 	case "$gccversion" in
-	?*)	set pipe -pipe
+	?*)	set pipe
 		eval $checkccflag
 		;;
 	esac

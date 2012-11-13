@@ -296,7 +296,7 @@ RUN = $run
 
 # These variables may need to be manually set for non-Unix systems.
 AR = $full_ar
-HOST_EXE_EXT = 
+HOST_EXE_EXT = .exe
 EXE_EXT = $_exe
 LIB_EXT = $_a
 OBJ_EXT = $_o
@@ -657,7 +657,7 @@ bitcount.h: generate_uudmap$(HOST_EXE_EXT)
 generate_uudmap$(OBJ_EXT): mg_raw.h
 
 generate_uudmap$(HOST_EXE_EXT): generate_uudmap$(OBJ_EXT)
-	$(CC) -o generate_uudmap$(EXE_EXT) $(LDFLAGS) generate_uudmap$(OBJ_EXT) $(libs)
+	$(CC) -Zexe -o generate_uudmap$(EXE_EXT) $(LDFLAGS) generate_uudmap$(OBJ_EXT) $(libs)
 
 miniperlmain$(OBJ_EXT): miniperlmain.c patchlevel.h
 	$(CCCMD) $(PLDLFLAGS) $*.c
@@ -1066,7 +1066,7 @@ extra.pods: $(MINIPERL_EXE)
 	-@rm -f extra.pods
 	-@for x in `grep -l '^=[a-z]' README.* | grep -v README.vms` ; do \
 	    nx=`echo $$x | sed -e "s/README\.//"`; \
-	    $(LNS) $$x "pod/perl"$$nx".pod" ; \
+	    $(LNS) ../$$x "pod/perl"$$nx".pod" ; \
 	    echo "pod/perl"$$nx".pod" >> extra.pods ; \
 	done
 

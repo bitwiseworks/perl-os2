@@ -21,8 +21,7 @@ cc='gcc'
 # Make denser object files and DLL
 case "X$optimize" in
   X)
-	optimize="-O2 -fomit-frame-pointer -falign-loops=2 -falign-jumps=2 -falign-functions=2 -s"
-	ld_dll_optimize="-s"
+	optimize="$(CFLAGS)"
 	;;
 esac
 
@@ -135,7 +134,7 @@ plibext='.a'
 d_fork='define'
 lddlflags="-Zdll -Zomf "
 # Recursive regmatch may eat 2.5M of stack alone.
-ldflags='-Zomf -Zhigh-mem -Zstack 32000 '
+ldflags='-Zomf -Zhigh-mem '
 ccflags="-DDOSISH -DOS2=2 -DEMBED -I."
 use_clib='libc_dll'
 usedl='define'
@@ -161,7 +160,7 @@ fi
 # [Maybe we should just remove c from $libswanted ?]
 
 # Test would pick up wrong rand, so we hardwire the value for random()
-libs='-lsocket'
+libs='-lsocket -lurpo -lssp'
 randbits=31
 archobjs="os2$obj_ext dl_os2$obj_ext"
 
@@ -206,10 +205,10 @@ nroff='nroff.cmd'
   _nroff='nroff.cmd'
 
 # should be handled automatically by Configure now.
-ln='cp'
+#ln='cp'
 # Will be rewritten otherwise, indented to not put in config.sh
-  _ln='cp'
-lns='cp'
+#  _ln='cp'
+#lns='cp'
 
 nm_opt='-pa'
 

@@ -55,7 +55,7 @@ enum module_name_how { mod_name_handle, mod_name_shortname, mod_name_full,
 static SV* module_name_at(void *pp, enum module_name_how how);
 
 void
-croak_with_os2error(char *s)
+croak_with_os2error(const char *s)
 {
     Perl_croak_nocontext("%s: %s", s, os2error(Perl_rc));
 }
@@ -3668,6 +3668,7 @@ fprintf(stderr,"sys_is_absolute2 = %s\n",path);
 		    RETVAL = NULL;
 		}
 	    } else {
+		RETVAL = -1;
 		/* Either path is relative, or starts with a drive letter. */
 		/* If the path starts with a drive letter, then dir is
 		   relevant only if 
@@ -3686,12 +3687,12 @@ fprintf(stderr,"sys_is_absolute3 = %s\n",dir);
 			      && toupper(path[0]) == current_drive())) {
 			path += 2;
 		    } else if (_abspath(p, path, MAXPATHLEN) == 0) {
-			RETVAL = p; goto done;
+			RETVAL = p;
 		    } else {
-			RETVAL = NULL; goto done;
+			RETVAL = NULL;
 		    }
 		}
-		{
+		if (RETVAL == -1) {
 		    /* Need to prepend the absolute path of dir. */
 		    char p1[MAXPATHLEN];
 
@@ -3712,7 +3713,6 @@ fprintf(stderr,"sys_is_absolute3 = %s\n",dir);
 			RETVAL = NULL;
 		    }
 		}
-	      done:
 	    }
 	}
 	if (!RETVAL)
@@ -4591,9 +4591,9 @@ XS(XS_OS2_open)
     if (items < 2 || items > 6)
 	Perl_croak(aTHX_ "Usage: OS2::open(pszFileName, ulOpenMode, ulOpenFlags= OPEN_ACTION_OPEN_IF_EXISTS | OPEN_ACTION_FAIL_IF_NEW, ulAttribute= FILE_NORMAL, ulFileSize= 0, pEABuf= NULL)");
     {
-#line 39 "pipe.xs"
+
 	ULONG rc;
-#line 113 "pipe.c"
+
 	ULONG	RETVAL;
 	PCSZ	pszFileName = ( SvOK(ST(0)) ? (PCSZ)SvPV_nolen(ST(0)) : NULL );
 	HFILE	hFile;

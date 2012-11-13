@@ -9,6 +9,11 @@ extern "C" {
 }
 #endif
 
+#ifdef __KLIBC__
+// avoid using libc _strptime
+#define _strptime _perl_strptime
+#endif
+
 /* XXX struct tm on some systems (SunOS4/BSD) contains extra (non POSIX)
  * fields for which we don't have Configure support prior to Perl 5.8.0:
  *   char *tm_zone;   -- abbreviation of timezone name
