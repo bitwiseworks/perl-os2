@@ -26,6 +26,10 @@ sub case_tolerant {
 sub file_name_is_absolute {
     my ($self,$file) = @_;
 
+    if ($file =~ /^.\@unixroot/) {
+      return 2;
+    }
+
     # 2012-06-08 SHL
     if ($file =~ m{^($VOL_RX)}o) {
       my $vol = $1;
