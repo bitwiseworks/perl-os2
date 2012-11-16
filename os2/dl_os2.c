@@ -79,6 +79,8 @@ find_myself(void)
   return mod;
 }
 
+#if 0 /* YD use klibc functions */
+
 void *
 dlopen(const char *path, int mode)
 {
@@ -202,3 +204,5 @@ dlclose(void *handle)
 	retcode = rc;
 	return 2;
 }
+
+#endif /* 0 // YD use klibc functions */
