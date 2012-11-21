@@ -228,6 +228,39 @@ static struct perlos2_state_t {
 
 const Perl_PFN * const pExtFCN = (Perl_po2()->po2_ExtFCN);
 
+/**** dynamic loader for PMPRINTF dll ****/
+typedef APIRET _PMPRINTF(const char*, ...);
+typedef _PMPRINTF* PMPRINTF;
+
+static void* 	hmodPmPrintf = NULL;
+static PMPRINTF	pfnPmPrintf = NULL;
+
+int debug_printf( const char* format, ...)
+{
+	va_list	args;
+	int		cnt;
+
+	if (hmodPmPrintf == NULL) {
+		/* try dll loading */
+		hmodPmPrintf = dlopen( "PMPRINTF", 0);
+		if (hmodPmPrintf == NULL)
+			return -1;
+
+		/* search function */
+		pfnPmPrintf = dlsym(hmodPmPrintf, "PmPrintfVa");
+		if (!pfnPmPrintf)
+			return -1;
+
+	}
+
+	/* function loaded, print data */
+	va_start(args, format);
+	cnt = pfnPmPrintf(format, args);
+	va_end(args);
+
+	return cnt;
+}
+
 #if defined(USE_5005THREADS) || defined(USE_ITHREADS)
 
 typedef void (*emx_startroutine)(void *);
@@ -1371,6 +1404,19 @@ do_spawn_ve(pTHX_ SV *really, U32 flag, U32 execf, char *inicmd, U32 addflag)
 	fcntl(2, F_SETFD, fl_stderr);
     } else if (nostderr)
        close(2);
+
+    if (flag == P_NOWAIT) {
+	PL_statusvalue = -1;	/* >16bits hint for pp_system() */
+    }
+    else {
+	if (rc < 0) {
+	    rc = 255 * 256;
+	}
+	else
+	    rc *= 256;
+	PL_statusvalue = rc;
+    }
+
     return rc;
 }
 
