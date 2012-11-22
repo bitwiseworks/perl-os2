@@ -4478,7 +4478,10 @@ dotted_decimal_version:
 	while (isDIGIT(*d)) 	/* integer part */
 	    d++;
 
-	if (*d == '.')
+/* YD FIXME this is a fast hack to allow proper number translation
+   when LANG sets decimal_separator=',', numbers (5.006) are translated
+   in upper code to 5,006 thus below code fails. */
+	if (*d == '.' || *d == ',')
 	{
 	    saw_decimal++;
 	    d++; 		/* decimal point */
@@ -4516,7 +4519,7 @@ dotted_decimal_version:
 		    d++;
 		    alpha = TRUE;
 		}
-		else if (*d == '.') {
+		else if (*d == '.' || *d == ',') {
 		    if (alpha) {
 			BADVERSION(s,errstr,"Invalid version format (underscores before decimal)");
 		    }
@@ -4539,7 +4542,7 @@ dotted_decimal_version:
     {					/* decimal versions */
 	/* special strict case for leading '.' or '0' */
 	if (strict) {
-	    if (*d == '.') {
+	    if (*d == '.' || *d == ',') {
 		BADVERSION(s,errstr,"Invalid version format (0 before decimal required)");
 	    }
 	    if (*d == '0' && isDIGIT(d[1])) {
@@ -4557,7 +4560,7 @@ dotted_decimal_version:
 	    d++;
 
 	/* look for a fractional part */
-	if (*d == '.') {
+	if (*d == '.' || *d == ',') {
 	    /* we found it, so consume it */
 	    saw_decimal++;
 	    d++;
@@ -4600,7 +4603,7 @@ dotted_decimal_version:
 
 	while (isDIGIT(*d)) {
 	    d++;
-	    if (*d == '.' && isDIGIT(d[-1])) {
+	    if ((*d == '.' || *d == ',') && isDIGIT(d[-1])) {
 		if (alpha) {
 		    BADVERSION(s,errstr,"Invalid version format (underscores before decimal)");
 		}
