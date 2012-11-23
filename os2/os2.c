@@ -1589,6 +1589,19 @@ os2_aspawn_4(pTHX_ SV *really, register SV **args, I32 cnt, int execing)
 	    
 	    rc = do_spawn_ve(aTHX_ really, flag, execf[execing], NULL, 0);
 	}
+
+    if (flag == P_NOWAIT) {
+	PL_statusvalue = -1;	/* >16bits hint for pp_system() */
+    }
+    else {
+	if (rc < 0) {
+	    rc = 255 * 256;
+	}
+	else
+	    rc *= 256;
+	PL_statusvalue = rc;
+    }
+
     } else
     	rc = -1;
     do_execfree();
@@ -2027,7 +2040,22 @@ XS(XS_File__Copy_syscopy)
 	RETVAL = !err;
     }
 #else
-	RETVAL = !CheckOSError(DosCopy(src, dst, flag));
+    {
+       char srcFull[CCHMAXPATH];
+       char dstFull[CCHMAXPATH];
+
+       /* use realpath to expand @unixroot macros */
+       if (strstr(src,"/@unixroot")==NULL) 
+          strcpy( srcFull, src);
+       else 
+          realpath( src, srcFull);
+       if (strstr(dst,"/@unixroot")==NULL) 
+          strcpy( dstFull, dst);
+       else 
+          realpath( dst, dstFull);
+
+	RETVAL = !CheckOSError(DosCopy(srcFull, dstFull, flag));
+    }
 #endif 
 /* FIXME: this copies EAs as well, including the unix EAs. great. */
 	XSprePUSH; PUSHi((IV)RETVAL);
