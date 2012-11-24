@@ -378,6 +378,9 @@ else {
 
 # Install header files and libraries.
 mkpath("$installarchlib/CORE", $opts{verbose}, 0777);
+if ($Is_OS2) {
+    mkpath("$installarchlib/CORE/os2", $opts{verbose}, 0777);
+}
 my @corefiles;
 if ($Is_VMS) {  # We did core file selection during build
     my $coredir = "lib/$Config{archname}/$ver/CORE";
@@ -409,6 +412,9 @@ elsif ($Is_Cygwin) { # On Cygwin symlink it to CORE to make Makefile happy
 
     # AIX needs perl.exp installed as well.
     push(@corefiles,'perl.exp') if $^O eq 'aix';
+    # OS/2 needs also real headers, not only symlinks.
+    push(@corefiles,'os2/os2ish.h') if $^O eq 'os2';
+    push(@corefiles,'os2/os2thread.h') if $^O eq 'os2';
     if ($^O eq 'mpeix') {
 	# MPE needs mpeixish.h installed as well.
 	mkpath("$installarchlib/CORE/mpeix", $opts{verbose}, 0777);
@@ -456,7 +462,7 @@ if ($archname && ! samepath($installbin, '.') && ($^O ne 'dos') && ! $Is_VMS) {
 	# MPE doesn't support hard links, so use a symlink.
 	# We don't want another cloned copy.
 	symlink($Config{perlpath}, "$installbin/$archperl");
-    } elsif ($^O eq 'vos') {
+    } elsif ($^O eq 'vos' or $Is_OS2) {
 	# VOS doesn't support hard links, so use a symlink.
 	symlink("$installbin/$perl_verbase$ver$exe_ext",
 		"$installbin/$archperl");
