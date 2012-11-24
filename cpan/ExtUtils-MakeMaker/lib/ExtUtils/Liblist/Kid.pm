@@ -154,7 +154,7 @@ sub _unix_os2_ext {
             }
             elsif ( -f ( $fullname = "$thispth/Slib$thislib$Config_libext" ) ) {
             }
-            # klibc libext is .a but we can use .lib too
+            # YD klibc libext is .a but we can use .lib too
             elsif ( -f ( $fullname = "$thispth/$thislib.lib" ) ) {
             }
             elsif ($^O eq 'dgux'
