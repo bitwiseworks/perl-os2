@@ -1378,7 +1378,6 @@ foreach my $symbol (@symbols) {
 
 if ($ARGS{PLATFORM} eq 'os2') {
     print <<EOP;
-    _dll_perlmain=main
     _fill_extLibpath
     _dir_subst
     _Perl_OS2_handler_install
