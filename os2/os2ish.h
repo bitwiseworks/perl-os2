@@ -358,6 +358,8 @@ extern unsigned long msCounter(void);
 extern unsigned long InfoTable(int local);
 extern unsigned long find_myself(void);
 
+#ifndef __KLIBC__
+/* use klibc sleep */
 #define MAX_SLEEP	(((1<30) / (1000/4))-1)	/* 1<32 msec */
 
 static __inline__ unsigned
@@ -374,6 +376,7 @@ my_sleep(unsigned sec)
 }
 
 #define sleep		my_sleep
+#endif /* __KLIBC__ */
 
 #ifndef INCL_DOSPROCESS
 unsigned long DosSleep(unsigned long);
