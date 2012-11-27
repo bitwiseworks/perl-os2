@@ -308,7 +308,12 @@ void Perl_OS2_term(void **excH, int exitstatus, int flags);
 #  else
 #    define PerlIO FILE
 #  endif 
+#ifndef __KLIBC__
 #  define SYSTEM_ALLOC(a) sys_alloc(a)
+#else
+/* use perl emulation since sbrk cannot access high mem */
+#  define USE_PERL_SBRK
+#endif
 
 void *sys_alloc(int size);
 
