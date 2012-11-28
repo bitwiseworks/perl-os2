@@ -1,3 +1,5 @@
+#include <os2safe.h>
+
 #define INCL_DOS
 #define INCL_NOPM
 #define INCL_DOSFILEMGR
