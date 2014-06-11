@@ -1370,6 +1370,7 @@ do_spawn_ve(pTHX_ SV *really, U32 flag, U32 execf, char *inicmd, U32 addflag)
 			    /* XXXX This is good only until we refuse
 			            quoted arguments... */
 
+			    argsp = fargs;
 			    PL_Argv[0] = inicmd;
 			    PL_Argv[1] = NULL;
 			    nargs = 2;	/* shell -c */
