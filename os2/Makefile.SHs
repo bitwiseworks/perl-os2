@@ -108,8 +108,8 @@ perl.linkexp: perl.exports perl.map  os2/os2.sym
 
 miniperl.map: miniperl$(EXE_EXT)
 
-miniperl$(EXE_EXT): $(obj) miniperlmain$(OBJ_EXT) opmini$(OBJ_EXT)
-	$(CC) $(CLDFLAGS) -o $@ miniperlmain$(OBJ_EXT) `echo $(obj)|sed -e 's/\bop\./opmini./g'` $(libs) -Zmap -Zargs-wild
+miniperl$(EXE_EXT): $(mini_obj)
+	$(CC) $(CLDFLAGS) -o $@ $(mini_obj) $(libs) -Zmap -Zargs-wild
 	@./miniperl$(EXE_EXT) -w -Ilib -MExporter -e '<?>' || $(MAKE) minitest
 
 depend: os2/os2ish.h os2/os2thread.h
