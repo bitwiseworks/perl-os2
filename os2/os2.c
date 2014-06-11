@@ -1027,6 +1027,36 @@ file_type(char *path)
     return apptype;
 }
 
+#ifdef __KLIBC__
+static ULONG
+safe_file_type(char *path)
+{
+    int rc;
+    char buf[CCHMAXPATH], buf2[PATH_MAX];
+
+    rc = file_type(path);
+    if (rc >= 0 || rc == -3 /* Directory */)
+        return rc;
+
+    /* This may be a symlink; check that */
+    if (!strpbrk(path, "\\/:")) {
+        APIRET arc;
+        arc = DosSearchPath(SEARCH_IGNORENETERRS |
+                            SEARCH_ENVIRONMENT |
+                            SEARCH_CUR_DIRECTORY,
+                            "PATH", path, buf, sizeof(buf));
+        if (CheckOSError(arc))
+            return -1;
+        path = buf;
+    }
+    if (!realpath(path, buf2))
+        return -1;
+    return file_type(buf2);
+}
+#else
+#define safe_file_type file_type
+#endif
+
 /* Spawn/exec a program, revert to shell if needed. */
 /* global PL_Argv[] contains arguments. */
 
@@ -1080,7 +1110,7 @@ do_spawn_ve(pTHX_ SV *really, U32 flag, U32 execf, char *inicmd, U32 addflag)
 #else
          {
 #endif
-	    int type = file_type(real_name);
+	    int type = safe_file_type(real_name);
 	  type_again:
 	    if (type == -1) {		/* Not found */
 		errno = ENOENT;
@@ -1100,7 +1130,7 @@ do_spawn_ve(pTHX_ SV *really, U32 flag, U32 execf, char *inicmd, U32 addflag)
 		if (l + 5 <= sizeof tbuf) {
 		    strcpy(tbuf, real_name);
 		    strcpy(tbuf + l, ".exe");
-		    type = file_type(tbuf);
+		    type = safe_file_type(tbuf);
 		    if (type >= -3)
 			goto type_again;
 		}
