@@ -157,6 +157,9 @@ sub _unix_os2_ext {
             # YD klibc libext is .a but we can use .lib too
             elsif ( -f ( $fullname = "$thispth/$thislib.lib" ) ) {
             }
+            # YD klibc libext is .a but we can use _dll.a too
+            elsif ( -f ( $fullname = "$thispth/lib$thislib"."_dll.a" ) ) {
+            }
             elsif ($^O eq 'dgux'
                 && -l ( $fullname = "$thispth/lib$thislib$Config_libext" )
                 && readlink( $fullname ) =~ /^elink:/s )
