@@ -28,7 +28,9 @@ sub _unix_os2_ext {
     my ( $self, $potential_libs, $verbose, $give_libs ) = @_;
     $verbose ||= 0;
 
-    if ( $^O =~ 'os2' and $Config{perllibs} ) {
+    my $os2 = $^O =~ 'os2';
+
+    if ( $os2 and $Config{perllibs} ) {
 
         # Dynamic libraries are not transitive, so we may need including
         # the libraries linked against perl.dll again.
@@ -100,7 +102,24 @@ sub _unix_os2_ext {
             # For gcc-2.6.2 on linux (March 1995), DLD can not load
             # .sa libraries, with the exception of libm.sa, so we
             # deliberately skip them.
-            if ( @fullname = $self->lsdir( $thispth, "^\Qlib$thislib.$so.\E[0-9]+" ) ) {
+            if ( $os2
+                && (   -f ( $fullname = "$thispth/lib${thislib}_dll$Config_libext" )
+                    || -f ( $fullname = "$thispth/${thislib}_dll$Config_libext" )
+                    || -f ( $fullname = "$thispth/lib$thislib$Config_libext" )
+                    || -f ( $fullname = "$thispth/$thislib$Config_libext" )
+                    || -f ( $fullname = "$thispth/$thislib.$so" )
+                    || -f ( $fullname = "$thispth/lib${thislib}_s$Config_libext" )
+                    || -f ( $fullname = "$thispth/${thislib}_s$Config_libext" )
+                    || -f ( $fullname = "$thispth/$thislib.lib" ) ) ) {
+
+                 # On OS/2 it's a bit different (and simpler): the full library
+                 # name is defined by ld/emxomfld at link time depending on
+                 # static/shared flags (with shared mode being the default), see
+                 # http://svn.netlabs.org/repos/libc/branches/libc-0.6/doc/ReleaseNotes.os2.
+                 # Try all variants in shared+dll order. Also accept the
+                 # native OS/2 .lib extension in addition to the Unix-like.
+            }
+            elsif ( @fullname = $self->lsdir( $thispth, "^\Qlib$thislib.$so.\E[0-9]+" ) ) {
 
                 # Take care that libfoo.so.10 wins against libfoo.so.9.
                 # Compare two libraries to find the most recent version
@@ -153,12 +172,6 @@ sub _unix_os2_ext {
             elsif ( -f ( $fullname = "$thispth/lib$thislib.dll$Config_libext" ) ) {
             }
             elsif ( -f ( $fullname = "$thispth/Slib$thislib$Config_libext" ) ) {
-            }
-            # YD klibc libext is .a but we can use .lib too
-            elsif ( -f ( $fullname = "$thispth/$thislib.lib" ) ) {
-            }
-            # YD klibc libext is .a but we can use _dll.a too
-            elsif ( -f ( $fullname = "$thispth/lib$thislib"."_dll.a" ) ) {
             }
             elsif ($^O eq 'dgux'
                 && -l ( $fullname = "$thispth/lib$thislib$Config_libext" )
