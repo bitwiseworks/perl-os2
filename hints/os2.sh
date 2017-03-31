@@ -160,7 +160,7 @@ fi
 # [Maybe we should just remove c from $libswanted ?]
 
 # Test would pick up wrong rand, so we hardwire the value for random()
-libs='-lsocket -lurpo -lssp'
+libs='-lsocket -lssp'
 randbits=31
 archobjs="os2$obj_ext dl_os2$obj_ext"
 
