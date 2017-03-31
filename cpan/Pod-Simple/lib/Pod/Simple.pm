@@ -64,6 +64,7 @@ __PACKAGE__->_accessorize(
 
   'output_fh',         # The filehandle we're writing to, if applicable.
                        # Used only in some derived classes.
+  'output_fh_opened',  # Whether output_fh was opened by us.
 
   'hide_line_numbers', # For some dumping subclasses: whether to pointedly
                        # suppress the start_line attribute
@@ -475,6 +476,7 @@ sub parse_from_file {
     binmode($out_fh)
      if $self->can('write_with_binmode') and $self->write_with_binmode;
     $self->output_fh($out_fh);
+    $self->output_fh_opened(1);
   }
 
   return $self->parse_file($source);

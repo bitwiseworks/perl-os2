@@ -1281,9 +1281,8 @@ sub parse_from_file {
     # Do the work.
     my $retval = $self->SUPER::parse_from_file (@_);
 
-    # Flush output, since Pod::Simple doesn't do this.  Ideally we should also
-    # close the file descriptor if we had to open one, but we can't easily
-    # figure this out.
+    # Flush output, since Pod::Simple doesn't do this.  Also close the file
+    # descriptor if we had to open one.
     my $fh = $self->output_fh ();
     my $oldfh = select $fh;
     my $oldflush = $|;
@@ -1291,6 +1290,10 @@ sub parse_from_file {
     print $fh '';
     $| = $oldflush;
     select $oldfh;
+    if ($self->output_fh_opened ()) {
+        close ($fh); # || croak "Can't close $_[2] after writing: $!";
+        $self->output_fh_opened (undef);
+    }
     return $retval;
 }
 
