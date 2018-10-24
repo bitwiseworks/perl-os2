@@ -3095,7 +3095,17 @@ sub fix_shebang_line { # Adapted from fixin() in ExtUtils::MM_Unix 1.35
 
     my ($cmd, $arg) = (split(' ', $line, 2), '');
     next unless $cmd =~ /perl/i;
-    my $interpreter = $self->{properties}{perl};
+    my $interpreter;
+    if ($self->is_os2ish) {
+      my $unixroot = lc($ENV{UNIXROOT});
+      if (substr(lc($interpreter), 0, length($unixroot)) eq $unixroot) {
+        my $repl_string = substr($interpreter, 0, length($unixroot), '/@unixroot');
+      } else {
+        $interpreter = $self->{properties}{perl};
+      }
+    } else {
+      $interpreter = $self->{properties}{perl};
+    }
 
     $self->log_verbose("Changing sharpbang in $file to $interpreter\n");
     my $shb = '';
@@ -3106,7 +3116,7 @@ sub fix_shebang_line { # Adapted from fixin() in ExtUtils::MM_Unix 1.35
     $shb .= qq{
 eval 'exec $interpreter $arg -S \$0 \${1+"\$\@"}'
     if 0; # not running under some shell
-} unless $self->is_windowsish; # this won't work on win32, so don't
+} unless $self->is_windowsish or $self->is_os2ish; # this won't work on win32 and os2, so don't
 
     my $FIXOUT = IO::File->new(">$file.new")
       or die "Can't create new $file: $!\n";

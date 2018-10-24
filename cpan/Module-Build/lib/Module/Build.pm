@@ -53,6 +53,7 @@ sub os_type { return Perl::OSType::os_type() }
 sub is_vmsish { return Perl::OSType::is_os_type('VMS') }
 sub is_windowsish { return Perl::OSType::is_os_type('Windows') }
 sub is_unixish { return Perl::OSType::is_os_type('Unix') }
+sub is_os2ish { return $^O == 'os2' }
 
 1;
 
