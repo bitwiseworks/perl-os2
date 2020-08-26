@@ -1292,6 +1292,8 @@ if ($ARGS{PLATFORM} eq 'os2') {
     @missing = grep { !exists $mapped{$_} }
 		    keys %export;
     @missing = grep { !exists $exportperlmalloc{$_} } @missing;
+    # preserv boot_DynaLoader !!!
+    @missing = grep {!/boot_DynaLoader/} @missing;
     delete $export{$_} foreach @missing;
 }
 
