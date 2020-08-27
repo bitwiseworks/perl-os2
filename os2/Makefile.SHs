@@ -71,8 +71,8 @@ perl_dll_t: t/$(PERL_DLL)
 t/$(PERL_DLL): $(PERL_DLL)
 	cp -f $(PERL_DLL) t/$(PERL_DLL)
 
-$(PERL_DLL): $(obj) perl5.def
-	$(LD) $(LD_OPT) $(LDDLFLAGS) $(PERL_DLL_LD_OPT) -o $@ $(obj) $(libs) perl5.def || ( rm $(PERL_DLL) && sh -c false )
+$(PERL_DLL): $(obj) $(DYNALOADER) perl5.def
+	$(LD) $(LD_OPT) $(LDDLFLAGS) $(PERL_DLL_LD_OPT) -o $@ $(obj) $(libs) $(DYNALOADER) perl5.def || ( rm $(PERL_DLL) && sh -c false )
 
 perl5.olddef: perl.linkexp
 	echo "LIBRARY '$(PERL_DLL_BASE)' INITINSTANCE TERMINSTANCE"	> $@
@@ -149,8 +149,8 @@ perl__$(EXE_EXT): $& $(PERL_DLL) libperl_dllmain$(LIB_EXT)
 
 # Forking dynamically loaded perl:
 
-perl$(EXE_EXT): $& $(PERLREXX_DLL) $(PERL_DLL) perlmain$(OBJ_EXT) $(DYNALOADER)
-	$(CC) $(CLDFLAGS) $(CCDLFLAGS) -o $@ perlmain$(OBJ_EXT) $(DYNALOADER) -lperl
+perl$(EXE_EXT): $& $(PERLREXX_DLL) $(PERL_DLL) perlmain$(OBJ_EXT)
+	$(CC) $(CLDFLAGS) $(CCDLFLAGS) -o $@ perlmain$(OBJ_EXT) -lperl
 
 clean: os2_clean
 
@@ -165,8 +165,8 @@ SO_CLDFLAGS = -Zdll -Zomf
 
 # A callable-from-REXX DLL
 
-$(PERLREXX_DLL): perlrexx$(OBJ_EXT) perlrexx.def $(DYNALOADER) ext.libs
-	$(SHRPENV) $(CC) $(SO_CLDFLAGS) $(CCDLFLAGS) -o $@ perlrexx$(OBJ_EXT) $(DYNALOADER) $(static_ext) $(LIBPERL) `cat ext.libs` $(libs) perlrexx.def
+$(PERLREXX_DLL): $(PERL_DLL) perlrexx$(OBJ_EXT) perlrexx.def ext.libs
+	$(SHRPENV) $(CC) $(SO_CLDFLAGS) $(CCDLFLAGS) -o $@ perlrexx$(OBJ_EXT) $(static_ext) $(LIBPERL) `cat ext.libs` $(libs) perlrexx.def
 
 lib/re.pm: ext/re/re.pm
 	@-rm -f $@
