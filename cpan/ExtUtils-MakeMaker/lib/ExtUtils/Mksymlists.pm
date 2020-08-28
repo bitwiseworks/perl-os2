@@ -94,7 +94,10 @@ sub _write_os2 {
         $comment = "Core $comment";
     }
     $comment = "$comment (Perl-config: $Config{config_args})";
-    $comment = substr($comment, 0, 200) . "...)" if length $comment > 203;
+    # count the complete fixed desc length including the #@: characters
+    my $desclength = 0;
+    $desclength = (length $distname) + (length $data->{VERSION}) + 6;
+    $comment = substr($comment, 0, (236 - $desclength) ) . "...)" if ((length $comment) + $desclength) > 240;
     rename "$data->{FILE}.def", "$data->{FILE}_def.old";
 
     open(my $def, ">", "$data->{FILE}.def")
