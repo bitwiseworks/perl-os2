@@ -44,6 +44,10 @@
 #  include <netinet/tcp.h>
 #endif
 
+#ifdef __LIBCN__
+#  include <libcx/net.h>
+#endif
+
 #ifdef NETWARE
 NETDB_DEFINE_CONTEXT
 NETINET_DEFINE_CONTEXT

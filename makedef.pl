@@ -1123,6 +1123,7 @@ elsif ($ARGS{PLATFORM} eq 'os2') {
 		      ResetWinError
 		      CroakWinError
 		      PL_do_undump
+		      os2_fstat
 		 ));
 }
 elsif ($ARGS{PLATFORM} eq 'netware') {

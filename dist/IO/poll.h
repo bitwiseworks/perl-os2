@@ -11,7 +11,11 @@
 #  define POLL_H
 
 #if (defined(HAS_POLL) && defined(I_POLL)) || defined(POLLWRBAND)
+# ifdef __LIBCN__
+#  include <sys/poll.h>
+# else
 #  include <poll.h>
+# endif
 #else
 #ifdef HAS_SELECT
 
