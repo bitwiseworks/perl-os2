@@ -242,6 +242,13 @@ sub write_errno_pm {
     unless ($^O eq 'beos') {	# trust what we have / get later
     # invoke CPP and read the output
 
+	my $inhibit_linemarkers = '';
+	if ($Config{gccversion} =~ /\A(\d+)\./ and $1 >= 5){
+	    # GCC 5.0 interleaves expanded macros with line number breaking
+	    # each line into mutliple lines. RT#123784
+	    $inhibit_linemarkers = ' -P';
+	}
+
 	if ($^O eq 'VMS') {
 	    my $cpp = "$Config{cppstdin} $Config{cppflags} $Config{cppminus}";
 	    $cpp =~ s/sys\$input//i;
@@ -255,7 +262,7 @@ sub write_errno_pm {
 	    open(CPPO,"$cpp < errno.c |")
 		or die "Cannot exec $cpp";
         } else {
-	    my $cpp = default_cpp();
+	    my $cpp = default_cpp() . $inhibit_linemarkers;
 	    open(CPPO,"$cpp < errno.c |")
 		or die "Cannot exec $cpp";
 	}
