@@ -150,7 +150,7 @@ perl__$(EXE_EXT): $& $(PERL_DLL) libperl_dllmain$(LIB_EXT)
 # Forking dynamically loaded perl:
 
 perl$(EXE_EXT): $& $(PERLREXX_DLL) $(PERL_DLL) perlmain$(OBJ_EXT)
-	$(CC) $(CLDFLAGS) $(CCDLFLAGS) -o $@ perlmain$(OBJ_EXT) -lperl
+	$(CC) $(CLDFLAGS) $(CCDLFLAGS) -o $@ perlmain$(OBJ_EXT) -lperl $(libs)
 
 clean: os2_clean
 
