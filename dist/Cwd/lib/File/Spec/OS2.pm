@@ -187,6 +187,7 @@ sub abs2rel {
         shift @pathchunks ;
         shift @basechunks ;
     }
+    return $self->curdir unless @pathchunks || @basechunks;
 
     # No need to catdir, we know these are well formed.
     $path_directories = CORE::join( '/', @pathchunks );
