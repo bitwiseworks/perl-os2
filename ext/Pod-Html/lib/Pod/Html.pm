@@ -681,7 +681,7 @@ sub _unixify {
                : File::Spec->splitdir($dirs);
     if (defined($vol) && $vol) {
         $vol =~ s/:$// if $^O eq 'VMS';
-        $vol = uc $vol if $^O eq 'MSWin32';
+        $vol = uc $vol if $^O eq 'MSWin32' or 'os2';
 
         if( $dirs[0] ) {
             unshift @dirs, $vol;
@@ -694,7 +694,7 @@ sub _unixify {
     return $file unless scalar(@dirs);
     $full_path = File::Spec::Unix->catfile(File::Spec::Unix->catdir(@dirs),
                                            $file);
-    $full_path =~ s|^\/|| if $^O eq 'MSWin32'; # C:/foo works, /C:/foo doesn't
+    $full_path =~ s|^\/|| if $^O eq 'MSWin32' or 'os2'; # C:/foo works, /C:/foo doesn't
     return $full_path;
 }
 
