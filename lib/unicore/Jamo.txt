@@ -1,14 +1,15 @@
-# Jamo-6.1.0.txt
-# Date: 2011-06-22, 23:07:00 GMT [KW, LI]
+# Jamo-16.0.0.txt
+# Date: 2024-02-02
+# © 2024 Unicode®, Inc.
+# Unicode and the Unicode Logo are registered trademarks of Unicode, Inc. in the U.S. and other countries.
+# For terms of use and license, see https://www.unicode.org/terms_of_use.html
 #
 # Unicode Character Database
-# Copyright (c) 1991-2011 Unicode, Inc.
-# For terms of use, see http://www.unicode.org/terms_of_use.html
-# For documentation, see http://www.unicode.org/reports/tr44/
+# For documentation, see https://www.unicode.org/reports/tr44/
 #
 # This file defines the Jamo_Short_Name property.
 #
-# See Section 3.12 of The Unicode Standard, Version 6.1
+# See Section 3.12 of The Unicode Standard, Version 15.0
 # for more information.
 #
 # Each line contains two fields, separated by a semicolon.
@@ -21,7 +22,7 @@
 # the null string).
 #
 # #############################################################
- 
+
 1100; G   # HANGUL CHOSEONG KIYEOK
 1101; GG  # HANGUL CHOSEONG SSANGKIYEOK
 1102; N   # HANGUL CHOSEONG NIEUN
@@ -90,3 +91,4 @@
 11C1; P   # HANGUL JONGSEONG PHIEUPH
 11C2; H   # HANGUL JONGSEONG HIEUH
 
+# EOF

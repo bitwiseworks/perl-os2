@@ -5,12 +5,13 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
+    require './test.pl';
+    set_up_inc(qw '../lib ../dist/base/lib');
     $| = 1;
     require "./test.pl";
 }
 
-plan tests => 133;
+plan tests => 144;
 
 $a = {};
 bless $a, "Bob";
@@ -107,7 +108,14 @@ for ($p=0; $p < @refs; $p++) {
     };
 };
 
-ok ! UNIVERSAL::can(23, "can");
+ok UNIVERSAL::can(23, "can");
+++${"23::foo"};
+ok UNIVERSAL::can("23", "can"), '"23" can can when the pack exists';
+ok UNIVERSAL::can(23, "can"), '23 can can when the pack exists';
+sub IO::Handle::turn {}
+ok UNIVERSAL::can(*STDOUT, 'turn'), 'globs with IOs can';
+ok UNIVERSAL::can(\*STDOUT, 'turn'), 'globrefs with IOs can';
+ok UNIVERSAL::can("STDOUT", 'turn'), 'IO barewords can';
 
 ok $a->can("VERSION");
 
@@ -130,12 +138,10 @@ ok ! (eval { aversion->VERSION(2.719) });
 like $@, qr/^Invalid version format/;
 
 my $subs = join ' ', sort grep { defined &{"UNIVERSAL::$_"} } keys %UNIVERSAL::;
-## The test for import here is *not* because we want to ensure that UNIVERSAL
-## can always import; it is an historical accident that UNIVERSAL can import.
 if ('a' lt 'A') {
-    is $subs, "can import isa DOES VERSION";
+    is $subs, "can import isa unimport DOES VERSION";
 } else {
-    is $subs, "DOES VERSION can import isa";
+    is $subs, "DOES VERSION can import isa unimport";
 }
 
 ok $a->isa("UNIVERSAL");
@@ -154,30 +160,20 @@ eval "use UNIVERSAL";
 ok $a->isa("UNIVERSAL");
 
 my $sub2 = join ' ', sort grep { defined &{"UNIVERSAL::$_"} } keys %UNIVERSAL::;
-# XXX import being here is really a bug
 if ('a' lt 'A') {
-    is $sub2, "can import isa DOES VERSION";
+    is $sub2, "can import isa unimport DOES VERSION";
 } else {
-    is $sub2, "DOES VERSION can import isa";
+    is $sub2, "DOES VERSION can import isa unimport";
 }
 
 eval 'sub UNIVERSAL::sleep {}';
 ok $a->can("sleep");
 
-ok ! UNIVERSAL::can($b, "can");
+ok UNIVERSAL::can($b, "can");
 
 ok ! $a->can("export_tags");	# a method in Exporter
 
 ok ! UNIVERSAL::isa("\xff\xff\xff\0", 'HASH');
-
-{
-    package Pickup;
-    use UNIVERSAL qw( isa can VERSION );
-
-    ::ok isa "Pickup", UNIVERSAL;
-    ::cmp_ok can( "Pickup", "can" ), '==', \&UNIVERSAL::can;
-    ::ok VERSION "UNIVERSAL" ;
-}
 
 {
     # test isa() and can() on magic variables
@@ -201,11 +197,23 @@ ok $x->isa('UNIVERSAL');
 ok $x->isa('UNIVERSAL');
 
 
-# Check that the "historical accident" of UNIVERSAL having an import()
-# method doesn't effect anyone else.
-eval { Some::Package->import("bar") };
-is $@, '';
+{
+    my $err;
+    $SIG{__WARN__}= sub { die $_[0] };
+    eval { Some::Package->import("bar") };
+    my $err = $@;
+    $err=~s!t/op!op!;
+    is $err, "Attempt to call undefined import method with arguments (\"bar\")"
+           . " via package \"Some::Package\" (Perhaps you forgot to load"
+           . " the package?) at op/universal.t line 203.\n";
+    eval { Some::Package->unimport(1.234) };
+    $err = $@;
+    $err=~s!t/op!op!;
+    is $err, "Attempt to call undefined unimport method with arguments (\"1.234\")"
+           . " via package \"Some::Package\" (Perhaps you forgot to load"
+           . " the package?) at op/universal.t line 209.\n";
 
+}
 
 # This segfaulted in a blead.
 fresh_perl_is('package Foo; Foo->VERSION;  print "ok"', 'ok');
@@ -247,7 +255,8 @@ like( $@, qr/Can't call method "DOES" on unblessed reference/,
 
 # Tests for can seem to be split between here and method.t
 # Add the verbatim perl code mentioned in the comments of
-# http://www.xray.mpe.mpg.de/mailing-lists/perl5-porters/2001-05/msg01710.html
+# Message-ID: E14ufZD-0007kD-00@libra.cus.cam.ac.uk
+# https://www.nntp.perl.org/group/perl.perl5.porters/2001/05/msg35327.html
 # but never actually tested.
 is(UNIVERSAL->can("NoSuchPackage::foo"), undef);
 
@@ -266,11 +275,15 @@ use warnings "deprecated";
     my $m;
     local $SIG{__WARN__} = sub { $m = $_[0] };
     eval "use UNIVERSAL 'can'";
-    like($m, qr/^UNIVERSAL->import is deprecated/,
-	"deprecation warning for UNIVERSAL->import('can')");
+    like($@, qr/^UNIVERSAL does not export anything\b/,
+	"error for UNIVERSAL->import('can')");
+    is($m, undef,
+	"no deprecation warning for UNIVERSAL->import('can')");
 
 	  undef $m;
     eval "use UNIVERSAL";
+    is($@, "",
+	"no error for UNIVERSAL->import");
     is($m, undef,
 	"no deprecation warning for UNIVERSAL->import");
 }
@@ -328,3 +341,17 @@ use warnings "deprecated";
     @RT66112::T6::ISA = qw/RT66112::E/;
     ok(RT66112::T6->isa('RT66112::A'), "modify \@ISA in isa (RT66112::T6 isa RT66112::A)");
 }
+
+ok(Undeclared->can("can"));
+sub Undeclared::foo { }
+ok(Undeclared->can("foo"));
+ok(!Undeclared->can("something_else"));
+
+ok(Undeclared->isa("UNIVERSAL"));
+
+# keep this at the end to avoid messing up earlier tests, since it modifies
+# @UNIVERSAL::ISA
+@UNIVERSAL::ISA = ('UniversalParent');
+{ package UniversalIsaTest1; }
+ok(UniversalIsaTest1->isa('UniversalParent'));
+ok(UniversalIsaTest2->isa('UniversalParent'));

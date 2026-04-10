@@ -1,10 +1,6 @@
 #!./perl
 
 BEGIN {
-    unless (find PerlIO::Layer 'perlio') {
-	print "1..0 # Skip: not perlio\n";
-	exit 0;
-    }
     require Config;
     if (($Config::Config{'extensions'} !~ m!\bPerlIO/via\b!) ){
         print "1..0 # Skip -- Perl configured without PerlIO::via module\n";
@@ -17,7 +13,7 @@ use warnings;
 
 my $tmp = "via$$";
 
-use Test::More tests => 18;
+use Test::More tests => 32;
 
 my $fh;
 my $a = join("", map { chr } 0..255) x 10;
@@ -44,7 +40,7 @@ is($a, $b, 'compare original data with filtered version');
     use warnings 'layer';
 
     # Find fd number we should be using
-    my $fd = open($fh,">$tmp") && fileno($fh);
+    my $fd = open($fh,'>',$tmp) && fileno($fh);
     print $fh "Hello\n";
     close($fh);
 
@@ -52,7 +48,7 @@ is($a, $b, 'compare original data with filtered version');
     like( $warnings, qr/^Cannot find package 'Unknown::Module'/,  'warn about unknown package' );
 
     # Now open normally again to see if we get right fileno
-    my $fd2 = open($fh,"<$tmp") && fileno($fh);
+    my $fd2 = open($fh,'<',$tmp) && fileno($fh);
     is($fd2,$fd,"Wrong fd number after failed open");
 
     my $data = <$fh>;
@@ -83,6 +79,102 @@ open $fh, '<:via(Foo)', "foo";
 is( $obj, 'Foo', 'search for package Foo' );
 open $fh, '<:via(Bar)', "bar";
 is( $obj, 'PerlIO::via::Bar', 'search for package PerlIO::via::Bar' );
+
+{
+    # [perl #131221]
+    ok(open(my $fh1, ">", $tmp), "open $tmp");
+    ok(binmode($fh1, ":via(XXX)"), "binmode :via(XXX) onto it");
+    ok(open(my $fh2, ">&", $fh1), "dup it");
+    close $fh1;
+    close $fh2;
+
+    # make sure the old workaround still works
+    ok(open($fh1, ">", $tmp), "open $tmp");
+    ok(binmode($fh1, ":via(YYY)"), "binmode :via(YYY) onto it");
+    ok(open($fh2, ">&", $fh1), "dup it");
+    print $fh2 "XZXZ";
+    close $fh1;
+    close $fh2;
+
+    ok(open($fh1, "<", $tmp), "open $tmp for check");
+    { local $/; $b = <$fh1> }
+    close $fh1;
+    is($b, "XZXZ", "check result is from non-filtering class");
+
+    package PerlIO::via::XXX;
+
+    sub PUSHED {
+        my $class = shift;
+        bless {}, $class;
+    }
+
+    sub WRITE {
+        my ($self, $buffer, $handle) = @_;
+
+        print $handle $buffer;
+        return length($buffer);
+    }
+    package PerlIO::via::YYY;
+
+    sub PUSHED {
+        my $class = shift;
+        bless {}, $class;
+    }
+
+    sub WRITE {
+        my ($self, $buffer, $handle) = @_;
+
+        $buffer =~ tr/X/Y/;
+        print $handle $buffer;
+        return length($buffer);
+    }
+
+    sub GETARG {
+        "XXX";
+    }
+}
+
+{
+    my $read_buf = "x" x 10;
+    my $read_res;
+
+    open my $fh, "<:via(BadRead)", $tmp
+      or die "Cannot open via BadRead";
+    my $buf;
+    my $warn = '';
+    local $SIG{__WARN__} = sub { $warn .= "@_\n" };
+    # this would segfault
+    $warn = '';
+    $read_res = -1;
+    ok(!eval { read($fh, $buf, 10) }, "READ returns -1");
+    like($warn, qr/Invalid return from PerlIO::via::BadRead::READ = -1, expected undef or 0 to 10/,
+         "check warning");
+
+    $warn = '';
+    $read_res = 11;
+    ok(!eval { read($fh, $buf, 10) }, "READ returns 11 when 10 requested");
+    like($warn, qr/Invalid return from PerlIO::via::BadRead::READ = 11, expected undef or 0 to 10/,
+         "check warning");
+
+    $warn = '';
+    $read_res = 10;
+    $read_buf = "x" x 9;
+    ok(!eval { read($fh, $buf, 10) }, "READ returns 10 when 9 in buffer");
+    like($warn, qr/Invalid return from PerlIO::via::BadRead::READ = 10, beyond end of the returned buffer at 9/,
+         "check warning");
+
+    package PerlIO::via::BadRead;
+
+    sub PUSHED {
+        bless {}, shift;
+    }
+
+    sub READ {
+        $_[1] = $read_buf;
+
+        return $read_res;
+    }
+}
 
 END {
     1 while unlink $tmp;

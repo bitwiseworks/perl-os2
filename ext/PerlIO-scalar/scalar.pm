@@ -1,7 +1,5 @@
 package PerlIO::scalar;
-our $VERSION = '0.14_01';
-require XSLoader;
-XSLoader::load();
+our $VERSION = '0.32';
 1;
 __END__
 
@@ -32,10 +30,12 @@ on a scalar variable.  All the normal file operations can be performed
 on the handle. The scalar is considered a stream of bytes.  Currently
 fileno($fh) returns -1.
 
+Attempting to open a read-only scalar for writing will fail, and if
+warnings are enabled, produce a warning.
+
 =head1 IMPLEMENTATION NOTE
 
-C<PerlIO::scalar> only exists to use XSLoader to load C code that
-provides support for treating a scalar as an "in memory" file.
-One does not need to explicitly C<use PerlIO::scalar>.
+C<PerlIO::scalar> only exists as a stub. One does not need to explicitly
+C<use PerlIO::scalar>.
 
 =cut

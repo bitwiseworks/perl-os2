@@ -2,15 +2,15 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
     require './test.pl';
+    set_up_inc('../lib');
 }
 
 use strict;
 
-use vars qw(@ary %ary %hash);
+my (@ary, %ary, %hash);
 
-plan 85;
+plan 88;
 
 ok !defined($a);
 
@@ -44,35 +44,6 @@ ok !defined($ary{'bar'});
 undef $ary{'foo'};
 ok !defined($ary{'foo'});
 
-{
-    no warnings 'deprecated';
-    ok defined(@ary);
-    ok defined(%ary);
-}
-ok %ary;
-undef @ary;
-{
-    no warnings 'deprecated';
-    ok !defined(@ary);
-}
-undef %ary;
-{
-    no warnings 'deprecated';
-    ok !defined(%ary);
-}
-ok !%ary;
-@ary = (1);
-{
-    no warnings 'deprecated';
-    ok defined @ary;
-}
-%ary = (1,1);
-{
-    no warnings 'deprecated';
-    ok defined %ary;
-}
-ok %ary;
-
 sub foo { pass; 1 }
 
 &foo || fail;
@@ -86,24 +57,6 @@ like $@, qr/^Modification of a read/;
 
 eval { $1 = undef };
 like $@, qr/^Modification of a read/;
-
-{
-    require Tie::Hash;
-    tie my %foo, 'Tie::StdHash';
-    no warnings 'deprecated';
-    ok defined %foo;
-    %foo = ( a => 1 );
-    ok defined %foo;
-}
-
-{
-    require Tie::Array;
-    tie my @foo, 'Tie::StdArray';
-    no warnings 'deprecated';
-    ok defined @foo;
-    @foo = ( a => 1 );
-    ok defined @foo;
-}
 
 {
     # [perl #17753] segfault when undef'ing unquoted string constant
@@ -168,6 +121,30 @@ like $@, qr/^Modification of a read/;
     is $k, undef, 'each undef at end';
 }
 
+# part of #105906: inlined undef constant getting copied
+BEGIN { $::{z} = \undef }
+for (z,z) {
+    push @_, \$_;
+}
+is $_[0], $_[1], 'undef constants preserve identity';
+
+# [perl #122556]
+my $messages;
+package Thingie;
+DESTROY { $messages .= 'destroyed ' }
+package main;
+sub body {
+    sub {
+        my $t = bless [], 'Thingie';
+        undef $t;
+    }->(), $messages .= 'after ';
+
+    return;
+}
+body();
+is $messages, 'destroyed after ', 'undef $scalar frees refs immediately';
+
+
 # this will segfault if it fails
 
 sub PVBM () { 'foo' }
@@ -176,3 +153,60 @@ sub PVBM () { 'foo' }
 my $pvbm = PVBM;
 undef $pvbm;
 ok !defined $pvbm;
+
+# Prior to GH#20077 (Add OPpTARGET_MY optimization to OP_UNDEF), any PV
+# allocation was kept with "$x = undef" but freed with "undef $x". That
+# behaviour was carried over and is expected to still be present.
+# (I totally copied most of this block from other t/op/* files.)
+
+SKIP: {
+    skip_without_dynamic_extension("Devel::Peek", 2);
+
+    my $out = runperl(stderr => 1,
+                  progs => [ split /\n/, <<'EOS' ]);
+    require Devel::Peek;
+    my $f = q(x) x 40;
+    chop $f; # Make sure that the PV buffer is not COWed
+    $f = undef;
+    Devel::Peek::Dump($f);
+    undef $f;
+    Devel::Peek::Dump($f);
+EOS
+
+    my ($space, $first, $second) = split /SV =/, $out;
+    like($first, qr/\bPV = 0x[0-9a-f]+\b/, '$x = undef preserves PV allocation');
+    like($second, qr/\bPV = 0\b$/, 'undef $x frees PV allocation');
+}
+
+# Tests suggested for GH#20077 (Add OPpTARGET_MY optimization to OP_UNDEF)
+# (No failures were observed during development, these are just checking
+# that no failures are introduced down the line.)
+
+{
+    my $y= 1; my @x= ($y= undef);
+    is( defined($x[0]), "", 'lval undef assignment in list context');
+    is( defined($y)  , "", 'scalar undef assignment in list context');
+
+    $y= 1; my $z; sub f{$z = shift} f($y=undef);
+    is( defined($y)  , "", 'undef assignment in sub args');
+    is( defined($z)  , "", 'undef assignment reaches @_');
+
+    ($y,$z)=(1,2); sub f{} f(($y=undef),$z);
+    is( defined($y)  , "", 'undef assignment reaches @_');
+    is( $z, 2, 'undef adjacent argument is unchanged');
+}
+
+{
+    my $h= { baz => 1 }; my @k= keys %{($h=undef)||{}};
+    is( defined($h)  , "", 'scalar undef assignment in keys');
+    is( scalar @k, 0, 'undef assignment dor anonhash');
+
+    my $y= 1; my @x= \($y= undef);
+    is( defined($y)  , "", 'scalar undef assignment before reference');
+    is( scalar @x, 1, 'assignment of one element to array');
+    is( defined($x[0]->$*), "", 'assignment of undef element to array');
+}
+
+# GH#20336 - "my $x = undef" pushed &PL_sv_undef onto the stack, but
+#            should be pushing $x (i.e. a mutable copy of &PL_sv_undef)
+is( ++(my $x = undef), 1, '"my $x = undef" pushes $x onto the stack' );

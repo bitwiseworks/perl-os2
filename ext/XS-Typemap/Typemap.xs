@@ -157,7 +157,7 @@ XS_unpack_anotherstructPtrPtr(SV *in)
     else
         Perl_croak(aTHX_ "Argument is not an ARRAY reference");
 
-    nitems = av_len(inary) + 1;
+    nitems = av_count(inary);
 
     /* FIXME dunno if supposed to use perl mallocs here */
     /* N+1 elements so we know the last one is NULL */
@@ -176,7 +176,8 @@ XS_unpack_anotherstructPtrPtr(SV *in)
         if (SvROK(tmp) && SvTYPE(SvRV(tmp)) == SVt_PVHV)
             inhash = (HV*)SvRV(tmp);
         else
-            Perl_croak(aTHX_ "Array element %u is not a HASH reference", i);
+            Perl_croak(aTHX_ "Array element %" UVuf
+                             " is not a HASH reference", i);
 
         elem = hv_fetchs(inhash, "a", 0);
         if (elem == NULL)
@@ -202,9 +203,9 @@ XS_unpack_anotherstructPtrPtr(SV *in)
 void
 XS_release_anotherstructPtrPtr(anotherstruct **in)
 {
-    unsigned int i = 0;
-    while (in[i] != NULL)
-        Safefree(in[i++]);
+    unsigned int i;
+    for (i = 0; in[i] != NULL; i++)
+        Safefree(in[i]);
     Safefree(in);
 }
 
@@ -266,6 +267,13 @@ T_SV( sv )
  OUTPUT:
   RETVAL
 
+void
+T_SV_output(sv)
+  SV *sv
+ CODE:
+ sv = sv_2mortal(newSVpvn("test", 4));
+ OUTPUT:
+  sv
 
 ## T_SVREF
 
@@ -289,6 +297,11 @@ T_SVREF_REFCOUNT_FIXED( svref )
  OUTPUT:
   RETVAL
 
+void
+T_SVREF_REFCOUNT_FIXED_output( OUT svref )
+  SVREF_FIXED svref
+ CODE:
+  svref = newSVpvn("test", 4);
 
 ## T_AVREF
 
@@ -312,6 +325,12 @@ T_AVREF_REFCOUNT_FIXED( av )
  OUTPUT:
   RETVAL
 
+void
+T_AVREF_REFCOUNT_FIXED_output( OUT avref)
+  AV_FIXED *avref;
+ CODE:
+  avref = newAV();
+  av_push(avref, newSVpvs("test"));
 
 ## T_HVREF
 
@@ -335,6 +354,12 @@ T_HVREF_REFCOUNT_FIXED( hv )
  OUTPUT:
   RETVAL
 
+void
+T_HVREF_REFCOUNT_FIXED_output( OUT hvref)
+  HV_FIXED *hvref;
+ CODE:
+  hvref = newHV();
+  hv_stores(hvref, "test", newSVpvs("value"));
 
 ## T_CVREF
 
@@ -358,6 +383,12 @@ T_CVREF_REFCOUNT_FIXED( cv )
  OUTPUT:
   RETVAL
 
+void
+T_CVREF_REFCOUNT_FIXED_output( OUT cvref)
+  CV_FIXED *cvref;
+ CODE:
+  cvref = get_cv("XSLoader::load", 0);
+  SvREFCNT_inc(cvref);
 
 ## T_SYSRET
 
@@ -436,6 +467,22 @@ T_BOOL( in )
  OUTPUT:
   RETVAL
 
+bool
+T_BOOL_2( in )
+  bool in
+ CODE:
+    PERL_UNUSED_VAR(RETVAL);
+ OUTPUT:
+   in
+
+void
+T_BOOL_OUT( out, in )
+  bool out
+  bool in
+ CODE:
+ out = in;
+ OUTPUT:
+   out
 
 ## T_U_INT
 
@@ -553,6 +600,13 @@ T_PV( in )
   char * in
  CODE:
   RETVAL = in;
+ OUTPUT:
+  RETVAL
+
+char *
+T_PV_null()
+ CODE:
+  RETVAL = NULL;
  OUTPUT:
   RETVAL
 
@@ -863,7 +917,7 @@ T_ARRAY( dummy, array, ... )
  PREINIT:
   U32 size_RETVAL;
  CODE:
-  dummy += 0; /* Fix -Wall */
+  PERL_UNUSED_VAR(dummy); /* GH 21505 */
   size_RETVAL = ix_array;
   RETVAL = array;
  OUTPUT:
@@ -882,6 +936,15 @@ T_STDIO_open( file )
   RETVAL = xsfopen( file );
  OUTPUT:
   RETVAL
+
+void
+T_STDIO_open_ret_in_arg( file, io)
+  const char * file
+  FILE * io = NO_INIT
+ CODE:
+  io = xsfopen( file );
+ OUTPUT:
+  io
 
 SysRet
 T_STDIO_close( f )

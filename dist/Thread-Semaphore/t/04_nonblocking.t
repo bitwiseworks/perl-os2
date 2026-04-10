@@ -12,14 +12,7 @@ BEGIN {
 use threads;
 use threads::shared;
 use Thread::Semaphore;
-
-if ($] == 5.008) {
-    require 't/test.pl';   # Test::More work-alike for Perl 5.8.0
-} else {
-    require Test::More;
-}
-Test::More->import();
-plan('tests' => 12);
+use Test::More 'tests' => 12;
 
 ### Basic usage with multiple threads ###
 
@@ -30,7 +23,7 @@ ok($st, 'New Semaphore');
 
 my $token :shared = 0;
 
-threads->create(sub {
+my $thread = threads->create(sub {
     ok(! $st->down_nb(), 'Semaphore unavailable to thread');
     $sm->up();
 
@@ -42,7 +35,7 @@ threads->create(sub {
     ok(! $st->down_nb(), 'Semaphore unavailable to thread');
     is($token++, 1, 'Thread done');
     $sm->up();
-})->detach();
+});
 
 $sm->down(1);
 is($token++, 0, 'Main has semaphore');
@@ -54,6 +47,7 @@ $st->up(4);
 $sm->down();
 is($token++, 2, 'Main got semaphore');
 
+$thread->join;
 exit(0);
 
 # EOF

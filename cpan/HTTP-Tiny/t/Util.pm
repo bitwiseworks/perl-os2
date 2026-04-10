@@ -1,4 +1,4 @@
-package t::Util;
+package Util;
 
 use strict;
 use warnings;
@@ -87,6 +87,7 @@ sub parse_case {
     my ($case) = @_;
     my %args;
     my $key = '';
+    my %seen;
     for my $line ( split "\n", $case ) {
         chomp $line;
         if ( substr($line,0,1) eq q{ } ) {
@@ -95,7 +96,11 @@ sub parse_case {
         }
         else {
             $key = $line;
+            $seen{$key}++;
         }
+    }
+    for my $k (keys %seen) {
+        $args{$k}=undef unless exists $args{$k};
     }
     return \%args;
 }
@@ -151,10 +156,14 @@ sub sort_headers {
         *HTTP::Tiny::Handle::can_read = sub {1};
         *HTTP::Tiny::Handle::can_write = sub {1};
         *HTTP::Tiny::Handle::connect = sub {
-            my ($self, $scheme, $host, $port) = @_;
-            $self->{host} = $monkey_host = $host;
-            $self->{port} = $monkey_port = $port;
+            my ($self, $scheme, $host, $port, $peer) = @_;
+            $self->{host}   = $monkey_host = $host;
+            $self->{port}   = $monkey_port = $port;
+            $self->{peer}   = $peer;
+            $self->{scheme} = $scheme;
             $self->{fh} = shift @req_fh;
+            $self->{pid} = $$;
+            $self->{tid} = HTTP::Tiny::Handle::_get_tid();
             return $self;
         };
         my $original_write_request = \&HTTP::Tiny::Handle::write_request;
@@ -164,8 +173,10 @@ sub sort_headers {
             $self->{fh} = shift @res_fh;
         };
         *HTTP::Tiny::Handle::close = sub { 1 }; # don't close our temps
-        
-        delete $ENV{http_proxy}; # don't try to proxy in mock-mode
+        *HTTP::Tiny::Handle::connected = sub { 1 };
+
+        # don't try to proxy in mock-mode
+        delete $ENV{$_} for map { $_, uc($_) } qw/http_proxy https_proxy all_proxy/;
     }
 }
 

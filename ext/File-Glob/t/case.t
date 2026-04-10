@@ -3,7 +3,7 @@
 BEGIN {
     chdir 't' if -d 't';
     @INC = '../lib';
-    require Config; import Config;
+    require Config; Config->import;
     if ($Config{'extensions'} !~ /\bFile\/Glob\b/i) {
         print "1..0\n";
         exit 0;
@@ -18,12 +18,12 @@ BEGIN {
 
 my $pat = "op/G*.t";
 
-import File::Glob ':nocase';
+File::Glob->import(':nocase');
 @a = csh_glob($pat);
 cmp_ok(scalar @a, '>=', 8, 'use of the case sensitivity tags, via csh_glob()');
 
 # This may fail on systems which are not case-PRESERVING
-import File::Glob ':case';
+File::Glob->import(':case');
 @a = csh_glob($pat);
 is(scalar @a, 0, 'None should be uppercase');
 
@@ -32,12 +32,12 @@ cmp_ok(scalar @a, '>=', 3, 'explicit use of the GLOB_NOCASE flag');
 
 # Test Win32 backslash nastiness...
 SKIP: {
-    skip 'Not Win32 or NetWare', 3 unless $^O eq 'MSWin32' || $^O eq 'NetWare';
+    skip 'Not Win32', 3 unless $^O eq 'MSWin32';
 
-    @a = File::Glob::glob("op\\g*.t");
+    @a = File::Glob::bsd_glob("op\\g*.t");
     cmp_ok(scalar @a, '>=', 8);
     mkdir "[]", 0;
-    @a = File::Glob::glob("\\[\\]", GLOB_QUOTE);
+    @a = File::Glob::bsd_glob("\\[\\]", GLOB_QUOTE);
     rmdir "[]";
     is(scalar @a, 1);
     @a = bsd_glob("op\\*", GLOB_QUOTE);

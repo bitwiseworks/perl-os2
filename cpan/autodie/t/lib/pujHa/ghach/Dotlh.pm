@@ -1,4 +1,4 @@
-package pujHa'ghach::Dotlh;
+package pujHa::ghach::Dotlh;
 
 # Translator notes: Dotlh = status
 
@@ -9,7 +9,7 @@ package pujHa'ghach::Dotlh;
 use strict;
 use warnings;
 
-use base qw(autodie::exception);
+use parent qw(autodie::exception);
 
 sub stringify {
     my ($this) = @_;

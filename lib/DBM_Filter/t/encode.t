@@ -3,6 +3,7 @@ use strict;
 use warnings;
 use Carp;
 
+require "../t/charset_tools.pl";
 
 BEGIN 
 {
@@ -18,7 +19,7 @@ BEGIN
 
 require "dbm_filter_util.pl";
 
-use Test::More tests => 26;
+use Test::More;
 
 BEGIN { use_ok('DBM_Filter') };
 my $db_file;
@@ -37,11 +38,11 @@ BEGIN { use_ok('charnames', qw{greek})};
 
 use charnames qw{greek};
 
-unlink <Op_dbmx*>;
-END { unlink <Op_dbmx*>; }
+unlink <encOp_dbmx*>;
+END { unlink <encOp_dbmx*>; }
 
 my %h1 = () ;
-my $db1 = tie(%h1, $db_file,'Op_dbmx', O_RDWR|O_CREAT, 0640) ;
+my $db1 = tie(%h1, $db_file,'encOp_dbmx', O_RDWR|O_CREAT, 0640) ;
 
 ok $db1, "tied to $db_file";
 
@@ -64,17 +65,24 @@ is $@, '', "push an 'encode' filter (default to utf-8)" ;
 
 }
 
-VerifyData(\%h1,
+{
+    local $TODO = "Currently broken on EBCDIC" if $::IS_EBCDIC;
+    VerifyData(\%h1,
 	{
 		'alpha'	=> "\N{alpha}",
 		"beta"	=> "\N{beta}",
 		"\N{gamma}"=> "gamma",
 		""		=> "",
 	});
+}
 
 eval { $db1->Filter_Pop() };
 is $@, '', "pop the 'utf8' filter" ;
 
+SKIP: {
+    skip "Encode doesn't currently work for most filters on EBCDIC, including 8859-16", 11 if $::IS_EBCDIC || $::IS_EBCDIC;
+    # Actually the only thing failing below is the euro, because that's the
+    # only thing that's added in 8859-16.
 eval { $db1->Filter_Push('encode' => 'iso-8859-16') };
 is $@, '', "push an 'encode' filter (specify iso-8859-16)" ;
 
@@ -93,29 +101,18 @@ undef $db1;
 
 # read the dbm file without the filter
 my %h2 = () ;
-my $db2 = tie(%h2, $db_file,'Op_dbmx', O_RDWR|O_CREAT, 0640) ;
+my $db2 = tie(%h2, $db_file,'encOp_dbmx', O_RDWR|O_CREAT, 0640) ;
 
 ok $db2, "tied to $db_file";
 
-if (ord('A') == 193) { # EBCDIC.
-    VerifyData(\%h2,
+VerifyData(\%h2,
 	   {
-	    'alpha'	=> "\xB4\x58",
-	    'beta'	=> "\xB4\x59",
-	    "\xB4\x62"=> "gamma",		
-	    "\x65\x75\x72\x6F" => "\xA4",                           
+	    'alpha'	=> byte_utf8a_to_utf8n("\xCE\xB1"),
+	    'beta'	=> byte_utf8a_to_utf8n("\xCE\xB2"),
+	    byte_utf8a_to_utf8n("\xCE\xB3") => "gamma",
+	    'euro'	=> uni_to_native("\xA4"),
 	    ""		=> "",
 	   });
-} else {
-    VerifyData(\%h2,
-	   {
-	    'alpha'	=> "\xCE\xB1",
-	    'beta'	=> "\xCE\xB2",
-	    "\xCE\xB3"=> "gamma",
-	    'euro'	=> "\xA4",
-	    ""		=> "",
-	   });
-}
 
 undef $db2;
 {
@@ -124,3 +121,6 @@ undef $db2;
     is $@, '', "untie without inner references" ;
 }
 
+}
+
+done_testing();

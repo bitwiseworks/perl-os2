@@ -8,12 +8,11 @@ package IO::Select;
 
 use     strict;
 use warnings::register;
-use     vars qw($VERSION @ISA);
 require Exporter;
 
-$VERSION = "1.21";
+our $VERSION = "1.55";
 
-@ISA = qw(Exporter); # This is only so we can do version checking
+our @ISA = qw(Exporter); # This is only so we can do version checking
 
 sub VEC_BITS () {0}
 sub FD_COUNT () {1}
@@ -58,7 +57,21 @@ sub _fileno
  my($self, $f) = @_;
  return unless defined $f;
  $f = $f->[0] if ref($f) eq 'ARRAY';
- ($f =~ /^\d+$/) ? $f : fileno($f);
+ if($f =~ /^[0-9]+$/) { # plain file number
+  return $f;
+ }
+ elsif(defined(my $fd = fileno($f))) {
+  return $fd;
+ }
+ else {
+  # Neither a plain file number nor an opened filehandle; but maybe it was
+  # previously registered and has since been closed. ->remove still wants to
+  # know what fileno it had
+  foreach my $i ( FIRST_FD .. $#$self ) {
+   return $i - FIRST_FD if defined $self->[$i] && $self->[$i] == $f;
+  }
+  return undef;
+ }
 }
 
 sub _update
@@ -86,15 +99,24 @@ sub _update
      $vec->[$i] = $f;
    } else {      # remove
      if ( ! defined $fn ) { # remove if fileno undef'd
-         defined($_) && $_ == $f and do { $vec->[FD_COUNT]--; $_ = undef; }
-           for @{$vec}[FIRST_FD .. $#$vec];
-         next;
+       $fn = 0;
+       for my $fe (@{$vec}[FIRST_FD .. $#$vec]) {
+         if (defined($fe) && $fe == $f) {
+	   $vec->[FD_COUNT]--;
+	   $fe = undef;
+	   vec($bits, $fn, 1) = 0;
+	   last;
+	 }
+	 ++$fn;
+       }
      }
-     my $i = $fn + FIRST_FD;
-     next unless defined $vec->[$i];
-     $vec->[FD_COUNT]--;
-     vec($bits, $fn, 1) = 0;
-     $vec->[$i] = undef;
+     else {
+       my $i = $fn + FIRST_FD;
+       next unless defined $vec->[$i];
+       $vec->[FD_COUNT]--;
+       vec($bits, $fn, 1) = 0;
+       $vec->[$i] = undef;
+     }
    }
    $count++;
   }
@@ -243,20 +265,20 @@ __END__
 
 =head1 NAME
 
-IO::Select - OO interface to the select system call
+IO::Select - OO interface to the C<select> system call
 
 =head1 SYNOPSIS
 
     use IO::Select;
 
-    $s = IO::Select->new();
+    my $s = IO::Select->new();
 
     $s->add(\*STDIN);
     $s->add($some_handle);
 
-    @ready = $s->can_read($timeout);
+    my @ready1 = $s->can_read($timeout);
 
-    @ready = IO::Select->new(@handles)->can_read(0);
+    my @ready2 = IO::Select->new(@handles)->can_read(0);
 
 =head1 DESCRIPTION
 
@@ -306,10 +328,13 @@ Return an array of all registered handles.
 
 =item can_read ( [ TIMEOUT ] )
 
-Return an array of handles that are ready for reading. C<TIMEOUT> is
-the maximum amount of time to wait before returning an empty list, in
-seconds, possibly fractional. If C<TIMEOUT> is not given and any
-handles are registered then the call will block.
+Return an array of handles that are ready for reading.  C<TIMEOUT> is the
+maximum amount of time to wait before returning an empty list (with C<$!>
+unchanged), in seconds, possibly fractional.  If C<TIMEOUT> is not given
+and any handles are registered then the call will block indefinitely.
+Upon error, an empty list is returned, with C<$!> set to indicate the
+error.  To distinguish between timeout and error, set C<$!> to zero
+before calling this method, and check it after an empty list is returned.
 
 =item can_write ( [ TIMEOUT ] )
 
@@ -337,9 +362,14 @@ like C<new>. C<READ>, C<WRITE> and C<EXCEPTION> are either C<undef> or
 C<IO::Select> objects. C<TIMEOUT> is optional and has the same effect as
 for the core select call.
 
-The result will be an array of 3 elements, each a reference to an array
-which will hold the handles that are ready for reading, writing and have
-exceptions respectively. Upon error an empty list is returned.
+If at least one handle is ready for the specified kind of operation,
+the result will be an array of 3 elements, each a reference to an array
+which will hold the handles that are ready for reading, writing and
+have exceptions respectively.  Upon timeout, an empty list is returned,
+with C<$!> unchanged.  Upon error, an empty list is returned, with C<$!>
+set to indicate the error.  To distinguish between timeout and error,
+set C<$!> to zero before calling this method, and check it after an
+empty list is returned.
 
 =back
 
@@ -352,14 +382,14 @@ listening for more connections on a listen socket
     use IO::Select;
     use IO::Socket;
 
-    $lsn = IO::Socket::INET->new(Listen => 1, LocalPort => 8080);
-    $sel = IO::Select->new( $lsn );
+    my $lsn = IO::Socket::INET->new(Listen => 1, LocalPort => 8080);
+    my $sel = IO::Select->new( $lsn );
 
-    while(@ready = $sel->can_read) {
-        foreach $fh (@ready) {
+    while(my @ready = $sel->can_read) {
+        foreach my $fh (@ready) {
             if($fh == $lsn) {
                 # Create a new socket
-                $new = $lsn->accept;
+                my $new = $lsn->accept;
                 $sel->add($new);
             }
             else {
@@ -375,7 +405,7 @@ listening for more connections on a listen socket
 =head1 AUTHOR
 
 Graham Barr. Currently maintained by the Perl Porters.  Please report all
-bugs to <perlbug@perl.org>.
+bugs at L<https://github.com/Perl/perl5/issues>.
 
 =head1 COPYRIGHT
 

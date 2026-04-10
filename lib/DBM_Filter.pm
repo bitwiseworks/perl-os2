@@ -2,12 +2,11 @@ package DBM_Filter ;
 
 use strict;
 use warnings;
-our $VERSION = '0.04';
 
-package Tie::Hash ;
+our $VERSION = '0.07';
 
-use strict;
-use warnings;
+package
+    Tie::Hash ;
 
 use Carp;
 
@@ -230,7 +229,7 @@ DBM_Filter -- Filter DBM keys/values
 =head1 SYNOPSIS
 
     use DBM_Filter ;
-    use SDBM_File; # or DB_File, or GDBM_File, or NDBM_File, or ODBM_File
+    use SDBM_File; # or DB_File, GDBM_File, NDBM_File, or ODBM_File
 
     $db = tie %hash, ...
 
@@ -247,7 +246,7 @@ DBM_Filter -- Filter DBM keys/values
     $db->Filtered();
 
     package DBM_Filter::my_filter1;
-    
+
     sub Store { ... }
     sub Fetch { ... }
 

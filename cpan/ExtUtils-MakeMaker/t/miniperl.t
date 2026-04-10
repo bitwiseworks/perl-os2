@@ -4,20 +4,20 @@
 # This mostly means no XS modules.
 
 use strict;
+use warnings;
 use lib 't/lib';
 
 use Test::More;
+use Config;
 
 # In a BEGIN block so the END tests aren't registered.
 BEGIN {
-    plan skip_all => "miniperl test only necessary for the perl core"
+    plan skip_all => 'miniperl test only necessary for the perl core'
       if !$ENV{PERL_CORE};
-    
-    plan "no_plan";
-}
 
-BEGIN {
-    ok !$INC{"ExtUtils/MakeMaker.pm"}, "MakeMaker is not yet loaded";
+    plan $ENV{PERL_CORE} && $Config{'usecrosscompile'}
+      ? (skip_all => 'cross-compiling and make not available')
+      : 'no_plan';
 }
 
 # Disable all XS from here on
@@ -27,7 +27,6 @@ use ExtUtils::MakeMaker;
 
 use MakeMaker::Test::Utils;
 use MakeMaker::Test::Setup::BFD;
-
 
 my $perl     = which_perl();
 my $makefile = makefile_name();

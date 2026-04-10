@@ -2,8 +2,8 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = qw(. ../lib);
     require "./test.pl";
+    set_up_inc(qw(. ../lib));
 }
 
 use Config;
@@ -46,7 +46,7 @@ close(STDERR) or die "Could not close: $!";
 open(STDOUT,">&DUPOUT") or die "Could not open: $!";
 open(STDERR,">&DUPERR") or die "Could not open: $!";
 
-if (($^O eq 'MSWin32') || ($^O eq 'NetWare')) { print `type $tempfile` }
+if ($^O eq 'MSWin32') { print `type $tempfile` }
 elsif ($^O eq 'VMS')   { system "type $tempfile.;" } # TYPE defaults to .LIS when there is no extension
 else { system "cat $tempfile" }
 

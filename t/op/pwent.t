@@ -2,8 +2,8 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
     require './test.pl';
+    set_up_inc('../lib');
 }
 
 use strict;
@@ -36,7 +36,9 @@ $where //= try_prog('NetInfo passwd', 'passwd .', '/usr/bin/nidump');
 $where //= try_prog('NIS+', 'passwd.org_dir', '/bin/niscat');
 
 # Try dscl
-if (!defined $where && $Config::Config{useperlio}) {
+DSCL: {
+my @dscl = qw(/usr/bin/dscl);
+if (!defined $where && grep { -x } @dscl) {
     # Map dscl items to passwd fields, and provide support for
     # mucking with the dscl output if we need to (and we do).
     my %want = do {
@@ -65,7 +67,7 @@ if (!defined $where && $Config::Config{useperlio}) {
     $want{UniqueID}{mung} = $want{PrimaryGroupID}{mung} = sub {
 	unpack 'L', pack 'l', $_[0]};
 
-    foreach my $dscl (qw(/usr/bin/dscl)) {
+    foreach my $dscl (@dscl) {
 	next unless -x $dscl;
 	next unless open my $fh, '-|', "$dscl . -readall /Users @{[keys %want]} 2>/dev/null";
 	my @lines;
@@ -96,6 +98,8 @@ if (!defined $where && $Config::Config{useperlio}) {
 	    }
 	}
 	if (@rec) {
+        # see above
+        no warnings 'uninitialized';
 	    push @lines, join (':', @rec) . "\n";
 	}
 	my $data = join '', @lines;
@@ -105,6 +109,7 @@ if (!defined $where && $Config::Config{useperlio}) {
 	}
     }
 }
+} # DSCL:
 
 if (not defined $where) {
     # Try local.
@@ -215,7 +220,7 @@ SKIP: {
 EOEX
     }
 
-    cmp_ok(keys %perfect, '>', 0)
+    cmp_ok(keys %perfect, '>', 0, "pwent test satisfactory")
 	or note("(not necessarily serious: run t/op/pwent.t by itself)");
 }
 
@@ -241,6 +246,7 @@ for (1..$max) {
 }
 endpwent();
 
-is("@pw1", "@pw2");
+is("@pw1", "@pw2",
+    "getpwent() produced identical results in list and scalar contexts");
 
 close(PW);

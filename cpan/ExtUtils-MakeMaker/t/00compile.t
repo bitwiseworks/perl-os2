@@ -5,6 +5,7 @@ BEGIN {
 }
 chdir 't';
 
+use warnings;
 use Test::More;
 
 my $Has_Test_Pod;
@@ -14,13 +15,13 @@ BEGIN {
 
 plan skip_all => 'No MANIFEST'
   unless -e "../MANIFEST";
-  
+
 chdir "..";
 
 my $manifest = "MANIFEST";
 open(my $manifest_fh, "<", $manifest) or die "Can't open $manifest: $!";
-my @modules = map  { m{^lib/(\S+)}; $1 } 
-              grep { m{^lib/\S+\.pm} } 
+my @modules = map  { m{^lib/(\S+)}; $1 }
+              grep { m{^lib/\S+\.pm} }
               <$manifest_fh>;
 
 chomp @modules;

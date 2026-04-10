@@ -11,50 +11,141 @@
 # This script is normally invoked from regen.pl.
 
 BEGIN {
-    require 'regen/regen_lib.pl';
     push @INC, './lib';
+    require './regen/regen_lib.pl';
+    require './regen/HeaderParser.pm';
 }
-use strict ;
 
+use strict;
+use warnings;
 
 ###########################################################################
 # Hand-editable data
 
 # (feature name) => (internal name, used in %^H and macro names)
 my %feature = (
-    say             => 'say',
-    state           => 'state',
-    switch          => 'switch',
-    evalbytes       => 'evalbytes',
-    array_base      => 'arybase',
-    current_sub     => '__SUB__',
-    unicode_eval    => 'unieval',
-    unicode_strings => 'unicode',
-    fc              => 'fc',
+    # A few features are publicly named differently than internally
+    current_sub             => '__SUB__',
+    unicode_eval            => 'unieval',
+    declared_refs           => 'myref',
+    unicode_strings         => 'unicode',
+    extra_paired_delimiters => 'more_delims',
+    apostrophe_as_package_separator => 'apos_as_name_sep',
+
+    # Most features have identical public and internal names
+    map { $_ => $_ } qw(
+        say
+        state
+        switch
+        bitwise
+        evalbytes
+        refaliasing
+        postderef_qq
+        fc
+        signatures
+        isa
+        indirect
+        multidimensional
+        bareword_filehandles
+        try
+        defer
+        module_true
+        class
+        keyword_any
+        keyword_all
+        smartmatch
+    )
 );
 
 # NOTE: If a feature is ever enabled in a non-contiguous range of Perl
 #       versions, any code below that uses %BundleRanges will have to
 #       be changed to account.
 
+# 5.odd implies the next 5.even, but an explicit 5.even can override it.
+
+# features bundles
+use constant V5_9_5 => sort qw{say state switch indirect multidimensional bareword_filehandles apostrophe_as_package_separator smartmatch};
+use constant V5_11  => sort ( +V5_9_5, qw{unicode_strings} );
+use constant V5_15  => sort ( +V5_11, qw{unicode_eval evalbytes current_sub fc} );
+use constant V5_23  => sort ( +V5_15, qw{postderef_qq} );
+use constant V5_27  => sort ( +V5_23, qw{bitwise} );
+
+use constant V5_35  => sort grep {; $_ ne 'switch'
+                                 && $_ ne 'indirect'
+                                 && $_ ne 'multidimensional' } +V5_27, qw{isa signatures};
+
+use constant V5_37  => sort grep {; $_ ne 'bareword_filehandles' } +V5_35, qw{module_true};
+
+use constant V5_39  => sort ( +V5_37, qw{try} );
+use constant V5_41  => sort
+  grep {; $_ ne 'apostrophe_as_package_separator'
+       && $_ ne 'smartmatch' }
+  ( +V5_39 );
+
+#
+# when updating features please also update the Pod entry for L</"FEATURES CHEAT SHEET">
+#
 my %feature_bundle = (
-     all     => [ keys %feature ],
-     default =>	[qw(array_base)],
-    "5.9.5"  =>	[qw(say state switch array_base)],
-    "5.10"   =>	[qw(say state switch array_base)],
-    "5.11"   =>	[qw(say state switch unicode_strings array_base)],
-    "5.12"   =>	[qw(say state switch unicode_strings array_base)],
-    "5.13"   =>	[qw(say state switch unicode_strings array_base)],
-    "5.14"   =>	[qw(say state switch unicode_strings array_base)],
-    "5.15"   =>	[qw(say state switch unicode_strings unicode_eval
-		    evalbytes current_sub fc)],
-    "5.16"   =>	[qw(say state switch unicode_strings unicode_eval
-		    evalbytes current_sub fc)],
+    all     => [ sort keys %feature ],
+    default => [ qw{indirect multidimensional bareword_filehandles
+                    apostrophe_as_package_separator smartmatch} ],
+    # using 5.9.5 features bundle
+    "5.9.5" => [ +V5_9_5 ],
+    "5.10"  => [ +V5_9_5 ],
+    # using 5.11 features bundle
+    "5.11"  => [ +V5_11 ],
+    "5.13"  => [ +V5_11 ],
+    # using 5.15 features bundle
+    "5.15"  => [ +V5_15 ],
+    "5.17"  => [ +V5_15 ],
+    "5.19"  => [ +V5_15 ],
+    "5.21"  => [ +V5_15 ],
+    # using 5.23 features bundle
+    "5.23"  => [ +V5_23 ],
+    "5.25"  => [ +V5_23 ],
+    # using 5.27 features bundle
+    "5.27"  => [ +V5_27 ],
+    "5.29"  => [ +V5_27 ],
+    "5.31"  => [ +V5_27 ],
+    "5.33"  => [ +V5_27 ],
+    # using 5.35 features bundle
+    "5.35"  => [ +V5_35 ],
+    # using 5.37 features bundle
+    "5.37"  => [ +V5_37 ],
+    # using 5.39 features bundle
+    "5.39"  => [ +V5_39 ],
+    # using 5.41 features bundle
+    "5.41"  => [ +V5_41 ],
 );
+
+my @noops = qw( postderef lexical_subs );
+my @removed = qw( array_base );
 
 
 ###########################################################################
 # More data generated from the above
+
+my %feature_bits;
+my %feature_indices;
+my $mask = 1;
+my $index = 0;
+for my $feature (sort keys %feature) {
+    $feature_bits{$feature} = $mask;
+    $feature_indices{$feature} = $index;
+    if ($mask == 0x8000_0000) {
+        $mask = 1;
+        ++$index;
+    }
+    else {
+        $mask <<= 1;
+    }
+}
+my $cop_feature_size = $mask == 1 ? $index : $index + 1;
+
+for (keys %feature_bundle) {
+    next unless /^5\.(\d*[13579])\z/;
+    $feature_bundle{"5.".($1+1)} ||= $feature_bundle{$_};
+}
 
 my %UniqueBundles; # "say state switch" => 5.10
 my %Aliases;       #  5.12 => 5.11
@@ -87,12 +178,15 @@ for my $bund (
 my $HintShift;
 my $HintMask;
 my $Uni8Bit;
+my $hp = HeaderParser->new()->read_file("perl.h");
 
-open "perl.h", "perl.h" or die "$0 cannot open perl.h: $!";
-while (readline "perl.h") {
-    next unless /#\s*define\s+(HINT_FEATURE_MASK|HINT_UNI_8_BIT)/;
+foreach my $line_data (@{$hp->lines}) {
+    next unless $line_data->{type} eq "content"
+            and $line_data->{sub_type} eq "#define";
+    my $line = $line_data->{line};
+    next unless $line=~/^\s*#\s*define\s+(HINT_FEATURE_MASK|HINT_UNI_8_BIT)/;
     my $is_u8b = $1 =~ 8;
-    /(0x[A-Fa-f0-9]+)/ or die "No hex number in:\n\n$_\n ";
+    $line=~/(0x[A-Fa-f0-9]+)/ or die "No hex number in:\n\n$line\n ";
     if ($is_u8b) {
 	$Uni8Bit = $1;
     }
@@ -100,20 +194,18 @@ while (readline "perl.h") {
 	my $hex = $HintMask = $1;
 	my $bits = sprintf "%b", oct $1;
 	$bits =~ /^0*1+(0*)\z/
-	 or die "Non-contiguous bits in $bits (binary for $hex):\n\n$_\n ";
+         or die "Non-contiguous bits in $bits (binary for $hex):\n\n$line\n ";
 	$HintShift = length $1;
 	my $bits_needed =
 	    length sprintf "%b", scalar keys %UniqueBundles;
 	$bits =~ /1{$bits_needed}/
 	    or die "Not enough bits (need $bits_needed)"
-		 . " in $bits (binary for $hex):\n\n$_\n ";
+                 . " in $bits (binary for $hex):\n\n$line\n ";
     }
     if ($Uni8Bit && $HintMask) { last }
 }
 die "No HINT_FEATURE_MASK defined in perl.h" unless $HintMask;
 die "No HINT_UNI_8_BIT defined in perl.h"    unless $Uni8Bit;
-
-close "perl.h";
 
 my @HintedBundles =
     ('default', grep !/[^\d.]/, sort values %UniqueBundles);
@@ -147,18 +239,18 @@ sub longest {
 
 print $pm "our %feature = (\n";
 my $width = length longest keys %feature;
-for(sort { length $a <=> length $b } keys %feature) {
+for(sort { length $a <=> length $b || $a cmp $b } keys %feature) {
     print $pm "    $_" . " "x($width-length)
 	    . " => 'feature_$feature{$_}',\n";
 }
 print $pm ");\n\n";
 
 print $pm "our %feature_bundle = (\n";
-$width = length longest values %UniqueBundles;
+my $bund_width = length longest values %UniqueBundles;
 for( sort { $UniqueBundles{$a} cmp $UniqueBundles{$b} }
           keys %UniqueBundles ) {
     my $bund = $UniqueBundles{$_};
-    print $pm qq'    "$bund"' . " "x($width-length $bund)
+    print $pm qq'    "$bund"' . " "x($bund_width-length $bund)
 	    . qq' => [qw($_)],\n';
 }
 print $pm ");\n\n";
@@ -167,6 +259,14 @@ for (sort keys %Aliases) {
     print $pm
 	qq'\$feature_bundle{"$_"} = \$feature_bundle{"$Aliases{$_}"};\n';
 };
+
+print $pm "my \%noops = (\n";
+print $pm "    $_ => 1,\n", for @noops;
+print $pm ");\n";
+
+print $pm "my \%removed = (\n";
+print $pm "    $_ => 1,\n", for @removed;
+print $pm ");\n";
 
 print $pm <<EOPM;
 
@@ -211,9 +311,37 @@ read_only_bottom_close_and_rename($pm);
 
 print $h <<EOH;
 
+#ifndef PERL_FEATURE_H_
+#define PERL_FEATURE_H_
+
 #if defined(PERL_CORE) || defined (PERL_EXT)
 
 #define HINT_FEATURE_SHIFT	$HintShift
+EOH
+
+for (sort keys %feature_bits) {
+    if ($feature_bits{$_} == 1) {
+        print $h "\n/* Index $feature_indices{$_} */\n";
+    }
+    printf $h "#define FEATURE_%s_BIT%*s %#010x\n", uc($feature{$_}),
+      $width-length($feature{$_}), "", $feature_bits{$_};
+}
+print $h "\n";
+
+for (sort keys %feature_indices) {
+    printf $h "#define FEATURE_%s_INDEX%*s %d\n", uc($feature{$_}),
+      $width-length($feature{$_}), "", $feature_indices{$_};
+}
+print $h "\n";
+
+# we don't require that every source #includes <feature.h>
+print $h <<EOH;
+#define REAL_COP_FEATURE_SIZE $cop_feature_size
+
+/* If the following errors, update COP_FEATURE_SIZE in cop.h */
+#if defined(COP_FEATURE_SIZE) && COP_FEATURE_SIZE != REAL_COP_FEATURE_SIZE
+#  error "COP_FEATURE_SIZE and REAL_COP_FEATURE_SIZE don't match"
+#endif
 
 EOH
 
@@ -226,17 +354,20 @@ for (@HintedBundles) {
 print $h <<'EOH';
 #define FEATURE_BUNDLE_CUSTOM	(HINT_FEATURE_MASK >> HINT_FEATURE_SHIFT)
 
-#define CURRENT_HINTS \
+/* this is preserved for testing and asserts */
+#define OLD_CURRENT_HINTS \
     (PL_curcop == &PL_compiling ? PL_hints : PL_curcop->cop_hints)
+/* this is the same thing, but simpler (no if) as PL_hints expands
+   to PL_compiling.cop_hints */
+#define CURRENT_HINTS \
+    PL_curcop->cop_hints
 #define CURRENT_FEATURE_BUNDLE \
     ((CURRENT_HINTS & HINT_FEATURE_MASK) >> HINT_FEATURE_SHIFT)
 
-/* Avoid using ... && Perl_feature_is_enabled(...) as that triggers a bug in
-   the HP-UX cc on PA-RISC */
-#define FEATURE_IS_ENABLED(name)				        \
-	((CURRENT_HINTS							 \
-	   & HINT_LOCALIZE_HH)						  \
-	    ? Perl_feature_is_enabled(aTHX_ STR_WITH_LEN(name)) : FALSE)
+#define FEATURE_IS_ENABLED_MASK(index, mask)                   \
+  ((CURRENT_HINTS & HINT_LOCALIZE_HH)                \
+    ? (PL_curcop->cop_features.bits[index] & (mask)) : FALSE)
+
 /* The longest string we pass in.  */
 EOH
 
@@ -247,49 +378,74 @@ print $h <<EOL;
 EOL
 
 for (
-    sort { length $a <=> length $b } keys %feature
+    sort { length $a <=> length $b || $a cmp $b } keys %feature
 ) {
     my($first,$last) =
 	map { (my $__ = uc) =~ y/.//d; $__ } @{$BundleRanges{$_}};
     my $name = $feature{$_};
     my $NAME = uc $name;
-    if ($last && $first eq 'DEFAULT') { #  ‘>= DEFAULT’ warns
+    if ($last && $first eq 'DEFAULT') { #  '>= DEFAULT' warns
 	print $h <<EOI;
-#define FEATURE_$NAME\_IS_ENABLED \\
+#define FEATURE_${NAME}_IS_ENABLED \\
     ( \\
 	CURRENT_FEATURE_BUNDLE <= FEATURE_BUNDLE_$last \\
      || (CURRENT_FEATURE_BUNDLE == FEATURE_BUNDLE_CUSTOM && \\
-	 FEATURE_IS_ENABLED("$name")) \\
+	 FEATURE_IS_ENABLED_MASK(FEATURE_${NAME}_INDEX, FEATURE_${NAME}_BIT)) \\
     )
 
 EOI
     }
     elsif ($last) {
 	print $h <<EOH3;
-#define FEATURE_$NAME\_IS_ENABLED \\
+#define FEATURE_${NAME}_IS_ENABLED \\
     ( \\
 	(CURRENT_FEATURE_BUNDLE >= FEATURE_BUNDLE_$first && \\
 	 CURRENT_FEATURE_BUNDLE <= FEATURE_BUNDLE_$last) \\
      || (CURRENT_FEATURE_BUNDLE == FEATURE_BUNDLE_CUSTOM && \\
-	 FEATURE_IS_ENABLED("$name")) \\
+	 FEATURE_IS_ENABLED_MASK(FEATURE_${NAME}_INDEX, FEATURE_${NAME}_BIT)) \\
     )
 
 EOH3
     }
-    else {
+    elsif ($first) {
 	print $h <<EOH4;
-#define FEATURE_$NAME\_IS_ENABLED \\
+#define FEATURE_${NAME}_IS_ENABLED \\
     ( \\
 	CURRENT_FEATURE_BUNDLE == FEATURE_BUNDLE_$first \\
      || (CURRENT_FEATURE_BUNDLE == FEATURE_BUNDLE_CUSTOM && \\
-	 FEATURE_IS_ENABLED("$name")) \\
+	 FEATURE_IS_ENABLED_MASK(FEATURE_${NAME}_INDEX, FEATURE_${NAME}_BIT)) \\
     )
 
 EOH4
     }
+    else {
+	print $h <<EOH5;
+#define FEATURE_${NAME}_IS_ENABLED \\
+    ( \\
+	CURRENT_FEATURE_BUNDLE == FEATURE_BUNDLE_CUSTOM && \\
+	 FEATURE_IS_ENABLED_MASK(FEATURE_${NAME}_INDEX, FEATURE_${NAME}_BIT) \\
+    )
+
+EOH5
+    }
 }
 
+my $save_bits = "STMT_START {  \\\n        "
+  . join("\\\n        ", map { "SAVEI32(PL_compiling.cop_features.bits[$_]); " } 0 .. $cop_feature_size-1)
+  . " \\\n    } STMT_END";
+
+my $clear_bits = "("
+  . join("   \\\n     ", map "PL_compiling.cop_features.bits[$_] = ", 0 .. $cop_feature_size-1) . "0)";
+
 print $h <<EOH;
+
+#define SAVEFEATUREBITS() \\
+    $save_bits
+
+#define CLEARFEATUREBITS() \\
+    $clear_bits
+
+#define FETCHFEATUREBITSHH(hh) S_fetch_feature_bits_hh(aTHX_ (hh))
 
 #endif /* PERL_CORE or PERL_EXT */
 
@@ -323,6 +479,135 @@ print $h <<EOJ;
     else			    PL_hints &= ~HINT_UNI_8_BIT;
 }
 #endif /* PERL_IN_OP_C */
+
+#if defined(PERL_IN_MG_C) || defined(PERL_IN_PP_CTL_C)
+
+#define magic_sethint_feature(keysv, keypv, keylen, valsv, valbool) \\
+    S_magic_sethint_feature(aTHX_ (keysv), (keypv), (keylen), (valsv), (valbool))
+PERL_STATIC_INLINE void
+S_magic_sethint_feature(pTHX_ SV *keysv, const char *keypv, STRLEN keylen,
+                        SV *valsv, bool valbool) {
+    if (keysv)
+      keypv = SvPV_const(keysv, keylen);
+
+    if (memBEGINs(keypv, keylen, "feature_")) {
+        const char *subf = keypv + (sizeof("feature_")-1);
+        U32 mask = 0;
+        int index = 0;
+        switch (*subf) {
+EOJ
+
+my %pref;
+for my $key (sort values %feature) {
+    push @{$pref{substr($key, 0, 1)}}, $key;
+}
+
+for my $pref (sort keys %pref) {
+    print $h <<EOS;
+        case '$pref':
+EOS
+    my $first = 1;
+    for my $subkey (@{$pref{$pref}}) {
+        my $rest = substr($subkey, 1);
+        my $if = $first ? "if" : "else if";
+        print $h <<EOJ;
+            $if (keylen == sizeof("feature_$subkey")-1
+                 && memcmp(subf+1, "$rest", keylen - sizeof("feature_")) == 0) {
+                mask = FEATURE_\U${subkey}\E_BIT;
+                index = FEATURE_\U${subkey}\E_INDEX;
+                break;
+            }
+EOJ
+
+        $first = 0;
+    }
+    print $h <<EOS;
+            return;
+
+EOS
+}
+
+print $h <<EOJ;
+        default:
+            return;
+        }
+        if (valsv ? SvTRUE(valsv) : valbool)
+            PL_compiling.cop_features.bits[index] |= mask;
+        else
+            PL_compiling.cop_features.bits[index] &= ~mask;
+    }
+}
+#endif /* PERL_IN_MG_C */
+
+/* subject to change */
+struct perl_feature_bit {
+  const char *name;
+  STRLEN namelen;
+  U32 mask;
+  int index;
+};
+
+#ifdef PERL_IN_PP_CTL_C
+
+static const struct perl_feature_bit
+PL_feature_bits[] = {
+EOJ
+for my $key (sort keys %feature) {
+    my $val = $feature{$key};
+    print $h <<EOJ;
+    {
+        /* feature $key */
+        "feature_$val",
+        STRLENs("feature_$val"),
+        FEATURE_\U$val\E_BIT,
+        FEATURE_\U$val\E_INDEX
+    },
+EOJ
+}
+
+print $h <<EOJ;
+    { NULL, 0, 0U, 0 }
+};
+
+PERL_STATIC_INLINE void
+S_fetch_feature_bits_hh(pTHX_ HV *hh) {
+    CLEARFEATUREBITS();
+
+    const struct perl_feature_bit *fb = PL_feature_bits;
+    while (fb->name) {
+        SV **svp = hv_fetch(hh, fb->name, (I32)fb->namelen, 0);
+        if (svp && SvTRUE(*svp))
+               PL_compiling.cop_features.bits[fb->index] |= fb->mask;
+        ++fb;
+    }
+}
+
+#endif /* PERL_IN_PP_CTL_C */
+
+#ifdef PERL_IN_DUMP_C
+
+EOJ
+
+my $any_bits_set = "(                              \\\n      " .
+  join(" || \\\n      ", map "cop->cop_features.bits[$_]", 0 .. $cop_feature_size-1) .
+  "    \\\n    )";
+
+my $dump_bits = "STMT_START { \\\n        " .
+  join(qq( \\\n        PerlIO_putc(file, ','); \\\n        ),
+       map { qq(PerlIO_printf(file, "0x%" U32xf, cop->cop_features.bits[$_]);) }
+       0 .. $cop_feature_size-1) .
+  " \\\n    } STMT_END";
+
+print $h <<EOJ;
+#define ANY_FEATURE_BITS_SET(cop)  \\
+    $any_bits_set
+
+#define DUMP_FEATURE_BITS(file, cop) \\
+    $dump_bits
+
+#endif /* PERL_IN_DUMP_C */
+
+#endif /* PERL_FEATURE_H_ */
 EOJ
 
 read_only_bottom_close_and_rename($h);
@@ -333,13 +618,14 @@ read_only_bottom_close_and_rename($h);
 
 __END__
 package feature;
-
-our $VERSION = '1.27';
+our $VERSION = '1.97';
 
 FEATURES
 
 # TODO:
 # - think about versioned features (use feature switch => 2)
+
+=encoding utf8
 
 =head1 NAME
 
@@ -347,18 +633,20 @@ feature - Perl pragma to enable new features
 
 =head1 SYNOPSIS
 
-    use feature qw(say switch);
-    given ($foo) {
-        when (1)          { say "\$foo == 1" }
-        when ([2,3])      { say "\$foo == 2 || \$foo == 3" }
-        when (/^a[bc]d$/) { say "\$foo eq 'abd' || \$foo eq 'acd'" }
-        when ($_ > 100)   { say "\$foo > 100" }
-        default           { say "None of the above" }
-    }
+    use feature qw(fc say);
 
-    use feature ':5.10'; # loads all features available in perl 5.10
+    # Without the "use feature" above, this code would not be able to find
+    # the built-ins "say" or "fc":
+    say "The case-folded version of $x is: " . fc $x;
 
-    use v5.10;           # implicitly loads :5.10 feature bundle
+
+    # set features to match the :5.36 bundle, which may turn off or on
+    # multiple features (see "FEATURE BUNDLES" below)
+    use feature ':5.36';
+
+
+    # implicitly loads :5.36 feature bundle
+    use v5.36;
 
 =head1 DESCRIPTION
 
@@ -373,7 +661,7 @@ pragma.)
 =head2 Lexical effect
 
 Like other pragmas (C<use strict>, for example), features have a lexical
-effect. C<use feature qw(foo)> will only make the feature "foo" available
+effect.  C<use feature qw(foo)> will only make the feature "foo" available
 from that point to the end of the enclosing block.
 
     {
@@ -400,9 +688,11 @@ disable I<all> features (an unusual request!) use C<no feature ':all'>.
 
 =head1 AVAILABLE FEATURES
 
+Read L</"FEATURE BUNDLES"> for the feature cheat sheet summary.
+
 =head2 The 'say' feature
 
-C<use feature 'say'> tells the compiler to enable the Perl 6 style
+C<use feature 'say'> tells the compiler to enable the Raku-inspired
 C<say> function.
 
 See L<perlfunc/say> for details.
@@ -418,25 +708,45 @@ See L<perlsub/"Persistent Private Variables"> for details.
 
 This feature is available starting with Perl 5.10.
 
+=head2 The 'smartmatch' feature
+
+C<use feature 'smartmatch'> tells the compiler to enable the
+smartmatch operator C<~~>.  It is enabled by default, but can be
+turned off to disallow the C<~~> operator.
+
+This feature is disabled by default in the 5.42 feature bundle
+onwards:
+
+  $x ~~ $y; # fine
+  use v5.42;
+  $x ~~ $y; # error
+
+This has no effect on the implicit smartmatches done by C<when>.
+
+See L<perlop/"Smartmatch Operator"> for details.
+
 =head2 The 'switch' feature
 
-C<use feature 'switch'> tells the compiler to enable the Perl 6
+C<use feature 'switch'> tells the compiler to enable the Raku
 given/when construct.
 
 See L<perlsyn/"Switch Statements"> for details.
 
-This feature is available starting with Perl 5.10.
+This feature is available starting with Perl 5.10.  It is enabled by
+feature bundles 5.10 through 5.34, and disabled from the 5.36 feature
+bundle onwards.
 
 =head2 The 'unicode_strings' feature
 
-C<use feature 'unicode_strings'> tells the compiler to use Unicode semantics
+C<use feature 'unicode_strings'> tells the compiler to use Unicode rules
 in all string operations executed within its scope (unless they are also
 within the scope of either C<use locale> or C<use bytes>).  The same applies
 to all regular expressions compiled within the scope, even if executed outside
-it.
+it.  It does not change the internal representation of strings, but only how
+they are interpreted.
 
 C<no feature 'unicode_strings'> tells the compiler to use the traditional
-Perl semantics wherein the native character set semantics is used unless it is
+Perl rules wherein the native character set rules is used unless it is
 clear to Perl that Unicode is desired.  This can lead to some surprises
 when the behavior suddenly changes.  (See
 L<perlunicode/The "Unicode Bug"> for details.)  For this reason, if you are
@@ -444,54 +754,29 @@ potentially using Unicode in your program, the
 C<use feature 'unicode_strings'> subpragma is B<strongly> recommended.
 
 This feature is available starting with Perl 5.12; was almost fully
-implemented in Perl 5.14; and extended in Perl 5.16 to cover C<quotemeta>.
+implemented in Perl 5.14; and extended in Perl 5.16 to cover C<quotemeta>;
+was extended further in Perl 5.26 to cover L<the range
+operator|perlop/Range Operators>; and was extended again in Perl 5.28 to
+cover L<special-cased whitespace splitting|perlfunc/split>.
 
 =head2 The 'unicode_eval' and 'evalbytes' features
 
-Under the C<unicode_eval> feature, Perl's C<eval> function, when passed a
-string, will evaluate it as a string of characters, ignoring any
-C<use utf8> declarations.  C<use utf8> exists to declare the encoding of
-the script, which only makes sense for a stream of bytes, not a string of
-characters.  Source filters are forbidden, as they also really only make
-sense on strings of bytes.  Any attempt to activate a source filter will
-result in an error.
+Together, these two features are intended to replace the legacy string
+C<eval> function, which behaves problematically in some instances.  They are
+available starting with Perl 5.16, and are enabled by default by a
+S<C<use 5.16>> or higher declaration.
 
-The C<evalbytes> feature enables the C<evalbytes> keyword, which evaluates
-the argument passed to it as a string of bytes.  It dies if the string
-contains any characters outside the 8-bit range.  Source filters work
-within C<evalbytes>: they apply to the contents of the string being
-evaluated.
+C<unicode_eval> changes the behavior of plain string C<eval> to work more
+consistently, especially in the Unicode world.  Certain (mis)behaviors
+couldn't be changed without breaking some things that had come to rely on
+them, so the feature can be enabled and disabled.  Details are at
+L<perlfunc/Under the "unicode_eval" feature>.
 
-Together, these two features are intended to replace the historical C<eval>
-function, which has (at least) two bugs in it, that cannot easily be fixed
-without breaking existing programs:
-
-=over
-
-=item *
-
-C<eval> behaves differently depending on the internal encoding of the
-string, sometimes treating its argument as a string of bytes, and sometimes
-as a string of characters.
-
-=item *
-
-Source filters activated within C<eval> leak out into whichever I<file>
-scope is currently being compiled.  To give an example with the CPAN module
-L<Semi::Semicolons>:
-
-    BEGIN { eval "use Semi::Semicolons;  # not filtered here " }
-    # filtered here!
-
-C<evalbytes> fixes that to work the way one would expect:
-
-    use feature "evalbytes";
-    BEGIN { evalbytes "use Semi::Semicolons;  # filtered " }
-    # not filtered
-
-=back
-
-These two features are available starting with Perl 5.16.
+C<evalbytes> is like string C<eval>, but it treats its argument as a byte
+string. Details are at L<perlfunc/evalbytes EXPR>.  Without a
+S<C<use feature 'evalbytes'>> nor a S<C<use v5.16>> (or higher) declaration in
+the current scope, you can still access it by instead writing
+C<CORE::evalbytes>.
 
 =head2 The 'current_sub' feature
 
@@ -502,9 +787,9 @@ This feature is available starting with Perl 5.16.
 
 =head2 The 'array_base' feature
 
-This feature supports the legacy C<$[> variable.  See L<perlvar/$[> and
-L<arybase>.  It is on by default but disabled under C<use v5.16> (see
-L</IMPLICIT LOADING>, below).
+This feature supported the legacy C<$[> variable.  See L<perlvar/$[>.
+It was on by default but disabled under C<use v5.16> (see
+L</IMPLICIT LOADING>, below) and unavailable since perl 5.30.
 
 This feature is available under this name starting with Perl 5.16.  In
 previous versions, it was simply on all the time, and this pragma knew
@@ -518,6 +803,303 @@ which implements Unicode casefolding.
 See L<perlfunc/fc> for details.
 
 This feature is available from Perl 5.16 onwards.
+
+=head2 The 'lexical_subs' feature
+
+In Perl versions prior to 5.26, this feature enabled
+declaration of subroutines via C<my sub foo>, C<state sub foo>
+and C<our sub foo> syntax.  See L<perlsub/Lexical Subroutines> for details.
+
+This feature is available from Perl 5.18 onwards.  From Perl 5.18 to 5.24,
+it was classed as experimental, and Perl emitted a warning for its
+usage, except when explicitly disabled:
+
+  no warnings "experimental::lexical_subs";
+
+As of Perl 5.26, use of this feature no longer triggers a warning, though
+the C<experimental::lexical_subs> warning category still exists (for
+compatibility with code that disables it).  In addition, this syntax is
+not only no longer experimental, but it is enabled for all Perl code,
+regardless of what feature declarations are in scope.
+
+=head2 The 'postderef' and 'postderef_qq' features
+
+The 'postderef_qq' feature extends the applicability of L<postfix
+dereference syntax|perlref/Postfix Dereference Syntax> so that
+postfix array dereference, postfix scalar dereference, and
+postfix array highest index access are available in double-quotish interpolations.
+For example, it makes the following two statements equivalent:
+
+  my $s = "[@{ $h->{a} }]";
+  my $s = "[$h->{a}->@*]";
+
+This feature is available from Perl 5.20 onwards. In Perl 5.20 and 5.22, it
+was classed as experimental, and Perl emitted a warning for its
+usage, except when explicitly disabled:
+
+  no warnings "experimental::postderef";
+
+As of Perl 5.24, use of this feature no longer triggers a warning, though
+the C<experimental::postderef> warning category still exists (for
+compatibility with code that disables it).
+
+The 'postderef' feature was used in Perl 5.20 and Perl 5.22 to enable
+postfix dereference syntax outside double-quotish interpolations. In those
+versions, using it triggered the C<experimental::postderef> warning in the
+same way as the 'postderef_qq' feature did. As of Perl 5.24, this syntax is
+not only no longer experimental, but it is enabled for all Perl code,
+regardless of what feature declarations are in scope.
+
+=head2 The 'signatures' feature
+
+This enables syntax for declaring subroutine arguments as lexical variables.
+For example, for this subroutine:
+
+    sub foo ($left, $right) {
+        return $left + $right;
+    }
+
+Calling C<foo(3, 7)> will assign C<3> into C<$left> and C<7> into C<$right>.
+
+See L<perlsub/Signatures> for details.
+
+This feature is available from Perl 5.20 onwards. From Perl 5.20 to 5.34,
+it was classed as experimental, and Perl emitted a warning for its usage,
+except when explicitly disabled:
+
+  no warnings "experimental::signatures";
+
+As of Perl 5.36, use of this feature no longer triggers a warning, though the
+C<experimental::signatures> warning category still exists (for compatibility
+with code that disables it). This feature is now considered stable, and is
+enabled automatically by C<use v5.36> (or higher).
+
+=head2 The 'refaliasing' feature
+
+B<WARNING>: This feature is still experimental and the implementation may
+change or be removed in future versions of Perl.  For this reason, Perl will
+warn when you use the feature, unless you have explicitly disabled the warning:
+
+    no warnings "experimental::refaliasing";
+
+This enables aliasing via assignment to references:
+
+    \$a = \$b; # $a and $b now point to the same scalar
+    \@a = \@b; #                     to the same array
+    \%a = \%b;
+    \&a = \&b;
+    foreach \%hash (@array_of_hash_refs) {
+        ...
+    }
+
+See L<perlref/Assigning to References> for details.
+
+This feature is available from Perl 5.22 onwards.
+
+=head2 The 'bitwise' feature
+
+This makes the four standard bitwise operators (C<& | ^ ~>) treat their
+operands consistently as numbers, and introduces four new dotted operators
+(C<&. |. ^. ~.>) that treat their operands consistently as strings.  The
+same applies to the assignment variants (C<&= |= ^= &.= |.= ^.=>).
+
+See L<perlop/Bitwise String Operators> for details.
+
+This feature is available from Perl 5.22 onwards.  Starting in Perl 5.28,
+C<use v5.28> will enable the feature.  Before 5.28, it was still
+experimental and would emit a warning in the "experimental::bitwise"
+category.
+
+=head2 The 'declared_refs' feature
+
+B<WARNING>: This feature is still experimental and the implementation may
+change or be removed in future versions of Perl.  For this reason, Perl will
+warn when you use the feature, unless you have explicitly disabled the warning:
+
+    no warnings "experimental::declared_refs";
+
+This allows a reference to a variable to be declared with C<my>, C<state>,
+or C<our>, or localized with C<local>.  It is intended mainly for use in
+conjunction with the "refaliasing" feature.  See L<perlref/Declaring a
+Reference to a Variable> for examples.
+
+This feature is available from Perl 5.26 onwards.
+
+=head2 The 'isa' feature
+
+This allows the use of the C<isa> infix operator, which tests whether the
+scalar given by the left operand is an object of the class given by the
+right operand. See L<perlop/Class Instance Operator> for more details.
+
+This feature is available from Perl 5.32 onwards.  From Perl 5.32 to 5.34,
+it was classed as experimental, and Perl emitted a warning for its usage,
+except when explicitly disabled:
+
+    no warnings "experimental::isa";
+
+As of Perl 5.36, use of this feature no longer triggers a warning (though the
+C<experimental::isa> warning category still exists for compatibility with
+code that disables it). This feature is now considered stable, and is enabled
+automatically by C<use v5.36> (or higher).
+
+=head2 The 'indirect' feature
+
+This feature allows the use of L<indirect object
+syntax|perlobj/Indirect Object Syntax> for method calls, e.g.  C<new
+Foo 1, 2;>. It is enabled by default, but can be turned off to
+disallow indirect object syntax.
+
+This feature is available under this name from Perl 5.32 onwards. In
+previous versions, it was simply on all the time.  To disallow (or
+warn on) indirect object syntax on older Perls, see the L<indirect>
+CPAN module.  It is disabled from the 5.36 feature bundle onwards.
+
+=head2 The 'multidimensional' feature
+
+This feature enables multidimensional array emulation, a perl 4 (or
+earlier) feature that was used to emulate multidimensional arrays with
+hashes.  This works by converting code like C<< $foo{$x, $y} >> into
+C<< $foo{join($;, $x, $y)} >>.  It is enabled by default, but can be
+turned off to disable multidimensional array emulation.
+
+When this feature is disabled the syntax that is normally replaced
+will report a compilation error.
+
+This feature is available under this name from Perl 5.34 onwards. In
+previous versions, it was simply on all the time.  It is disabled from
+the 5.36 feature bundle onwards.
+
+You can use the L<multidimensional> module on CPAN to disable
+multidimensional array emulation for older versions of Perl.
+
+=head2 The 'bareword_filehandles' feature
+
+This feature enables bareword filehandles for builtin functions
+operations, a generally discouraged practice.  It is enabled by
+default, but can be turned off to disable bareword filehandles, except
+for the exceptions listed below.
+
+The perl built-in filehandles C<STDIN>, C<STDOUT>, C<STDERR>, C<DATA>,
+C<ARGV>, C<ARGVOUT> and the special C<_> are always enabled.
+
+This feature is available under this name from Perl 5.34 onwards.  In
+previous versions it was simply on all the time.  It is disabled from
+the 5.38 feature bundle onwards.
+
+You can use the L<bareword::filehandles> module on CPAN to disable
+bareword filehandles for older versions of perl.
+
+=head2 The 'try' feature
+
+B<WARNING>: This feature is still partly experimental, and the implementation
+may change or be removed in future versions of Perl.
+
+This feature enables the C<try> and C<catch> syntax, which allows exception
+handling, where exceptions thrown from the body of the block introduced with
+C<try> are caught by executing the body of the C<catch> block.
+
+This feature is available starting in Perl 5.34. Before Perl 5.40 it was
+classed as experimental, and Perl emitted a warning for its usage, except when
+explicitly disabled:
+
+    no warnings "experimental::try";
+
+As of Perl 5.40, use of this feature without a C<finally> block no longer
+triggers a warning.  The optional C<finally> block is still considered
+experimental and emits a warning, except when explicitly disabled as above.
+
+For more information, see L<perlsyn/"Try Catch Exception Handling">.
+
+=head2 The 'defer' feature
+
+B<WARNING>: This feature is still experimental and the implementation may
+change or be removed in future versions of Perl.  For this reason, Perl will
+warn when you use the feature, unless you have explicitly disabled the warning:
+
+    no warnings "experimental::defer";
+
+This feature enables the C<defer> block syntax, which allows a block of code
+to be deferred until when the flow of control leaves the block which contained
+it. For more details, see L<perlsyn/defer>.
+
+This feature is available starting in Perl 5.36.
+
+=head2 The 'extra_paired_delimiters' feature
+
+B<WARNING>: This feature is still experimental and the implementation may
+change or be removed in future versions of Perl.  For this reason, Perl will
+warn when you use the feature, unless you have explicitly disabled the warning:
+
+    no warnings "experimental::extra_paired_delimiters";
+
+This feature enables the use of more paired string delimiters than the
+traditional four, S<C<< <  > >>>, S<C<( )>>, S<C<{ }>>, and S<C<[ ]>>.  When
+this feature is on, for example, you can say S<C<qrE<171>patE<187>>>.
+
+As with any usage of non-ASCII delimiters in a UTF-8-encoded source file, you
+will want to ensure the parser will decode the source code from UTF-8 bytes
+with a declaration such as C<use utf8>.
+
+This feature is available starting in Perl 5.36.
+
+For a full list of the available characters, see
+L<perlop/List of Extra Paired Delimiters>.
+
+=head2 The 'module_true' feature
+
+This feature removes the need to return a true value at the end of a module
+loaded with C<require> or C<use>. Any errors during compilation will cause
+failures, but reaching the end of the module when this feature is in effect
+will prevent C<perl> from throwing an exception that the module "did not return
+a true value".
+
+=head2 The 'class' feature
+
+B<WARNING>: This feature is still experimental and the implementation may
+change or be removed in future versions of Perl.  For this reason, Perl will
+warn when you use the feature, unless you have explicitly disabled the warning:
+
+    no warnings "experimental::class";
+
+This feature enables the C<class> block syntax and other associated keywords
+which implement the "new" object system, previously codenamed "Corinna".
+
+=head2 The 'apostrophe_as_package_separator' feature
+
+This feature enables use C<'> (apostrophe) as an alternative to using
+C<::> as a separate in package and other global names.
+
+This is enabled by default, but disabled from the 5.42 feature bundle
+onwards.  In previous versions it was enabled all the time.
+
+This only disables C<'> in symbols in your source code, the internal
+conversion from C<'> to C<::>, including for symbolic references, is
+always enabled.
+
+=head2 The 'keyword_any' feature
+
+B<WARNING>: This feature is still experimental and the implementation may
+change or be removed in future versions of Perl.  For this reason, Perl will
+warn when you use the feature, unless you have explicitly disabled the warning:
+
+    no warnings "experimental::keyword_any";
+
+This feature enables the L<C<any>|perlfunc/any BLOCK LIST> operator keyword.
+This allow testing whether any of the values in a list satisfy a given
+condition, with short-circuiting behaviour as soon as it finds one.
+
+=head2 The 'keyword_all' feature
+
+B<WARNING>: This feature is still experimental and the implementation may
+change or be removed in future versions of Perl.  For this reason, Perl will
+warn when you use the feature, unless you have explicitly disabled the warning:
+
+    no warnings "experimental::keyword_all";
+
+This feature enables the L<C<all>|perlfunc/all BLOCK LIST> operator keyword.
+This allow testing whether all of the values in a list satisfy a given
+condition, with short-circuiting behaviour as soon as it finds one that does
+not.
 
 =head1 FEATURE BUNDLES
 
@@ -541,6 +1123,19 @@ no effect.  Feature bundles are guaranteed to be the same for all sub-versions.
   use feature ":5.14.0";    # same as ":5.14"
   use feature ":5.14.1";    # same as ":5.14"
 
+You can also do:
+
+  use feature ":all";
+
+or
+
+  no feature ":all";
+
+but the first may enable features in a later version of Perl that
+change the meaning of your code, and the second may disable mechanisms
+that are part of Perl's current behavior that have been turned into
+features, just as C<indirect> and C<bareword_filehandles> were.
+
 =head1 IMPLICIT LOADING
 
 Instead of loading feature bundles by name, it is easier to let Perl do
@@ -561,12 +1156,12 @@ main compilation unit (that is, the one-liner that follows C<-E>).
 By explicitly requiring a minimum Perl version number for your program, with
 the C<use VERSION> construct.  That is,
 
-    use v5.10.0;
+    use v5.36.0;
 
 will do an implicit
 
     no feature ':all';
-    use feature ':5.10';
+    use feature ':5.36';
 
 and so on.  Note how the trailing sub-version
 is automatically stripped from the
@@ -574,19 +1169,92 @@ version.
 
 But to avoid portability warnings (see L<perlfunc/use>), you may prefer:
 
-    use 5.010;
+    use 5.036;
 
 with the same effect.
 
 If the required version is older than Perl 5.10, the ":default" feature
 bundle is automatically loaded instead.
 
+Unlike C<use feature ":5.12">, saying C<use v5.12> (or any higher version)
+also does the equivalent of C<use strict>; see L<perlfunc/use> for details.
+
+=back
+
+=head1 CHECKING FEATURES
+
+C<feature> provides some simple APIs to check which features are enabled.
+
+These functions cannot be imported and must be called by their fully
+qualified names.  If you don't otherwise need to set a feature you will
+need to ensure C<feature> is loaded with:
+
+  use feature ();
+
+=over
+
+=item feature_enabled($feature)
+
+=item feature_enabled($feature, $depth)
+
+  package MyStandardEnforcer;
+  use feature ();
+  use Carp "croak";
+  sub import {
+    croak "disable indirect!" if feature::feature_enabled("indirect");
+  }
+
+Test whether a named feature is enabled at a given level in the call
+stack, returning a true value if it is.  C<$depth> defaults to 1,
+which checks the scope that called the scope calling
+feature::feature_enabled().
+
+croaks for an unknown feature name.
+
+=item features_enabled()
+
+=item features_enabled($depth)
+
+  package ReportEnabledFeatures;
+  use feature "say";
+  sub import {
+    say STDERR join " ", feature::features_enabled();
+  }
+
+Returns a list of the features enabled at a given level in the call
+stack.  C<$depth> defaults to 1, which checks the scope that called
+the scope calling feature::features_enabled().
+
+=item feature_bundle()
+
+=item feature_bundle($depth)
+
+Returns the feature bundle, if any, selected at a given level in the
+call stack.  C<$depth> defaults to 1, which checks the scope that called
+the scope calling feature::feature_bundle().
+
+Returns an undefined value if no feature bundle is selected in the
+scope.
+
+The bundle name returned will be for the earliest bundle matching the
+selected bundle, so:
+
+  use feature ();
+  use v5.12;
+  BEGIN { print feature::feature_bundle(0); }
+
+will print C<5.11>.
+
+This returns internal state, at this point C<use v5.12;> sets the
+feature bundle, but C< use feature ":5.12"; > does not set the feature
+bundle.  This may change in a future release of perl.
+
 =back
 
 =cut
 
 sub import {
-    my $class = shift;
+    shift;
 
     if (!@_) {
         croak("No features specified");
@@ -596,7 +1264,7 @@ sub import {
 }
 
 sub unimport {
-    my $class = shift;
+    shift;
 
     # A bare C<no feature> should reset to the default bundle
     if (!@_) {
@@ -612,7 +1280,7 @@ sub __common {
     my $import = shift;
     my $bundle_number = $^H & $hint_mask;
     my $features = $bundle_number != $hint_mask
-	&& $feature_bundle{$hint_bundles[$bundle_number >> $hint_shift]};
+      && $feature_bundle{$hint_bundles[$bundle_number >> $hint_shift]};
     if ($features) {
 	# Features are enabled implicitly via bundle hints.
 	# Delete any keys that may be left over from last time.
@@ -637,6 +1305,12 @@ sub __common {
             next;
         }
         if (!exists $feature{$name}) {
+            if (exists $noops{$name}) {
+                next;
+            }
+            if (!$import && exists $removed{$name}) {
+                next;
+            }
             unknown_feature($name);
         }
 	if ($import) {
@@ -664,6 +1338,67 @@ sub unknown_feature_bundle {
 sub croak {
     require Carp;
     Carp::croak(@_);
+}
+
+sub features_enabled {
+    my ($depth) = @_;
+
+    $depth //= 1;
+    my @frame = caller($depth+1)
+      or return;
+    my ($hints, $hinthash) = @frame[8, 10];
+
+    my $bundle_number = $hints & $hint_mask;
+    if ($bundle_number != $hint_mask) {
+        return $feature_bundle{$hint_bundles[$bundle_number >> $hint_shift]}->@*;
+    }
+    else {
+        my @features;
+        for my $feature (sort keys %feature) {
+            if ($hinthash->{$feature{$feature}}) {
+                push @features, $feature;
+            }
+        }
+        return @features;
+    }
+}
+
+sub feature_enabled {
+    my ($feature, $depth) = @_;
+
+    $depth //= 1;
+    my @frame = caller($depth+1)
+      or return;
+    my ($hints, $hinthash) = @frame[8, 10];
+
+    my $hint_feature = $feature{$feature}
+      or croak "Unknown feature $feature";
+    my $bundle_number = $hints & $hint_mask;
+    if ($bundle_number != $hint_mask) {
+        my $bundle = $hint_bundles[$bundle_number >> $hint_shift];
+        for my $bundle_feature ($feature_bundle{$bundle}->@*) {
+            return 1 if $bundle_feature eq $feature;
+        }
+        return 0;
+    }
+    else {
+        return $hinthash->{$hint_feature} // 0;
+    }
+}
+
+sub feature_bundle {
+    my $depth = shift;
+
+    $depth //= 1;
+    my @frame = caller($depth+1)
+      or return;
+    my $bundle_number = $frame[8] & $hint_mask;
+    if ($bundle_number != $hint_mask) {
+        return $hint_bundles[$bundle_number >> $hint_shift];
+    }
+    else {
+        return undef;
+    }
 }
 
 1;

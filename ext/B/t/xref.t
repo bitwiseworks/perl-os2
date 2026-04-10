@@ -23,7 +23,7 @@ open SAVEOUT, ">&STDOUT" or diag $!;
 close STDOUT;
 # line 100
 our $compilesub = B::Xref::compile("-o$file");
-ok( ref $compilesub eq 'CODE', "compile() returns a coderef ($compilesub)" );
+ok( ref $compilesub eq 'CODE', "compile() returns a coderef" );
 $compilesub->(); # Compile this test script
 close STDOUT;
 open STDOUT, ">&SAVEOUT" or diag $!;
@@ -32,8 +32,9 @@ open STDOUT, ">&SAVEOUT" or diag $!;
 # line 200
 my ($curfile, $cursub, $curpack) = ('') x 3;
 our %xreftable = ();
-open XREF, $file or die "# Can't open $file: $!\n";
+open XREF, '<', $file or die "# Can't open $file: $!\n";
 while (<XREF>) {
+    print STDERR $_ if $ENV{PERL_DEBUG};
     chomp;
     if (/^File (.*)/) {
 	$curfile = $1;

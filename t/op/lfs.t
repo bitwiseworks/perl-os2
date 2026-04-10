@@ -1,12 +1,12 @@
-# NOTE: this file tests how large files (>2GB) work with perlio (stdio/sfio).
+# NOTE: this file tests how large files (>2GB) work with perlio (or stdio).
 # sysopen(), sysseek(), syswrite(), sysread() are tested in t/lib/syslfs.t.
 # If you modify/add tests here, remember to update also ext/Fcntl/t/syslfs.t.
 
 BEGIN {
 	chdir 't' if -d 't';
-	@INC = '../lib';
 	require './test.pl';
-	require Config;
+	set_up_inc('../lib');
+    require Config;
 	# Don't bother if there are no quad offsets.
 	skip_all('no 64-bit file offsets')
 		if $Config::Config{lseeksize} < 8;
@@ -51,7 +51,7 @@ $| = 1;
 print "# checking whether we have sparse files...\n";
 
 # Known have-nots.
-if ($^O eq 'MSWin32' || $^O eq 'NetWare' || $^O eq 'VMS') {
+if ($^O eq 'MSWin32' || $^O eq 'VMS') {
     skip_all("no sparse files in $^O");
 }
 
@@ -134,7 +134,7 @@ if ($r or not seek(BIG, 5_000_000_000, SEEK_SET)) {
 }
 
 # Either the print or (more likely, thanks to buffering) the close will
-# fail if there are are filesize limitations (process or fs).
+# fail if there are filesize limitations (process or fs).
 my $print = print BIG "big";
 print "# print failed: $!\n" unless $print;
 my $close = close BIG;

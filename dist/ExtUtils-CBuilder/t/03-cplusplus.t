@@ -2,11 +2,11 @@
 
 use strict;
 use Test::More;
-BEGIN { 
+BEGIN {
   if ($^O eq 'VMS') {
     # So we can get the return value of system()
     require vmsish;
-    import vmsish;
+    vmsish->import;
   }
 }
 use ExtUtils::CBuilder;
@@ -26,14 +26,12 @@ else {
   plan tests => 7;
 }
 
-ok $b, "created EU::CB object";
-
 ok $b->have_cplusplus, "have_cplusplus";
 
 $source_file = File::Spec->catfile('t', 'cplust.cc');
 {
-  open my $FH, "> $source_file" or die "Can't create $source_file: $!";
-  print $FH "class Bogus { public: int boot_cplust() { return 1; } };\n";
+  open my $FH, '>', $source_file or die "Can't create $source_file: $!";
+  print $FH q<namespace Bogus { extern "C" int boot_cplust() { return 1; } };> . "\n";
   close $FH;
 }
 ok -e $source_file, "source file '$source_file' created";
@@ -43,12 +41,13 @@ ok 1;
 
 is $object_file, $b->compile(source => $source_file, 'C++' => 1);
 
-$lib_file = $b->lib_file($object_file);
+$lib_file = $b->lib_file($object_file, module_name => 'cplust');
 ok 1;
 
 my ($lib, @temps) = $b->link(objects => $object_file,
                              module_name => 'cplust');
 $lib =~ tr/"'//d;
+$_ = File::Spec->rel2abs($_) for $lib_file, $lib;
 is $lib_file, $lib;
 
 for ($source_file, $object_file, $lib_file) {
@@ -59,5 +58,23 @@ for ($source_file, $object_file, $lib_file) {
 if ($^O eq 'VMS') {
    1 while unlink 'CPLUST.LIS';
    1 while unlink 'CPLUST.OPT';
+}
+
+{
+    # GH #23355
+    local $ENV{CC};
+    delete $ENV{CC};
+    local $ENV{CXX};
+    delete $ENV{CXX};
+    # GH #23146
+    my $fake_cc = File::Spec->rel2abs(File::Spec->catfile(qw(some directory what doesnt exist), 'cc'));
+    my $cb = ExtUtils::CBuilder->new(
+        quiet => $quiet,
+        config => {
+            cc => $fake_cc,
+        },
+    );
+
+    is $cb->{config}{cxx}, $fake_cc, "did not search PATH for C++ compiler when given absolute path to C compiler";
 }
 

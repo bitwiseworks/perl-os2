@@ -1,17 +1,17 @@
 #!./perl
 
 #
-# test the logical operators '&&', '||', '!', 'and', 'or', 'not'
+# test the logical operators '&&', '||', '^^', '!', 'and', 'or', , 'xor', 'not'
 #
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
+    require './test.pl';
+    set_up_inc('../lib');
 }
 
-print "1..11\n";
+plan tests => 58;
 
-my $test = 0;
 for my $i (undef, 0 .. 2, "", "0 but true") {
     my $true = 1;
     my $false = 0;
@@ -29,37 +29,94 @@ for my $i (undef, 0 .. 2, "", "0 but true") {
 	    and (($i || !$j) != (!$i && $j))
 	);
     }
-    if (not $true) {
-	print "not ";
-    } elsif ($false) {
-	print "not ";
-    }
-    print "ok ", ++$test, "\n";
+    my $m = ! defined $i ? 'undef'
+       : $i eq ''   ? 'empty string'
+       : $i;
+    ok( $true, "true: $m");
+    ok( ! $false, "false: $m");
 }
 
-# $test == 6
 my $i = 0;
 (($i ||= 1) &&= 3) += 4;
-print "not " unless $i == 7;
-print "ok ", ++$test, "\n";
+is( $i, 7, '||=, &&=');
 
 my ($x, $y) = (1, 8);
 $i = !$x || $y;
-print "not " unless $i == 8;
-print "ok ", ++$test, "\n";
+is( $i, 8, 'negation precedence with ||' );
 
 ++$y;
 $i = !$x || !$x || !$x || $y;
-print "not " unless $i == 9;
-print "ok ", ++$test, "\n";
+is( $i, 9, 'negation precedence with ||, multiple operands' );
 
 $x = 0;
 ++$y;
 $i = !$x && $y;
-print "not " unless $i == 10;
-print "ok ", ++$test, "\n";
+is( $i, 10, 'negation precedence with &&' );
 
 ++$y;
 $i = !$x && !$x && !$x && $y;
-print "not " unless $i == 11;
-print "ok ", ++$test, "\n";
+is( $i, 11, 'negation precedence with &&, multiple operands' );
+
+# [perl #127952]. This relates to OP_AND and OP_OR with a negated constant
+# on the lhs (either a negated bareword, or a negation of a do{} containing
+# a constant) and a negated non-foldable expression on the rhs. These cases
+# yielded 42 or "Bare" or "str" before the bug was fixed.
+{
+    $x = 42;
+
+    $i = !Bare || !$x;
+    is( $i, '', 'neg-bareword on lhs of || with non-foldable neg-true on rhs' );
+
+    $i = !Bare && !$x;
+    is( $i, '', 'neg-bareword on lhs of && with non-foldable neg-true on rhs' );
+
+    $i = do { !$x if !Bare };
+    is( $i, '', 'neg-bareword on rhs of modifier-if with non-foldable neg-true on lhs' );
+
+    $i = do { !$x unless !Bare };
+    is( $i, '', 'neg-bareword on rhs of modifier-unless with non-foldable neg-true on lhs' );
+
+    $i = !do { "str" } || !$x;
+    is( $i, '', 'neg-do-const on lhs of || with non-foldable neg-true on rhs' );
+
+    $i = !do { "str" } && !$x;
+    is( $i, '', 'neg-do-const on lhs of && with non-foldable neg-true on rhs' );
+}
+
+# RT #131820
+#
+# It turns out that in 2017, 23 years after the release of perl5,
+# the 'xor' logical operator was still untested in core.
+
+for my $test (
+    [ 0, 0, '' ],
+    [ 0, 1, 1  ],
+    [ 1, 0, 1  ],
+    [ 1, 1, '' ],
+
+    [ 0, 2, 1  ],
+    [ 2, 0, 1  ],
+    [ 2, 2, '' ],
+
+    [ 0, 3, 1  ],
+    [ 3, 0, 1  ],
+    [ 3, 4, '' ],
+) {
+    my ($a,$b, $exp) = @$test;
+    is(($a xor $b), $exp, "($a xor $b) == '$exp'");
+    is(($a ^^ $b), $exp, "($a ^^ $b) == '$exp'");
+
+    my ($lhs, $rhs) = @$test;
+    $lhs ^^= $rhs;
+    is($lhs, $exp, "$a ^^= $b gives '$exp'");
+}
+
+my $var = 123;
+($var ^^= 456) ^^= 456;
+is($var, 1, '^^= yields mutable lvalue');
+
+# precedence
+is((1 xor 1 and 0), 1, '(1 xor 1 and 0) == 1');
+is((1 xor 0 or 1), 1, "(1 xor 0 or 1) == 1");
+is((1 ^^ 1 && 0), 1, '(1 ^^ 1 && 0) == 1');
+is((1 ^^ 0 || 1), 1, "(1 ^^ 0 || 1) == 1");

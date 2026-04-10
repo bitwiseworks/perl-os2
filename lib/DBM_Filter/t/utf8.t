@@ -6,6 +6,8 @@ use Carp;
 BEGIN 
 {
 
+    require "../t/charset_tools.pl";
+
     eval { require Encode; };
     
     if ($@) {
@@ -16,7 +18,7 @@ BEGIN
 
 require "dbm_filter_util.pl";
 
-use Test::More tests => 20;
+use Test::More;
 
 BEGIN { use_ok('DBM_Filter') };
 my $db_file;
@@ -35,11 +37,11 @@ BEGIN { use_ok('charnames', qw{greek})};
 
 use charnames qw{greek};
 
-unlink <Op_dbmx*>;
-END { unlink <Op_dbmx*>; }
+unlink <utf8Op_dbmx*>;
+END { unlink <utf8Op_dbmx*>; }
 
 my %h1 = () ;
-my $db1 = tie(%h1, $db_file,'Op_dbmx', O_RDWR|O_CREAT, 0640) ;
+my $db1 = tie(%h1, $db_file,'utf8Op_dbmx', O_RDWR|O_CREAT, 0640) ;
 
 ok $db1, "tied to $db_file";
 
@@ -75,27 +77,17 @@ undef $db1;
 
 # read the dbm file without the filter
 my %h2 = () ;
-my $db2 = tie(%h2, $db_file,'Op_dbmx', O_RDWR|O_CREAT, 0640) ;
+my $db2 = tie(%h2, $db_file,'utf8Op_dbmx', O_RDWR|O_CREAT, 0640) ;
 
 ok $db2, "tied to $db_file";
 
-if (ord('A') == 193) { # EBCDIC.
-    VerifyData(\%h2,
-	   {
-	    'alpha'	=> "\xB4\x58",
-	    'beta'	=> "\xB4\x59",
-	    "\xB4\x62"=> "gamma",
-	    ""		=> "",
-	   });
-} else {
-    VerifyData(\%h2,
-	   {
-	    'alpha'	=> "\xCE\xB1",
-	    'beta'	=> "\xCE\xB2",
-	    "\xCE\xB3"=> "gamma",
-	    ""		=> "",
-	   });
-}
+VerifyData(\%h2,
+        {
+        'alpha'	=> byte_utf8a_to_utf8n("\xCE\xB1"),
+        'beta'	=> byte_utf8a_to_utf8n("\xCE\xB2"),
+        byte_utf8a_to_utf8n("\xCE\xB3")=> "gamma",
+        ""		=> "",
+        });
 
 undef $db2;
 {
@@ -104,3 +96,4 @@ undef $db2;
     is $@, '', "untie without inner references" ;
 }
 
+done_testing();

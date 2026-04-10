@@ -1,11 +1,8 @@
-
-require 5;
 package Pod::Simple::DumpAsText;
-$VERSION = '3.20';
-use Pod::Simple ();
-BEGIN {@ISA = ('Pod::Simple')}
-
 use strict;
+our $VERSION = '3.45';
+use Pod::Simple ();
+BEGIN { our @ISA = ('Pod::Simple')}
 
 use Carp ();
 
@@ -16,6 +13,7 @@ sub new {
   my $new = $self->SUPER::new(@_);
   $new->{'output_fh'} ||= *STDOUT{IO};
   $new->accept_codes('VerbatimFormatted');
+  $new->keep_encoding_directive(1);
   return $new;
 }
 
@@ -25,8 +23,8 @@ sub _handle_element_start {
   # ($self, $element_name, $attr_hash_r)
   my $fh = $_[0]{'output_fh'};
   my($key, $value);
-  DEBUG and print "++ $_[1]\n";
-  
+  DEBUG and print STDERR "++ $_[1]\n";
+
   print $fh   '  ' x ($_[0]{'indent'} || 0),  "++", $_[1], "\n";
   $_[0]{'indent'}++;
   while(($key,$value) = each %{$_[2]}) {
@@ -42,8 +40,8 @@ sub _handle_element_start {
 }
 
 sub _handle_text {
-  DEBUG and print "== \"$_[1]\"\n";
-  
+  DEBUG and print STDERR "== \"$_[1]\"\n";
+
   if(length $_[1]) {
     my $indent = '  ' x $_[0]{'indent'};
     my $text = $_[1];
@@ -53,17 +51,17 @@ sub _handle_text {
          [^\n]{55}         # Snare some characters from a line
          [^\n\ ]{0,50}     #  and finish any current word
         )
-        \x20{1,10}(?!\n)   # capture some spaces not at line-end
+        \ {1,10}(?!\n)     # capture some spaces not at line-end
        /$1"\n$indent . "/gx     # => line-break here
     ;
-    
+
     print {$_[0]{'output_fh'}} $indent, '* "', $text, "\"\n";
   }
   return;
 }
 
 sub _handle_element_end {
-  DEBUG and print "-- $_[1]\n";
+  DEBUG and print STDERR "-- $_[1]\n";
   print {$_[0]{'output_fh'}}
    '  ' x --$_[0]{'indent'}, "--", $_[1], "\n";
   return;
@@ -118,8 +116,8 @@ pod-people@perl.org mail list. Send an empty email to
 pod-people-subscribe@perl.org to subscribe.
 
 This module is managed in an open GitHub repository,
-L<http://github.com/theory/pod-simple/>. Feel free to fork and contribute, or
-to clone L<git://github.com/theory/pod-simple.git> and send patches!
+L<https://github.com/perl-pod/pod-simple/>. Feel free to fork and contribute, or
+to clone L<https://github.com/perl-pod/pod-simple.git> and send patches!
 
 Patches against Pod::Simple are welcome. Please send bug reports to
 <bug-pod-simple@rt.cpan.org>.
@@ -153,3 +151,4 @@ Pod::Simple is maintained by:
 =back
 
 =cut
+use warnings;

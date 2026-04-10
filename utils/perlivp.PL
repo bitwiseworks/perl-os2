@@ -20,7 +20,7 @@ my $file = basename($0, '.PL');
 $file .= '.com' if $^O eq 'VMS';
 
 # Create output file.
-open OUT,">$file" or die "Can't create $file: $!";
+open OUT, ">", $file or die "Can't create $file: $!";
 
 print "Extracting $file (with variable substitutions)\n";
 
@@ -30,7 +30,7 @@ print "Extracting $file (with variable substitutions)\n";
 print OUT <<"!GROK!THIS!";
 $Config{'startperl'}
     eval 'exec $Config{'perlpath'} -S \$0 \${1+"\$@"}'
-        if \$running_under_some_shell;
+        if 0; # ^ Run only under a shell
 !GROK!THIS!
 
 print OUT "\n# perlivp $^V\n";
@@ -38,6 +38,8 @@ print OUT "\n# perlivp $^V\n";
 # In the following, perl variables are not expanded during extraction.
 
 print OUT <<'!NO!SUBS!';
+
+BEGIN { pop @INC if $INC[-1] eq '.' }
 
 sub usage {
     warn "@_\n" if @_;
@@ -163,7 +165,7 @@ foreach (@INC) {
     $INC_total++;
 }
 
-$label = '@INC directoreis exist';
+$label = '@INC directories exist';
 if ($INC_total == $INC_there) {
     print "ok 3 $label\n";
     $pass__total++;
@@ -229,7 +231,7 @@ if (defined($Config{'extensions'})) {
         next if $_ eq 'XS/APItest';
         next if $_ eq 'XS/Typemap';
            # VMS$ perl  -e "eval ""require \""Devel/DProf.pm\"";"" print $@"
-           # \NT> perl  -e "eval \"require 'Devel/DProf.pm'\"; print $@"
+           # \NT> perl  -e "eval \"require './Devel/DProf.pm'\"; print $@"
            # DProf: run perl with -d to use DProf.
            # Compilation failed in require at (eval 1) line 1.
         eval " require \"$_.pm\"; ";

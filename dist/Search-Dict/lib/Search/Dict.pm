@@ -1,10 +1,18 @@
 package Search::Dict;
-require 5.000;
-require Exporter;
-
 use strict;
+use Exporter;
 
-our $VERSION = '1.04';
+BEGIN {
+    if ("$]" >= 5.015008) {
+        require feature;
+        'feature'->import('fc'); # string avoids warning on old Perls <sigh>
+    } else {
+        # ($) prototype, not (_), for perl 5.8 compatibility, just in case
+        *fc = sub ($) { lc $_[0] };
+    }
+}
+
+our $VERSION = '1.08';
 our @ISA = qw(Exporter);
 our @EXPORT = qw(look);
 
@@ -18,7 +26,7 @@ Search::Dict - look - search for key in dictionary file
     look *FILEHANDLE, $key, $dict, $fold;
 
     use Search::Dict;
-    look *FILEHANDLE, $params;
+    look *FILEHANDLE, $key, $params;
 
 =head1 DESCRIPTION
 
@@ -60,12 +68,19 @@ sub look {
     }
     $comp = sub { $_[0] cmp $_[1] } unless defined $comp;
     local($_);
-    my(@stat) = stat($fh)
-	or return -1;
+    my $fno = fileno $fh;
+    my @stat;
+    if ( defined $fno && $fno >= 0 && ! tied *{$fh} ) { # real, open file
+      @stat = eval { stat($fh) }; # in case fileno lies
+    }
     my($size, $blksize) = @stat[7,11];
+    $size = do { seek($fh,0,2); my $s = tell($fh); seek($fh,0,0); $s }
+        unless defined $size;
     $blksize ||= 8192;
     $key =~ s/[^\w\s]//g if $dict;
-    $key = lc $key       if $fold;
+    if ( $fold ) {
+      $key = fc($key);
+    }
     # find the right block
     my($min, $max) = (0, int($size / $blksize));
     my $mid;
@@ -78,7 +93,9 @@ sub look {
 	$_ = $xfrm->($_) if defined $xfrm;
 	chomp;
 	s/[^\w\s]//g if $dict;
-	$_ = lc $_   if $fold;
+        if ( $fold ) {
+          $_ = fc($_);
+        }
 	if (defined($_) && $comp->($_, $key) < 0) {
 	    $min = $mid;
 	}
@@ -98,7 +115,9 @@ sub look {
 	$_ = $xfrm->($_) if defined $xfrm;
 	chomp;
 	s/[^\w\s]//g if $dict;
-	$_ = lc $_   if $fold;
+        if ( $fold ) {
+          $_ = fc($_);
+        }
 	last if $comp->($_, $key) >= 0;
     }
     seek($fh,$min,0);

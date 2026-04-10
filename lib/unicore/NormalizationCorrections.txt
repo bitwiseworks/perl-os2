@@ -1,11 +1,14 @@
-# NormalizationCorrections-6.1.0.txt
-# Date: 2011-06-23, 00:46:00 GMT [KW, LI]
+# NormalizationCorrections-16.0.0.txt
+# Date: 2024-02-02
+# © 2024 Unicode®, Inc.
+# Unicode and the Unicode Logo are registered trademarks of Unicode, Inc. in the U.S. and other countries.
+# For terms of use and license, see https://www.unicode.org/terms_of_use.html
+#
+# Unicode Character Database
+# For documentation, see https://www.unicode.org/reports/tr44/
 #
 # This file is a normative contributory data file in the
 # Unicode Character Database.
-#
-# Copyright (c) 1991-2011 Unicode, Inc.
-# For terms of use, see http://www.unicode.org/terms_of_use.html
 #
 # The normalization stability policy of the Unicode Consortium
 # ordinarily precludes any change to the decomposition
@@ -25,7 +28,7 @@
 #
 # Currently this list has exactly six entries in it, one for the
 # typo found and corrected in Corrigendum #3, and five for
-# the typos and misidentifications found and corrected in 
+# the typos and misidentifications found and corrected in
 # Corrigendum #4. All efforts
 # will be made to keep the entries limited to just those fixes.
 #
@@ -35,7 +38,7 @@
 #   Field 2: Corrected decomposition
 #   Field 3: Version of Unicode for which the correction was
 #            entered into UnicodeData.txt, in n.n.n format.
-#   Comment: Indicates the Unicode Corrigendum which documents 
+#   Comment: Indicates the Unicode Corrigendum which documents
 #            the correction
 #
 # For more information, see UAX #15, Unicode Normalization Forms.
@@ -46,3 +49,5 @@ F951;96FB;964B;3.2.0 # Corrigendum 3
 2F91F;43AB;243AB;4.0.0 # Corrigendum 4
 2F95F;7AAE;7AEE;4.0.0 # Corrigendum 4
 2F9BF;4D57;45D7;4.0.0 # Corrigendum 4
+
+# EOF

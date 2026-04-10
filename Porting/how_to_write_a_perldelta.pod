@@ -1,16 +1,27 @@
-=head1 How to write a perldelta
+=head1 NAME
+
+how_to_write_a_perldelta - How to write a perldelta
+
+=head2 Description
 
 This is intended as a guide for how to write a perldelta. There has never
 been a formal specification - the working rule is "fake up a document that
 looks something close to the existing perldeltas". So if it's unclear how
 to do something, see if it's been done before, and if the approach works
-there, steal it.
+there, steal it. (L<perl5300delta> and L<perl5320delta> are both quite
+lengthy and contain good examples for many of the perldelta sections.)
 
-=head2 Template
+=head2 Template Automation
 
-Note there is a file F<Porting/perldelta_template.pod> which contains a
-skeleton version of a perldelta.pod file, which should normally be copied
-in at the start of a new release.
+Note that F<Porting/perldelta_template.pod> contains a skeleton version of 
+a perldelta.pod file. Following the steps in the Release Manager's Guide
+(F<Porting/release_managers_guide.pod>) usually ensures hassle-free 
+rotation of the most recently completed perldelta.pod and preparation of
+a fresh new document ready for the next release.
+
+The skeleton document also contains inline hints on how to prepare the
+final perldelta.pod. (These hints should be removed in turn as each section
+of the final perldelta.pod is completed.)
 
 =head2 Style
 
@@ -31,14 +42,15 @@ Whilst modules could also be links, usually in the context of the perldelta
 the reference is to code C<use>ing them, rather than something within their
 documentation.
 
-Be consistent in how bugs are referenced. One style is
+Be consistent in how bugs are referenced. One common style, which is
+expected by some commands given in the Release Manager's Guide, is as
+follows:
 
 =over 4
 
-=item rt.perl.org
+=item GitHub
 
-C<perl #43010> inline, but enclose in square brackets after a sentence.
-C<[perl #43010]>.  This mirrors how rt.perl.org subject lines appear.
+C<[GH #12345]> can be used to reference both Issues and Pull Requests.
 
 =item rt.cpan.org
 
@@ -47,7 +59,7 @@ C<[rt.cpan.org #43010]>.  This mirrors how rt.cpan.org subject lines appear.
 
 =item ActiveState
 
-C<http://bugs.activestate.com/show_bug.cgi?id=72443>
+C<L<http://bugs.activestate.com/show_bug.cgi?id=72443>>
 
 =item Debian
 
@@ -82,67 +94,93 @@ Follows this formula:
 
 For a release on a stable branch, follows this formula:
 
-    This document describes differences between the 5.10.3 release and
-    the 5.10.4 release.
+    This document describes differences between the 5.10.3 release
+    and the 5.10.4 release.
 
 For the start of a new stable branch, follows this formula:
 
-    This document describes differences between the 5.12.0 release and
-    the 5.10.0 release.
+    This document describes differences between the 5.10.0 release
+    and the 5.12.0 release.
 
-Clearly this sets the scope of which changes are to be summarised in the rest
-of the document.
+This clearly sets the scope of which changes are to be summarized in the
+rest of the document.
+
+For all releases, a second paragraph points to the previous perldelta
+and the preceding version from which that perldelta describes changes:
+
+    If you are upgrading from an earlier release such as 5.rXXX.aXXX,
+    first read perl5XXXdelta, which describes differences between
+    5.rXXX.aXXX and 5.sXXX.bXXX.
+
+For a release on a stable branch, this will reference the two preceding
+stable releases. For example, the 5.12.1 perldelta will reference the
+5.12.0 perldelta describing differences between 5.10.0 and 5.12.0;
+the 5.12.4 perldelta will reference the 5.12.3 perldelta describing
+differences between 5.12.2 and 5.12.3.
 
 =item Notice
 
 There was a I<Notice> section in L<perl589delta>, to carry an important
 notice.
 
-=item Incompatible Changes
-
-For a release on a stable branch, this section aspires to be
-
-    There are no changes intentionally incompatible with 5.10.3. If any exist,
-    they are bugs and reports are welcome.
-
 =item Core Enhancements
 
-New core language features go here. Summarise user-visible core language
+New core language features go here. Summarize user-visible core language
 enhancements. Particularly prominent performance optimisations could go
 here, but most should go in the L</Performance Enhancements> section.
 
 Feature inside modules (pure-Perl and XS) go in L</Modules and Pragmata>
 
-=item New Platforms
+=item Security
 
-List any platforms that this version of perl compiles on, that previous
-versions did not. These will either be enabled by new files in the F<hints/>
-directories, or new subdirectories and F<README> files at the top level of the
-source tree.
+Any security-related notices go here. In particular, any security
+vulnerabilities closed should be noted here rather than in the
+"Selected Bug Fixes" section.
+
+L<perl5303delta> has multiple such examples, as well as
+a useful accompanying paragraph outlining the known attack
+vectors / requirements for the vulnerabilities to be exploitable.
+
+=item Incompatible Changes
+
+For a release on a stable branch, this section aspires to be
+
+    There are no changes intentionally incompatible with 5.10.3.
+    If any exist, they are bugs and reports are welcome.
+
+Otherwise, changes should be listed as =head2 entries.
+
+=item Deprecations
+
+Add any new known deprecations (features, syntax, modules) here.
+
+A I<Module removals> subsection can be used to foreshadow planned removal
+of core modules in a future release. Modules that were actually removed
+in this release should go in the "Modules and Pragmata" section.
+
+=item Performance Enhancements
+
+Changes which enhance performance without changing behaviour go here. There
+may well be none in a stable release.
 
 =item Modules and Pragmata
 
-All changes to installed files in F<ext/> and F<lib/> go here, in a list
-ordered by distribution name. Minimally it should be the module version,
-but it's more useful to the end user to give a paragraph's summary of the
-module's changes. In an ideal world, dual-life modules would have a
-F<Changes> file that could be cribbed.
+All changes to installed files in F<cpan/>, F<dist/>, F<ext/> and F<lib/> go
+here, in a list ordered by distribution name. Minimally it should be the
+module version, but it's more useful to the end user to give a paragraph's
+summary of the module's changes. In an ideal world, dual-life modules would
+have a F<Changes> file that could be cribbed.
 
 Whilst this section could be built by incrementally working through change
 descriptions applying to files, this is prone to error. It's better to
-collate changes to F<ext/> and F<lib/> by module, and then summarise all
-changes to a module as a group. This can be done by partitioning directories
-within F<ext/> and F<lib/> to a number of people.
-
-B<FIXME> - this could be automated better
+collate changes by module, and then summarize all changes to a module as a
+group.
 
 If Module::CoreList has been updated, then F<Porting/corelist-perldelta.pl>
-will automatically print out several sections if relevant that can be
-pasted into F<perldelta>:
+will automatically update two sections in F<perldelta>:
 
     * New Modules and Pragmata
-    * Pragmata Changes
-    * Updated Modules
+    * Updated Modules and Pragmata
     * Removed Modules and Pragmata
 
 Each section will have stub entries following a template like this:
@@ -158,28 +196,10 @@ added by hand.
 A more adventurous enhancement would be to automate grabbing
 the changelogs for dual lived modules. For each of them, grab the relevant
 changes files from CPAN for the old and new versions, and if the old one is
-a strict subset of the new one, splice the extra lines right into the output,
-as a basis for summarising.
+a strict subset of the new one, use the extra lines as a basis for summarizing.
 
 (And if not, experiment with using F<git> to get the relevant part of changelog
-for the particular file in core)
-
-These could also be enhanced further by using a Pod parser module to produce
-a parse tree of F<perl${whatever}delta.pod>, and splicing in the updates
-correctly without throwing existing entries away.
-
-If you think that's nuts, take a look at what F<pod/buildtoc> already does to
-splice into existing Makefiles on various platforms:
-
-http://perl5.git.perl.org/perl.git/blob/blead:/pod/buildtoc#l498
-
-Perl is this really powerful language for text manipulation. And fun to
-play with. We need to get that message out. :-)
-
-=item Utility Changes
-
-Changes to installed programs such as F<perlbug> and F<xsubpp> go here. Most
-of these are built within the directories F<utils> and F<x2p>.
+for the particular file in core.)
 
 =item New Documentation
 
@@ -244,41 +264,67 @@ Write out a block of text starting roughly
 
 Changes which significantly change existing files in F<pod/> go here.
 Any changes to F<pod/perldiag.pod> should go in
-L</New or Changed Diagnostics>.
+L</New Diagnostics> or L</Changed Diagnostics>.
 
-=item Performance Enhancements
+=item New Diagnostics
 
-Changes which enhance performance without changing behaviour go here. There
-may well be none in a stable release.
+New warnings emitted by the core's C<C> code go here.
 
-=item Installation and Configuration Improvements
+=item Changed Diagnostics
+
+Changed warnings emitted by the core's C<C> code go here.
+
+=item Utility Changes
+
+Changes to installed programs such as F<perldoc> and F<xsubpp> go here. Most
+of these are built within the directory F<utils>.
+
+=item Configuration and Compilation
 
 Changes to F<Configure>, F<installperl>, F<installman>, and analogous tools
 go here.
 
-=item Selected Bug Fixes
-
-Important bug fixes in the core language are summarised here.
-Bug fixes in files in F<ext/> and F<lib/> are best summarised in
-L</Modules and Pragmata>.
-
-=item New or Changed Diagnostics
-
-New or changed warnings emitted by the core's C<C> code go here.
-
-=item Changed Internals
-
-Changes which affect the interface available to C<XS> code go here.
-
-=item New Tests
+=item Testing
 
 Changes which create B<new> files in F<t/> go here. Changes to existing files
-in F<t/> aren't worth summarising, although the bugs that they represent
+in F<t/> aren't worth summarizing, although the bugs that they represent
 may be.
 
 Autogenerate this section by running something like this:
 
  # perl newtests-perldelta.pl v5.11.1 HEAD
+
+=item Platform Support
+
+Any changes specific to a particular platform. VMS and Win32 are the usual
+stars here. It's probably best to group changes under the same section layout
+as the main perldelta.
+
+=item New Platforms
+
+List any platforms that this version of perl compiles on, that previous
+versions did not. These will either be enabled by new files in the F<hints/>
+directories, or new subdirectories and F<README> files at the top level of the
+source tree.
+
+=item Discontinued Platforms
+
+List any platforms that this version of perl no longer compiles on. The
+reverse of the advice above applies - look for removed hints or README files.
+
+=item Platform-Specific Notes
+
+Changes of note to specific platforms go here.
+
+=item Internal Changes
+
+Changes which affect the interface available to C<XS> code go here.
+
+=item Selected Bug Fixes
+
+Important bug fixes in the core language are summarized here.
+Bug fixes in files in F<ext/> and F<lib/> are best summarized in
+L</Modules and Pragmata>.
 
 =item Known Problems
 
@@ -286,15 +332,9 @@ Descriptions of platform agnostic bugs we know we can't fix go here. Any
 tests that had to be C<TODO>ed for the release would be noted here, unless
 they were specific to a particular platform (see below).
 
-=item Deprecations
+=item Errata From Previous Releases
 
-Add any new known deprecations here.
-
-=item Platform Specific Notes
-
-Any changes specific to a particular platform. VMS and Win32 are the usual
-stars here. It's probably best to group changes under the same section layout
-as the main perldelta.
+XXXXXXXXXX TODO
 
 =item Obituary
 
@@ -308,6 +348,10 @@ Generate this with:
   perl Porting/acknowledgements.pl v5.15.0..HEAD
 
 =item Reporting Bugs
+
+This doesn't usually need to be changed from the previous perldelta.
+
+=item Give Thanks
 
 This doesn't usually need to be changed from the previous perldelta.
 

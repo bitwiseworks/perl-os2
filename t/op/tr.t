@@ -1,16 +1,24 @@
 # tr.t
-
-use utf8;
+$|=1;
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
     require './test.pl';
+    set_up_inc('../lib');
+    if (is_miniperl()) {
+	eval 'require utf8';
+        if ($@) { skip_all("miniperl, no 'utf8'") }
+    }
 }
 
-plan tests => 131;
+use utf8;
+require Config;
 
-my $Is_EBCDIC = (ord('i') == 0x89 & ord('J') == 0xd1);
+plan tests => 318;
+
+# Test this first before we extend the stack with other operations.
+# This caused an asan failure due to a bad write past the end of the stack.
+eval { no warnings 'uninitialized'; my $x; die  1..127, $x =~ y/// };
 
 $_ = "abcdefghijklmnopqrstuvwxyz";
 
@@ -25,12 +33,562 @@ is($_, "abcdefghijklmnopqrstuvwxyz",    'lc');
 tr/b-y/B-Y/;
 is($_, "aBCDEFGHIJKLMNOPQRSTUVWXYz",    'partial uc');
 
+{
+    # AB is 2 characters, longer than single char source, so otherwise gets
+    # warned about
+    no warnings 'misc';
+
+    tr/a-a/AB/;
+    is($_, "ABCDEFGHIJKLMNOPQRSTUVWXYz",    'single char range a-a');
+}
+
+eval 'tr/a/\N{KATAKANA LETTER AINU P}/;';
+like $@,
+     qr/\\N\{KATAKANA LETTER AINU P\} must not be a named sequence in transliteration operator/,
+     "Illegal to tr/// named sequence";
+
+eval 'tr/\x{101}-\x{100}//;';
+like $@,
+     qr/Invalid range "\\x\{0101\}-\\x\{0100\}" in transliteration operator/,
+     "UTF-8 range with min > max";
+
+$_ = "0123456789";
+tr/10/01/;
+is($_, "1023456789",    'swapping 0 and 1');
+tr/01/10/;
+is($_, "0123456789",    'swapping 0 and 1');
+
+# Test /c and variants, with all the search and replace chars being
+# non-utf8, but with both non-utf8 and utf8 strings.
+
+SKIP: {
+    my $all255            = join '', map chr, 0..0xff;
+    my $all255_twice      = join '', map chr, map { ($_, $_) } 0..0xff;
+    my $plus              = join '', map chr, 0x100..0x11f;
+    my $plus_twice        = join '', map chr, map { ($_, $_) } 0x100..0x11f;
+    my $all255_plus       = $all255 . $plus;
+    my $all255_twice_plus = $all255_twice . $plus_twice;
+    my ($c, $s);
+
+    # length(replacement) == 0
+    # non-utf8 string
+
+    $s = $all255;
+    $c = $s =~ tr/\x40-\xbf//c;
+    is $s, $all255, "/c   ==0";
+    is $c, 0x80, "/c   ==0  count";
+
+    $s = $all255;
+    $c = $s =~ tr/\x40-\xbf//cd;
+    is $s, join('', map chr, 0x40.. 0xbf), "/cd  ==0";
+    is $c, 0x80, "/cd  ==0  count";
+
+    $s = $all255_twice;
+    $c = $s =~ tr/\x40-\xbf//cs;
+    is $s, join('', map chr,
+                0x00..0x3f,
+                (map  { ($_, $_) } 0x40..0xbf),
+                0xc0..0xff,
+            ),
+        "/cs  ==0";
+    is $c, 0x100, "/cs  ==0  count";
+
+    $s = $all255_twice;
+    $c = $s =~ tr/\x40-\xbf//csd;
+    is $s, join('', map chr, (map  { ($_, $_) } 0x40..0xbf)), "/csd ==0";
+    is $c, 0x100, "/csd ==0  count";
+
+
+    # length(search) > length(replacement)
+    # non-utf8 string
+
+    $s = $all255;
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x2f/c;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                0x40..0xbf,
+                0x00..0x2f,
+                ((0x2f) x 16),
+            ),
+        "/c   >";
+    is $c, 0x80, "/c   >  count";
+
+    $s = $all255;
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x2f/cd;
+    is $s, join('', map chr, 0x80..0xbf, 0x40..0xbf, 0x00..0x2f),
+        "/cd  >";
+    is $c, 0x80, "/cd  >  count";
+
+    $s = $all255_twice;
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x2f/cs;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                (map  { ($_, $_) } 0x40..0xbf),
+                0x00..0x2f,
+            ),
+        "/cs  >";
+    is $c, 0x100, "/cs  >  count";
+
+    $s = $all255_twice;
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x2f/csd;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                (map  { ($_, $_) } 0x40..0xbf),
+                0x00..0x2f,
+            ),
+        "/csd >";
+    is $c, 0x100, "/csd >  count";
+
+
+    # length(search) == length(replacement)
+    # non-utf8 string
+
+    $s = $all255;
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x3f/c;
+    is $s, join('', map chr, 0x80..0xbf, 0x40..0xbf, 0x00..0x3f), "/c   ==";
+    is $c, 0x80, "/c   == count";
+
+    $s = $all255;
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x3f/cd;
+    is $s, join('', map chr, 0x80..0xbf, 0x40..0xbf, 0x00..0x3f), "/cd  ==";
+    is $c, 0x80, "/cd  == count";
+
+    $s = $all255_twice;
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x3f/cs;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                (map  { ($_, $_) } 0x40..0xbf),
+                0x00..0x3f,
+            ),
+        "/cs  ==";
+    is $c, 0x100, "/cs  == count";
+
+    $s = $all255_twice;
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x3f/csd;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                (map  { ($_, $_) } 0x40..0xbf),
+                0x00..0x3f,
+            ),
+        "/csd ==";
+    is $c, 0x100, "/csd == count";
+
+    # length(search) == length(replacement) - 1
+    # non-utf8 string
+
+
+    $s = $all255;
+    $c = $s =~ tr/\x40-\xbf\xf0-\xff/\x80-\xbf\x00-\x30/c;
+    is $s, join('', map chr, 0x80..0xbf, 0x40..0xbf, 0x00..0x2f, 0xf0..0xff),
+        "/c   =-";
+    is $c, 0x70, "/c   =-  count";
+
+    $s = $all255;
+    $c = $s =~ tr/\x40-\xbf\xf0-\xff/\x80-\xbf\x00-\x30/cd;
+    is $s, join('', map chr, 0x80..0xbf, 0x40..0xbf, 0x00..0x2f, 0xf0..0xff),
+        "/cd  =-";
+    is $c, 0x70, "/cd  =-  count";
+
+    $s = $all255_twice;
+    $c = $s =~ tr/\x40-\xbf\xf0-\xff/\x80-\xbf\x00-\x30/cs;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                (map  { ($_, $_) } 0x40..0xbf),
+                0x00..0x2f,
+                (map  { ($_, $_) } 0xf0..0xff),
+            ),
+        "/cs  =-";
+    is $c, 0xe0, "/cs  =-  count";
+
+    $s = $all255_twice;
+    $c = $s =~ tr/\x40-\xbf\xf0-\xff/\x80-\xbf\x00-\x30/csd;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                (map  { ($_, $_) } 0x40..0xbf),
+                0x00..0x2f,
+                (map  { ($_, $_) } 0xf0..0xff),
+            ),
+        "/csd =-";
+    is $c, 0xe0, "/csd =-  count";
+
+    # length(search) < length(replacement)
+    # non-utf8 string
+
+    $s = $all255;
+    $c = $s =~ tr/\x40-\xbf\xf0-\xff/\x80-\xbf\x00-\x3f/c;
+    is $s, join('', map chr, 0x80..0xbf, 0x40..0xbf, 0x00..0x2f, 0xf0..0xff),
+        "/c   <";
+    is $c, 0x70, "/c   <  count";
+
+    $s = $all255;
+    $c = $s =~ tr/\x40-\xbf\xf0-\xff/\x80-\xbf\x00-\x3f/cd;
+    is $s, join('', map chr, 0x80..0xbf, 0x40..0xbf, 0x00..0x2f, 0xf0..0xff),
+        "/cd  <";
+    is $c, 0x70, "/cd  <  count";
+
+    $s = $all255_twice;
+    $c = $s =~ tr/\x40-\xbf\xf0-\xff/\x80-\xbf\x00-\x3f/cs;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                (map  { ($_, $_) } 0x40..0xbf),
+                0x00..0x2f,
+                (map  { ($_, $_) } 0xf0..0xff),
+            ),
+        "/cs  <";
+    is $c, 0xe0, "/cs  <  count";
+
+    $s = $all255_twice;
+    $c = $s =~ tr/\x40-\xbf\xf0-\xff/\x80-\xbf\x00-\x3f/csd;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                (map  { ($_, $_) } 0x40..0xbf),
+                0x00..0x2f,
+                (map  { ($_, $_) } 0xf0..0xff),
+            ),
+        "/csd <";
+    is $c, 0xe0, "/csd <  count";
+
+
+    # length(replacement) == 0
+    # with some >= 0x100 utf8 chars in the string to be modified
+
+    $s = $all255_plus;
+    $c = $s =~ tr/\x40-\xbf//c;
+    is $s, $all255_plus, "/c   ==0U";
+    is $c, 0xa0, "/c   ==0U  count";
+
+    $s = $all255_plus;
+    $c = $s =~ tr/\x40-\xbf//cd;
+    is $s, join('', map chr, 0x40..0xbf), "/cd  ==0U";
+    is $c, 0xa0, "/cd  ==0U  count";
+
+    $s = $all255_twice_plus;
+    $c = $s =~ tr/\x40-\xbf//cs;
+    is $s, join('', map chr,
+                0x00..0x3f,
+                (map  { ($_, $_) } 0x40..0xbf),
+                0xc0..0x11f,
+            ),
+        "/cs  ==0U";
+    is $c, 0x140, "/cs  ==0U  count";
+
+    $s = $all255_twice_plus;
+    $c = $s =~ tr/\x40-\xbf//csd;
+    is $s, join('', map chr, (map  { ($_, $_) } 0x40..0xbf)), "/csd ==0U";
+    is $c, 0x140, "/csd ==0U  count";
+
+    # length(search) > length(replacement)
+    # with some >= 0x100 utf8 chars in the string to be modified
+
+    $s = $all255_plus;
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x2f/c;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                0x40..0xbf,
+                0x00..0x2f,
+                ((0x2f) x 48),
+            ),
+        "/c   >U";
+    is $c, 0xa0, "/c   >U count";
+
+    $s = $all255_plus;
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x2f/cd;
+    is $s, join('', map chr, 0x80..0xbf, 0x40..0xbf, 0x00..0x2f),
+        "/cd  >U";
+    is $c, 0xa0, "/cd  >U count";
+
+    $s = $all255_twice_plus . "\x3f\x3f\x{200}\x{300}";
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x2f/cs;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                (map  { ($_, $_) } 0x40..0xbf),
+                0x00..0x2f,
+                0xbf,
+                0x2f,
+            ),
+        "/cs  >U";
+    is $c, 0x144, "/cs  >U count";
+
+    $s = $all255_twice_plus;
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x2f/csd;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                (map  { ($_, $_) } 0x40..0xbf),
+                0x00..0x2f,
+            ),
+        "/csd >U";
+    is $c, 0x140, "/csd >U count";
+
+    # length(search) == length(replacement)
+    # with some >= 0x100 utf8 chars in the string to be modified
+
+    $s = $all255_plus;
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x3f/c;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                0x40..0xbf,
+                0x00..0x3f,
+                ((0x3f) x 32),
+            ),
+        "/c   ==U";
+    is $c, 0xa0, "/c   ==U count";
+
+    $s = $all255_plus;
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x3f/cd;
+    is $s, join('', map chr, 0x80..0xbf, 0x40..0xbf, 0x00..0x3f), "/cd ==U";
+    is $c, 0xa0, "/cd  ==U count";
+
+    $s = $all255_twice_plus . "\x3f\x3f\x{200}\x{300}";
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x3f/cs;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                (map  { ($_, $_) } 0x40..0xbf),
+                0x00..0x3f,
+                0xbf,
+                0x3f,
+            ),
+        "/cs  ==U";
+    is $c, 0x144, "/cs  ==U count";
+
+    $s = $all255_twice_plus;
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x3f/csd;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                (map  { ($_, $_) } 0x40..0xbf),
+                0x00..0x3f,
+            ),
+        "/csd ==U";
+    is $c, 0x140, "/csd ==U count";
+
+
+    # length(search) == length(replacement) - 1
+    # with some >= 0x100 utf8 chars in the string to be modified
+
+    $s = $all255_plus;
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x40/c;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                0x40..0xbf,
+                0x00..0x40,
+                ((0x40) x 31),
+            ),
+        "/c   =-U";
+    is $c, 0xa0, "/c   =-U count";
+
+    $s = $all255_plus;
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x40/cd;
+    is $s, join('', map chr, 0x80..0xbf, 0x40..0xbf, 0x00..0x40), "/cd =-U";
+    is $c, 0xa0, "/cd  =-U count";
+
+    $s = $all255_twice_plus . "\x3f\x3f\x{200}\x{300}";
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x40/cs;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                (map  { ($_, $_) } 0x40..0xbf),
+                0x00..0x40,
+                0xbf,
+                0x40,
+            ),
+        "/cs  =-U";
+    is $c, 0x144, "/cs  =-U count";
+
+    $s = $all255_twice_plus;
+    $c = $s =~ tr/\x40-\xbf/\x80-\xbf\x00-\x40/csd;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                (map  { ($_, $_) } 0x40..0xbf),
+                0x00..0x40,
+            ),
+        "/csd =-U";
+    is $c, 0x140, "/csd =-U count";
+
+
+
+    # length(search) < length(replacement),
+    # with some >= 0x100 utf8 chars in the string to be modified
+
+    $s = $all255_plus;
+    $c = $s =~ tr/\x40-\xbf\xf0-\xff/\x80-\xbf\x00-\x3f/c;
+    is $s, join('', map chr,
+                    0x80..0xbf,
+                    0x40..0xbf,
+                    0x00..0x2f,
+                    0xf0..0xff,
+                    0x30..0x3f,
+                    ((0x3f)x 16),
+                ),
+        "/c   <U";
+    is $c, 0x90, "/c   <U count";
+
+    $s = $all255_plus;
+    $c = $s =~ tr/\x40-\xbf\xf0-\xff/\x80-\xbf\x00-\x3f/cd;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                0x40..0xbf,
+                0x00..0x2f,
+                0xf0..0xff,
+                0x30..0x3f,
+                ),
+            "/cd  <U";
+    is $c, 0x90, "/cd  <U count";
+
+    $s = $all255_twice_plus . "\x3f\x3f\x{200}\x{300}";
+    $c = $s =~ tr/\x40-\xbf\xf0-\xff/\x80-\xbf\x00-\x3f/cs;
+    is $s, join('', map chr,
+                0x80..0xbf,
+                (map  { ($_, $_) } 0x40..0xbf),
+                0x00..0x2f,
+                (map  { ($_, $_) } 0xf0..0xff),
+                0x30..0x3f,
+                0xbf,
+                0x3f,
+            ),
+        "/cs  <U";
+    is $c, 0x124, "/cs  <U count";
+
+    $s = $all255_twice_plus;
+    $c = $s =~ tr/\x40-\xbf\xf0-\xff/\x80-\xbf\x00-\x3f/csd;
+    is $s, join('', map chr, 0x80..0xbf,
+                (map  { ($_, $_) } 0x40..0xbf),
+                0x00..0x2f,
+                (map  { ($_, $_) } 0xf0..0xff),
+                0x30..0x3f,
+            ),
+        "/csd <U";
+    is $c, 0x120, "/csd <U count";
+
+    if ($::IS_EBCDIC) {
+        skip "Not valid only for EBCDIC", 4;
+    }
+    $s = $all255_twice;
+    $c = $s =~ tr/[](){}<>\x00-\xff/[[(({{<</sd;
+    is $s, "(<[{", 'tr/[](){}<>\x00-\xff/[[(({{<</sd';
+    is $c, 512, "count of above";
+
+    $s = $all255_plus;
+    $c = $s =~ tr/[](){}<>\x00-\xff/[[(({{<</sd;
+    is $s, "(<[{" . $plus, 'tr/[](){}<>\x00-\xff/[[(({{<</sd';
+    is $c, 256, "count of above";
+}
+
+{
+    # RT #132608
+    # the 'extra length' for tr///c was stored as a short, so if the
+    # replacement string had more than 0x7fff chars not paired with
+    # search chars, bad things could happen
+
+    my ($c, $e, $s);
+
+    $s = "\x{9000}\x{9001}\x{9002}";
+    $e =    "\$c = \$s =~ tr/\\x00-\\xff/"
+          . ("ABCDEFGHIJKLMNO" x (0xa000 / 15))
+          . "/c; 1; ";
+    eval $e or die $@;
+    is $s, "IJK", "RT #132608 len=0xa000";
+    is $c, 3, "RT #132608 len=0xa000 count";
+
+    $s = "\x{9003}\x{9004}\x{9005}";
+    $e =    "\$c = \$s =~ tr/\\x00-\\xff/"
+          . ("ABCDEFGHIJKLMNO" x (0x12000 / 15))
+          . "/c; 1; ";
+    eval $e or die $@;
+    is $s, "LMN", "RT #132608 len=0x12000";
+    is $c, 3, "RT #132608 len=0x12000 count";
+}
+
+
+SKIP: {   # Test literal range end point special handling
+    unless ($::IS_EBCDIC) {
+        skip "Valid only for EBCDIC", 24;
+    }
+
+    $_ = "\x89";    # is 'i'
+    tr/i-j//d;
+    is($_, "", '"\x89" should match [i-j]');
+    $_ = "\x8A";
+    tr/i-j//d;
+    is($_, "\x8A", '"\x8A" shouldnt match [i-j]');
+    $_ = "\x90";
+    tr/i-j//d;
+    is($_, "\x90", '"\x90" shouldnt match [i-j]');
+    $_ = "\x91";    # is 'j'
+    tr/i-j//d;
+    is($_, "", '"\x91" should match [i-j]');
+
+    $_ = "\x89";
+    tr/i-\N{LATIN SMALL LETTER J}//d;
+    is($_, "", '"\x89" should match [i-\N{LATIN SMALL LETTER J}]');
+    $_ = "\x8A";
+    tr/i-\N{LATIN SMALL LETTER J}//d;
+    is($_, "\x8A", '"\x8A" shouldnt match [i-\N{LATIN SMALL LETTER J}]');
+    $_ = "\x90";
+    tr/i-\N{LATIN SMALL LETTER J}//d;
+    is($_, "\x90", '"\x90" shouldnt match [i-\N{LATIN SMALL LETTER J}]');
+    $_ = "\x91";
+    tr/i-\N{LATIN SMALL LETTER J}//d;
+    is($_, "", '"\x91" should match [i-\N{LATIN SMALL LETTER J}]');
+
+    $_ = "\x89";
+    tr/i-\N{U+6A}//d;
+    is($_, "", '"\x89" should match [i-\N{U+6A}]');
+    $_ = "\x8A";
+    tr/i-\N{U+6A}//d;
+    is($_, "\x8A", '"\x8A" shouldnt match [i-\N{U+6A}]');
+    $_ = "\x90";
+    tr/i-\N{U+6A}//d;
+    is($_, "\x90", '"\x90" shouldnt match [i-\N{U+6A}]');
+    $_ = "\x91";
+    tr/i-\N{U+6A}//d;
+    is($_, "", '"\x91" should match [i-\N{U+6A}]');
+
+    $_ = "\x89";
+    tr/\N{U+69}-\N{U+6A}//d;
+    is($_, "", '"\x89" should match [\N{U+69}-\N{U+6A}]');
+    $_ = "\x8A";
+    tr/\N{U+69}-\N{U+6A}//d;
+    is($_, "\x8A", '"\x8A" shouldnt match [\N{U+69}-\N{U+6A}]');
+    $_ = "\x90";
+    tr/\N{U+69}-\N{U+6A}//d;
+    is($_, "\x90", '"\x90" shouldnt match [\N{U+69}-\N{U+6A}]');
+    $_ = "\x91";
+    tr/\N{U+69}-\N{U+6A}//d;
+    is($_, "", '"\x91" should match [\N{U+69}-\N{U+6A}]');
+
+    $_ = "\x89";
+    tr/i-\x{91}//d;
+    is($_, "", '"\x89" should match [i-\x{91}]');
+    $_ = "\x8A";
+    tr/i-\x{91}//d;
+    is($_, "", '"\x8A" should match [i-\x{91}]');
+    $_ = "\x90";
+    tr/i-\x{91}//d;
+    is($_, "", '"\x90" should match [i-\x{91}]');
+    $_ = "\x91";
+    tr/i-\x{91}//d;
+    is($_, "", '"\x91" should match [i-\x{91}]');
+
+    # Need to use eval, because tries to compile on ASCII platforms even
+    # though the tests are skipped, and fails because 0x89-j is an illegal
+    # range there.
+    $_ = "\x89";
+    eval 'tr/\x{89}-j//d';
+    is($_, "", '"\x89" should match [\x{89}-j]');
+    $_ = "\x8A";
+    eval 'tr/\x{89}-j//d';
+    is($_, "", '"\x8A" should match [\x{89}-j]');
+    $_ = "\x90";
+    eval 'tr/\x{89}-j//d';
+    is($_, "", '"\x90" should match [\x{89}-j]');
+    $_ = "\x91";
+    eval 'tr/\x{89}-j//d';
+    is($_, "", '"\x91" should match [\x{89}-j]');
+}
+
 
 # In EBCDIC 'I' is \xc9 and 'J' is \0xd1, 'i' is \x89 and 'j' is \x91.
 # Yes, discontinuities.  Regardless, the \xca in the below should stay
 # untouched (and not became \x8a).
 {
-    no utf8;
     $_ = "I\xcaJ";
 
     tr/I-J/i-j/;
@@ -38,7 +596,6 @@ is($_, "aBCDEFGHIJKLMNOPQRSTUVWXYz",    'partial uc');
     is($_, "i\xcaj",    'EBCDIC discontinuity');
 }
 #
-
 
 ($x = 12) =~ tr/1/3/;
 (my $y = 12) =~ tr/1/3/;
@@ -68,7 +625,7 @@ like $@, qr\^Using !~ with tr///r doesn't make sense\,
   is $wc, 1, '/r warns just once';
 }
 
-# perlbug [ID 20000511.005]
+# perlbug [ID 20000511.005 (#3237)]
 $_ = 'fred';
 /([a-z]{2})/;
 $1 =~ tr/A-Z//;
@@ -92,7 +649,7 @@ is(length $x, 3);
 
 $x =~ tr/A/B/;
 is(length $x, 3);
-if (ord("\t") == 9) { # ASCII
+if ($::IS_ASCII) { # ASCII
     is($x, 256.66.258);
 }
 else {
@@ -106,7 +663,7 @@ is($x, 256.193.258);
 
 $x =~ tr/A/B/;
 is(length $x, 3);
-if (ord("\t") == 9) { # ASCII
+if ($::IS_ASCII) { # ASCII
     is($x, 256.193.258);
 }
 else {
@@ -114,6 +671,7 @@ else {
 }
 
 
+start:
 {
     my $l = chr(300); my $r = chr(400);
     $x = 200.300.400;
@@ -248,7 +806,7 @@ is((($a = v300.196.172.300.196.172) =~ tr/\x{12c}/\x{12d}/), 2);
 is($a, v301.196.301.301.196.301,    'translit w/complement');
 
 ($a = v300.196.172.300.196.172) =~ tr/\x{12c}/\xc5/c;
-is($a, v300.197.197.300.197.197);
+is($a, v300.197.197.300.197.197, 'more translit w/complement');
 
 
 ($a = v300.196.172.300.196.172) =~ tr/\xc4//d;
@@ -278,7 +836,6 @@ is(sprintf("%vd", $a), '196.172.200');
 
 # UTF8 range tests from Inaba Hiroto
 
-# Not working in EBCDIC as of 12674.
 ($a = v300.196.172.302.197.172) =~ tr/\x{12c}-\x{130}/\xc0-\xc4/;
 is($a, v192.196.172.194.197.172,    'UTF range');
 
@@ -309,9 +866,8 @@ is($a, "X");
 ($a = "\x{200}") =~ tr/\x00-\x{100}/X/cs;
 is($a, "X");
 
-
-# Tricky on EBCDIC: while [a-z] [A-Z] must not match the gap characters,
-# (i-j, r-s, I-J, R-S), [\x89-\x91] [\xc9-\xd1] has to match them,
+# Tricky on EBCDIC: while [a-z] [A-Z] must not match the gap characters (as
+# well as i-j, r-s, I-J, R-S), [\x89-\x91] [\xc9-\xd1] has to match them,
 # from Karsten Sperling.
 
 $c = ($a = "\x89\x8a\x8b\x8c\x8d\x8f\x90\x91") =~ tr/\x89-\x91/X/;
@@ -323,7 +879,7 @@ is($c, 8);
 is($a, "XXXXXXXX");
 
 SKIP: {
-    skip "not EBCDIC", 4 unless $Is_EBCDIC;
+    skip "EBCDIC-centric tests", 4 unless $::IS_EBCDIC;
 
     $c = ($a = "\x89\x8a\x8b\x8c\x8d\x8f\x90\x91") =~ tr/i-j/X/;
     is($c, 2);
@@ -402,7 +958,7 @@ is( ref $x, 'SCALAR', "    doesn't stringify its argument" );
 
 # rt.perl.org 36622.  Perl didn't like a y/// at end of file.  No trailing
 # newline allowed.
-fresh_perl_is(q[$_ = "foo"; y/A-Z/a-z/], '');
+fresh_perl_is(q[$_ = "foo"; y/A-Z/a-z/], '', {}, 'RT #36622 y/// at end of file');
 
 
 { # [perl #38293] chr(65535) should be allowed in regexes
@@ -440,8 +996,7 @@ $s = "ABC";
 $s =~ tr/ABC/\x{fffd}-\x{ffff}/;
 is($s, "\x{fffd}\x{fffe}\x{ffff}", "utf8, REPLACEMENTLIST range");
 
-$s = "A\x{ffff}B\x{100}\0\x{fffe}\x{ffff}";
-$i = $s =~ tr/\x{ffff}//;
+$s = "A\x{ffff}B\x{100}\0\x{fffe}\x{ffff}"; $i = $s =~ tr/\x{ffff}//;
 is($i, 2, "utf8, count");
 
 $s = "A\x{ffff}\x{ffff}C";
@@ -484,13 +1039,16 @@ is($s, "AxBC", "utf8, DELETE");
     is($c, "\x20\x30\x40\x50\x60", "tr/\\x00-\\x1f//d");
 }
 
-($s) = keys %{{pie => 3}};
 SKIP: {
-    if (!eval { require B }) { skip "no B", 1 }
-    my $wasro = B::svref_2object(\$s)->FLAGS & &B::SVf_READONLY;
-    $wasro or local $TODO = "didn't have a COW";
+    if (!eval { require XS::APItest }) { skip "no XS::APItest", 2 }
+    skip "with NODEFAULT_SHAREKEYS there are few COWs", 2
+        if $Config::Config{ccflags} =~ /-DNODEFAULT_SHAREKEYS\b/;
+
+    ($s) = keys %{{pie => 3}};
+    my $wasro = XS::APItest::SvIsCOW($s);
+    ok $wasro, "have a COW";
     $s =~ tr/i//;
-    ok( B::svref_2object(\$s)->FLAGS & &B::SVf_READONLY,
+    ok( XS::APItest::SvIsCOW($s),
        "count-only tr doesn't deCOW COWs" );
 }
 
@@ -512,6 +1070,7 @@ SKIP: {
 eval q{ $a ~= tr/a/b/; };
 ok 1;
 SKIP: {
+    no warnings "deprecated";
     skip "no encoding", 1 unless eval { require encoding; 1 };
     eval q{ use encoding "utf8"; $a ~= tr/a/b/; };
     ok 1;
@@ -521,8 +1080,145 @@ SKIP: {
 
     my $x = "Perlα";
     $x =~ tr/αα/βγ/;
-    note $x;
+    { no warnings 'utf8'; print "# $x\n"; } # No note() to avoid wide warning.
     is($x, "Perlβ", "Only first of multiple transliterations is used");
+}
+
+# tr/a/b/ should fail even on zero-length read-only strings
+use constant nullrocow => (keys%{{""=>undef}})[0];
+for ("", nullrocow) {
+    eval { $_ =~ y/a/b/ };
+    like $@, qr/^Modification of a read-only value attempted at /,
+        'tr/a/b/ fails on zero-length ro string';
+}
+
+# Whether they're permitted or not, non-modifying tr/// should not write
+# to read-only values, even with funky flags.
+{ # [perl #123759]
+	eval q{ ('a' =~ /./) =~ tr///d };
+	ok(1, "tr///d on PL_Yes does not assert");
+	eval q{ ('a' =~ /./) =~ tr/a-z/a-z/d };
+	ok(1, "tr/a-z/a-z/d on PL_Yes does not assert");
+	eval q{ ('a' =~ /./) =~ tr///s };
+	ok(1, "tr///s on PL_Yes does not assert");
+	eval q{ *x =~ tr///d };
+	ok(1, "tr///d on glob does not assert");
+}
+
+{ # [perl #128734
+    my $string = chr utf8::unicode_to_native(0x00e0);
+    $string =~ tr/\N{U+00e0}/A/;
+    is($string, "A", 'tr// of \N{U+...} works for upper-Latin1');
+    $string = chr utf8::unicode_to_native(0x00e1);
+    $string =~ tr/\N{LATIN SMALL LETTER A WITH ACUTE}/A/;
+    is($string, "A", 'tr// of \N{name} works for upper-Latin1');
+}
+
+# RT #130198
+# a tr/// that is cho(m)ped, possibly with an array as arg
+
+{
+    use warnings;
+
+    my ($s, @a);
+
+    my $warn;
+    local $SIG{__WARN__ } = sub { $warn .= "@_" };
+
+    for my $c (qw(chop chomp)) {
+        for my $bind ('', '$s =~ ', '@a =~ ') {
+            for my $arg2 (qw(a b)) {
+                for my $r ('', 'r') {
+                    $warn = '';
+                    # tr/a/b/ modifies its LHS, so if the LHS is an
+                    # array, this should die. The special cases of tr/a/a/
+                    # and tr/a/b/r don't modify their LHS, so instead
+                    # we croak because cho(m)p is trying to modify it.
+                    #
+                    my $exp =
+                        ($r eq '' && $arg2 eq 'b' && $bind =~ /\@a/)
+                            ? qr/Can't modify private array in transliteration/
+                            : qr{Can't modify transliteration \(tr///\) in $c};
+
+                    my $expr = "$c(${bind}tr/a/$arg2/$r);";
+                    eval $expr;
+                    like $@, $exp, "RT #130198 eval: $expr";
+
+                    $exp =
+                        $bind =~ /\@a/
+                         ? qr{^Applying transliteration \(tr///\) to \@a will act on scalar\(\@a\)}
+                         : qr/^$/;
+                    like $warn, $exp, "RT #130198 warn: $expr";
+                }
+            }
+        }
+    }
+
+
+}
+
+{   # [perl #130656] This bug happens when the tr is split across lines, so
+    # that the first line causes it to go into UTF-8, and the 2nd is only
+    # things like \x
+    my $x = "\x{E235}";
+    $x =~ tr
+    [\x{E234}-\x{E342}\x{E5B5}-\x{E5DF}]
+    [\x{E5CD}-\x{E5DF}\x{EA80}-\x{EAFA}\x{EB0E}-\x{EB8E}\x{EAFB}-\x{EB0D}\x{E5B5}-\x{E5CC}];
+
+    is $x, "\x{E5CE}", '[perl #130656]';
+
+}
+
+{
+    fresh_perl_like('y/\x{a00}0-\N{}//', qr/Unknown charname/, { },
+                    'RT #133880 illegal \N{}');
+}
+
+{
+    my $c;
+    my $x = "\1\0\0\0\0\0\0\0\0\0\0\0\0";
+    $c = $x =~ tr/\x0f\x0e\x0d\x0c\x0b\x0a\x09\x08\x07\x06\x05\x04\x03\x02\x01\x00/FEDCBA9876543210/;
+    is $x, "1000000000000", "Decreasing ranges work with start at \\0";
+    is $c, 13, "Count for above test";
+
+    $x = "\1\0\0\0\0\0\0\0\0\0\0\0\0";
+    $c = $x =~ tr/\x0f\x0e\x0d\x0c\x0b\x0a\x09\x08\x07\x06\x05\x04\x03\x02\x01\x00/\x{FF26}\x{FF25}\x{FF24}\x{FF23}\x{FF22}\x{FF21}\x{FF19}\x{FF18}\x{FF17}\x{FF16}\x{FF15}\x{FF14}\x{FF13}\x{FF12}\x{FF11}\x{FF10}/;
+    is $x, "\x{FF11}\x{FF10}\x{FF10}\x{FF10}\x{FF10}\x{FF10}\x{FF10}\x{FF10}\x{FF10}\x{FF10}\x{FF10}\x{FF10}\x{FF10}", "Decreasing Above ASCII ranges work with start at \\0";
+    is $c, 13, "Count for above test";
+}
+
+{
+    my $c = "\xff";
+    my $d = "\x{104}";
+    eval '$c =~ tr/\x{ff}-\x{104}/\x{100}-\x{105}/';
+    is($@, "", 'tr/\x{ff}-\x{104}/\x{100}-\x{105}/ compiled');
+    is($c, "\x{100}", 'ff -> 100');
+    eval '$d =~ tr/\x{ff}-\x{104}/\x{100}-\x{105}/';
+    is($d, "\x{105}", '104 -> 105');
+}
+
+{
+    my $c = "cb";
+    eval '$c =~ tr{aabc}{d\x{d0000}}';
+    is($c, "\x{d0000}\x{d0000}", "Shouldn't generate valgrind errors");
+}
+
+{   # GH #21748
+    my $c;
+    my $x = chr utf8::unicode_to_native(0xcb);
+    $c = $x =~ tr[\N{U+00CB}\N{U+00EB}\N{U+2010}][\N{U+0401}\N{U+0451}\-];
+    is $x, "\x{401}", 'Latin1 \N{} followed by above Latin1 work properly';
+    is $c, 1, "Count for the above test";
+}
+
+{   # As of August 2024, the code to handle this situation is not otherwise
+    # exercised by the test suite
+
+    my $A = "A";
+    utf8::upgrade($A);
+
+    $A =~ tr/A/\xB6/;   # B6 works in both ASCII and EBCDIC
+    is($A, "\xB6", "UTF-8 invariant in a UTF-8 string to UTF-8 variant");
 }
 
 1;

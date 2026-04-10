@@ -200,6 +200,23 @@ logically match their complements.
 C<\R> matches a generic linebreak, that is, vertical whitespace, plus
 the multi-character sequence C<"\x0D\x0A">.
 
+=item Optional pre-match and post-match captures with the /p flag
+
+There is a new flag C</p> for regular expressions.  Using this
+makes the engine preserve a copy of the part of the matched string before
+the matching substring to the new special variable C<${^PREMATCH}>, the
+part after the matching substring to C<${^POSTMATCH}>, and the matched
+substring itself to C<${^MATCH}>.
+
+Perl is still able to store these substrings to the special variables
+C<$`>, C<$'>, C<$&>, but using these variables anywhere in the program
+adds a penalty to all regular expression matches, whereas if you use
+the C</p> flag and the new special variables instead, you pay only for
+the regular expressions where the flag is used.
+
+For more detail on the new variables, see L<perlvar>; for the use of
+the regular expression flag, see L<perlop> and L<perlre>.
+
 =back
 
 =head2 C<say()>
@@ -273,7 +290,7 @@ Cwd::cwd() may return a short directory name, and glob() may return short
 names as well.  On the NTFS file system these short names can always be
 represented in the ANSI codepage.  This will not be true for all other file
 system drivers; e.g. the FAT filesystem stores short filenames in the OEM
-codepage, so some files on FAT volumes remain unaccessible through the
+codepage, so some files on FAT volumes remain inaccessible through the
 ANSI APIs.
 
 Similarly, $^X, @INC, and $ENV{PATH} are preprocessed at startup to make
@@ -646,6 +663,13 @@ On 5.10.0 and newer, the code warns when main contains C<use warnings;>
 It does not matter if Foo::Base or Foo::Bar have warnings enabled
 to disable the warning one has to modify main.
 
+=head2 Removal of C<package;> (C<package> without arguments)
+
+The C<package;> syntax that would let code switch out of any package (and thus
+require the use of either lexical or fully-qualified names) has been removed.
+Its semantics were never that clear and its implementation even less so. (It
+was previously deprecated in perl 5.8.0.)
+
 =head1 Modules and Pragmata
 
 =head2 Upgrading individual core modules
@@ -998,7 +1022,7 @@ The L<perlreapi> manpage describes the interface to the perl interpreter
 used to write pluggable regular expression engines (by Ævar Arnfjörð
 Bjarmason).
 
-The L<perlunitut> manpage is an tutorial for programming with Unicode and
+The L<perlunitut> manpage is a tutorial for programming with Unicode and
 string encodings in Perl, courtesy of Juerd Waalboer.
 
 A new manual page, L<perlunifaq> (the Perl Unicode FAQ), has been added
@@ -1559,7 +1583,7 @@ inherits from C<B::SV> (it used to inherit from C<B::IV>).
 
 The anonymous hash and array constructors now take 1 op in the optree
 instead of 3, now that pp_anonhash and pp_anonlist return a reference to
-an hash/array when the op is flagged with OPf_SPECIAL. (Nicholas Clark)
+a hash/array when the op is flagged with OPf_SPECIAL. (Nicholas Clark)
 
 =head1 Known Problems
 

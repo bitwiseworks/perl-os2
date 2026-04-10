@@ -82,13 +82,13 @@ case `$cc -v 2>&1`"" in
 		fi
 	    case "$gccversion" in
 		[012]*) # HP-UX and gcc-2.* break UINT32_MAX :-(
-			ccflags="$ccflags -DUINT32_MAX_BROKEN"
-			;;
+		    ccflags="$ccflags -DUINT32_MAX_BROKEN"
+		    ;;
 		[34]*) # GCC (both 32bit and 64bit) will define __STDC_EXT__
                        # by default when using GCC 3.0 and newer versions of
                        # the compiler.
-                       cppflags="$cc_cppflags"
-                       ;;
+		   cppflags="$cc_cppflags"
+		   ;;
 		esac
 	    case "`getconf KERNEL_BITS 2>/dev/null`" in
 		*64*)
@@ -160,7 +160,7 @@ case `$cc -v 2>&1`"" in
 	    ccversion=`what $cc_found | awk '/Compiler/{print $2}/Itanium/{print $6,$7}/for Integrity/{print $6,$7}'`
 	    case "$ccflags" in
                "-Ae "*) ;;
-		*)  ccflags="-Ae $cc_cppflags"
+		*)  ccflags="-Ae -Wp,-H150000 $cc_cppflags"
 		    # +vnocompatwarnings not known in 10.10 and older
 		    if [ $xxOsRev -ge 1020 ]; then
 			ccflags="$ccflags -Wl,+vnocompatwarnings"
@@ -212,6 +212,30 @@ case "$use64bitall" in
 case "$usemorebits" in
     $define|true|[yY]*) use64bitint="$define"; uselongdouble="$define" ;;
     esac
+
+# There is a weird pre-C99 long double (a struct of four uin32_t)
+# in HP-UX 10.20 but beyond strtold() there's no support for them
+# for example in <math.h>.
+case "$uselongdouble" in
+    $define|true|[yY]*)
+	if [ "$xxOsRevMajor" -lt 11 ]; then
+	    cat <<EOM >&4
+
+*** uselongdouble (or usemorebits) is not supported on HP-UX $xxOsRevMajor.
+*** You need at least HP-UX 11.0.
+*** Cannot continue, aborting.
+EOM
+	    exit 1
+	fi
+	;;
+    esac
+
+# Configure long double scan will detect the HP-UX 10.20 "long double"
+# (a struct of four uin32_t) and think it is IEEE quad.  Make it not so.
+if [ "$xxOsRevMajor" -lt 11 ]; then
+    d_longdbl="$undef"
+    longdblsize=8 # Make it double.
+    fi
 
 case "$archname" in
     IA64*)
@@ -377,6 +401,9 @@ EOM
 regexec_cflags=''
 doop_cflags=''
 op_cflags=''
+opmini_cflags=''
+perlmain_cflags=''
+pp_pack_cflags=''
     fi
 
 case "$ccisgcc" in
@@ -406,10 +433,11 @@ case "$ccisgcc" in
 	    esac
 	if [ $maxdsiz -le 64 ]; then
 	    case "$optimize" in
-		*O2*)	opt=`echo "$optimize" | sed -e 's/O2/O1/'`
-			toke_cflags="$toke_cflags;optimize=\"$opt\""
-			regexec_cflags="optimize=\"$opt\""
-			;;
+		*O2*)
+		    opt=`echo "$optimize" | sed -e 's/O2/O1/'`
+		    toke_cflags="$toke_cflags;optimize=\"$opt\""
+		    regexec_cflags="optimize=\"$opt\""
+		    ;;
 		esac
 	    fi
 	;;
@@ -427,6 +455,24 @@ case "$ccisgcc" in
 		    ;;
 	    esac
 	case "$archname" in
+	    PA-RISC2.0)
+		case "$ccversion" in
+		    B.11.11.*)
+			# opmini.c and op.c with +O2 makes the compiler die
+			# of internal error, for perlmain.c only +O0 (no opt)
+                        # works. Disable +Ox for pp_pack, as the optimizer
+                        # causes this unit to fail (not a limit issue)
+			case "$optimize" in
+			*O[12]*)
+			    opt=`echo "$optimize" | sed -e 's/O2/O1/' -e 's/ *+Onolimit//'`
+			    opmini_cflags="optimize=\"$opt\""
+			    op_cflags="optimize=\"$opt\""
+			    perlmain_cflags="optimize=\"\""
+			    pp_pack_cflags="optimize=\"\""
+			    ;;
+			esac
+		    esac
+		;;
 	    IA64*)
 		case "$ccversion" in
 		    B3910B*A.06.0[12345])
@@ -439,18 +485,20 @@ case "$ccisgcc" in
 			B3910B*A.06.15)
 			# > cc --version
 			# cc: HP C/aC++ B3910B A.06.15 [May 16 2007]
-			# Has optimizing problems with +O2 for blead (5.16.1),
-			# see https://rt.perl.org:443/rt3/Ticket/Display.html?id=103668.
+			# Has optimizing problems with +O2 for blead (5.17.4),
+			# see https://github.com/Perl/perl5/issues/11748.
 			#
 			# +O2 +Onolimit +Onoprocelim  +Ostore_ordering \
 			# +Onolibcalls=strcmp
 			# passes all tests (with/without -DDEBUGGING) [Nov 17 2011]
 			case "$optimize" in
-				*O2*) optimize="$optimize +Onoprocelim +Ostore_ordering +Onolibcalls=strcmp" ;;
-				esac
+			    *O2*) optimize="$optimize +Onoprocelim +Ostore_ordering +Onolibcalls=strcmp" ;;
+			    esac
 			;;
 		    *)  doop_cflags="optimize=\"$opt\""
-			op_cflags="optimize=\"$opt\""	;;
+			op_cflags="optimize=\"$opt\""
+			#opt=`echo "$optimize" | sed -e 's/O1/O0/'`
+			globals_cflags="optimize=\"$opt\""	;;
 		    esac
 		;;
 	    esac
@@ -557,6 +605,14 @@ EOCBU
 cat >UU/uselargefiles.cbu <<'EOCBU'
 # This script UU/uselargefiles.cbu will get 'called-back' by Configure
 # after it has prompted the user for whether to use large files.
+
+case "$archname:$use64bitall:$use64bitint" in
+    *-LP64*:undef:define)
+	archname=`echo "$archname" | sed 's/-LP64/-64int/'`
+	echo "Archname changed to $archname"
+	;;
+    esac
+
 case "$uselargefiles" in
     ""|$define|true|[yY]*)
 	# there are largefile flags available via getconf(1)
@@ -733,14 +789,39 @@ d_isnan='define'
 d_isinf='define'
 d_isfinite='define'
 d_unordered='define'
-# Next one(s) need the leading tab.  These are special 'hint' symbols that
-# are not to be propagated to config.sh, all related to pthreads draft 4
-# interfaces.
-case "$d_oldpthreads" in
-    ''|$undef)
-	d_crypt_r_proto='undef'
-	d_getgrent_r_proto='undef'
-	d_getpwent_r_proto='undef'
-	d_strerror_r_proto='undef'
-	;;
+# Old versions of pthreads (Draft 4) might require the following variables
+# set to 'undef'. Having C99 as requirement invalidates forcing those
+#   d_crypt_r_proto, d_getgrent_r_proto, d_getpwent_r_proto, and
+#   d_strerror_r_proto
+
+# H.Merijn says it's not 1998 anymore: ODBM is not needed,
+# and it seems to be buggy in HP-UX anyway.
+i_dbm=undef
+
+if [ "$xxOsRevMajor" -lt 11 ] || [ "$xxOsRevMajor" -eq 11 ] && [ "$xxOsRevMinor" -lt 23 ]; then
+    # In HP-UXes prior to 11.23 strtold() returned a HP-UX
+    # specific union called long_double, not a C99 long double.
+    case "`grep 'double strtold.const' /usr/include/stdlib.h`" in
+        *"long double strtold"*) ;; # strtold should be safe.
+        *) echo "Looks like your strtold() is non-standard..." >&4
+        d_strtold=undef ;;
+	esac
+    fi
+
+# In pre-11 HP-UXes there really isn't isfinite(), despite what
+# Configure might think. (There is finite(), though.)
+case "`grep 'isfinite' /usr/include/math.h`" in
+    *"isfinite"*) ;;
+    *) d_isfinite=undef ;;
     esac
+
+# 11.23 says it has mbrlen and mbrtowc, but compiling them fails as it can't
+# find the type definition for mbstate_t which one of the parameters is.  It's
+# not in the hdr the man page says it is.  Perhaps a better Configure probe is
+# needed, but for now simply undefine them
+d_mbrlen='undef'
+d_mbrtowc='undef'
+# And this one is not known on 11.11 (with HP C-ANSI-C)
+if [ "$xxOsRevMajor" -lt 11 ] || [ "$xxOsRevMinor" -lt 12 ]; then
+    d_wcrtomb='undef'
+    fi

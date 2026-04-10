@@ -1,8 +1,8 @@
 use strict;
 use warnings;
 
+use Config;
 BEGIN {
-    use Config;
     if (! $Config{'useithreads'}) {
         print("1..0 # SKIP Perl not compiled with 'useithreads'\n");
         exit(0);
@@ -11,14 +11,7 @@ BEGIN {
 
 use threads;
 use Thread::Queue;
-
-if ($] == 5.008) {
-    require 't/test.pl';   # Test::More work-alike for Perl 5.8.0
-} else {
-    require Test::More;
-}
-Test::More->import();
-plan('tests' => 19);
+use Test::More 'tests' => 19;
 
 my $q = Thread::Queue->new(1..10);
 ok($q, 'New queue');

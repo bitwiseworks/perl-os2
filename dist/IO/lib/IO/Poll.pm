@@ -10,25 +10,24 @@ package IO::Poll;
 use strict;
 use IO::Handle;
 use Exporter ();
-our(@ISA, @EXPORT_OK, @EXPORT, $VERSION);
 
-@ISA = qw(Exporter);
-$VERSION = "0.09";
+our @ISA = qw(Exporter);
+our $VERSION = "1.56";
 
-@EXPORT = qw( POLLIN
+our @EXPORT = qw( POLLIN
 	      POLLOUT
 	      POLLERR
 	      POLLHUP
 	      POLLNVAL
 	    );
 
-@EXPORT_OK = qw(
- POLLPRI   
+our @EXPORT_OK = qw(
+ POLLPRI
  POLLRDNORM
  POLLWRNORM
  POLLRDBAND
  POLLWRBAND
- POLLNORM  
+ POLLNORM
 	       );
 
 # [0] maps fd's to requested masks
@@ -83,7 +82,7 @@ sub poll {
 	push(@poll,$fd => $mask);
     }
 
-    my $ret = @poll ? _poll(defined($timeout) ? $timeout * 1000 : -1,@poll) : 0;
+    my $ret = _poll(defined($timeout) ? $timeout * 1000 : -1,@poll);
 
     return $ret
 	unless $ret > 0;
@@ -187,7 +186,7 @@ Remove IO from the list of file descriptors for the next poll.
 Returns a list of handles. If EVENT_MASK is not given then a list of all
 handles known will be returned. If EVENT_MASK is given then a list
 of handles will be returned which had one of the events specified by
-EVENT_MASK happen during the last call ti C<poll>
+EVENT_MASK happen during the last call to C<poll>.
 
 =back
 
@@ -198,7 +197,7 @@ L<poll(2)>, L<IO::Handle>, L<IO::Select>
 =head1 AUTHOR
 
 Graham Barr. Currently maintained by the Perl Porters.  Please report all
-bugs to <perlbug@perl.org>.
+bugs at L<https://github.com/Perl/perl5/issues>.
 
 =head1 COPYRIGHT
 

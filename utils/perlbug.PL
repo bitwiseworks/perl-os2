@@ -1,5 +1,8 @@
 #!/usr/local/bin/perl
 
+use strict;
+use warnings;
+
 use Config;
 use File::Basename qw(&basename &dirname);
 use Cwd;
@@ -15,46 +18,21 @@ use File::Spec::Functions;
 
 # This forces PL files to create target in same directory as PL file.
 # This is so that make depend always knows where to find PL derivatives.
-$origdir = cwd;
+my $origdir = cwd;
 chdir dirname($0);
-$file = basename($0, '.PL');
+my $file = basename($0, '.PL');
 $file .= '.com' if $^O eq 'VMS';
 
-open OUT, ">$file" or die "Can't create $file: $!";
+open OUT, ">", $file or die "Can't create $file: $!";
 
-# extract patchlevel.h information
+# get patchlevel.h timestamp
 
-open PATCH_LEVEL, "<" . catfile(updir, "patchlevel.h")
-    or die "Can't open patchlevel.h: $!";
+-e catfile(updir, "patchlevel.h")
+    or die "Can't find patchlevel.h: $!";
 
-my $patchlevel_date = (stat PATCH_LEVEL)[9];
+my $patchlevel_date = (stat _)[9];
 
-while (<PATCH_LEVEL>) {
-    last if $_ =~ /^\s*static\s+(?:const\s+)?char.*?local_patches\[\]\s*=\s*{\s*$/;
-}
-
-if (! defined($_)) {
-    warn "Warning: local_patches section not found in patchlevel.h\n";
-}
-
-my @patches;
-while (<PATCH_LEVEL>) {
-    last if /^\s*}/;
-    next if /^\s*#/;  # preprocessor stuff
-    next if /PERL_GIT_UNPUSHED_COMMITS/;    # XXX expand instead
-    next if /"uncommitted-changes"/;        # XXX determine if active instead
-    chomp;
-    s/^\s+,?\s*"?//;
-    s/"?\s*,?$//;
-    s/(['\\])/\\$1/g;
-    push @patches, $_ unless $_ eq 'NULL';
-}
-my $patch_desc = "'" . join("',\n    '", @patches) . "'";
-my $patch_tags = join "", map /(\S+)/ ? "+$1 " : (), @patches;
-
-close(PATCH_LEVEL) or die "Error closing patchlevel.h: $!";
-
-# TO DO (prehaps): store/embed $Config::config_sh into perlbug. When perlbug is
+# TO DO (perhaps): store/embed $Config::config_sh into perlbug. When perlbug is
 # used, compare $Config::config_sh with the stored version. If they differ then
 # append a list of individual differences to the bug report.
 
@@ -69,27 +47,28 @@ my $extract_version = sprintf("%vd", $^V);
 print OUT <<"!GROK!THIS!";
 $Config{startperl}
     eval 'exec $Config{perlpath} -S \$0 \${1+"\$@"}'
-	if \$running_under_some_shell;
+	if 0; # ^ Run only under a shell
 
 my \$config_tag1 = '$extract_version - $Config{cf_time}';
 
 my \$patchlevel_date = $patchlevel_date;
-my \$patch_tags = '$patch_tags';
-my \@patches = (
-    $patch_desc
-);
 !GROK!THIS!
 
 # In the following, perl variables are not expanded during extraction.
 
 print OUT <<'!NO!SUBS!';
+my @patches = Config::local_patches();
+my $patch_tags = join "", map /(\S+)/ ? "+$1 " : (), @patches;
 
+BEGIN { pop @INC if $INC[-1] eq '.' }
 use warnings;
 use strict;
 use Config;
 use File::Spec;		# keep perlbug Perl 5.005 compatible
 use Getopt::Std;
 use File::Basename 'basename';
+
+$Getopt::Std::STANDARD_HELP_VERSION = 1;
 
 sub paraprint;
 
@@ -103,22 +82,26 @@ BEGIN {
     $::HaveTemp = ($@ eq "");
     eval { require Module::CoreList; };
     $::HaveCoreList = ($@ eq "");
+    eval { require Text::Wrap; };
+    $::HaveWrap = ($@ eq "");
 };
 
-my $Version = "1.39";
+our $VERSION = "1.43";
 
 #TODO:
 #       make sure failure (transmission-wise) of Mail::Send is accounted for.
 #       (This may work now. Unsure of the original author's issue -JESSE 2008-06-08)
 #       - Test -b option
 
-my( $file, $usefile, $cc, $address, $bugaddress, $testaddress, $thanksaddress,
+my( $file, $usefile, $cc, $address, $thanksaddress,
     $filename, $messageid, $domain, $subject, $from, $verbose, $ed, $outfile,
     $fh, $me, $body, $andcc, %REP, $ok, $thanks, $progname,
     $Is_MSWin32, $Is_Linux, $Is_VMS, $Is_OpenBSD,
     $report_about_module, $category, $severity,
-    %opt,
+    %opt, $have_attachment, $attachments, $has_patch, $mime_boundary
 );
+
+my $running_noninteractively = !-t STDIN;
 
 my $perl_version = $^V ? sprintf("%vd", $^V) : $];
 
@@ -128,7 +111,7 @@ Init();
 
 if ($opt{h}) { Help(); exit; }
 if ($opt{d}) { Dump(*STDOUT); exit; }
-if (!-t STDIN && !($ok and not $opt{n})) {
+if ($running_noninteractively && !$opt{t} && !($ok and not $opt{n})) {
     paraprint <<"EOF";
 Please use $progname interactively. If you want to
 include a file, you can use the -f switch.
@@ -139,15 +122,27 @@ EOF
 Query();
 Edit() unless $usefile || ($ok and not $opt{n});
 NowWhat();
-if ($outfile) {
-    save_message_to_disk($outfile);
-} else {
+if ($address) {
     Send();
     if ($thanks) {
 	print "\nThank you for taking the time to send a thank-you message!\n\n";
+
+	paraprint <<EOF
+Please note that mailing lists are moderated, your message may take a while to
+show up.
+EOF
     } else {
 	print "\nThank you for taking the time to file a bug report!\n\n";
+
+	paraprint <<EOF
+Please note that mailing lists are moderated, your message may take a while to
+show up. Please consider submitting your report directly to the issue tracker
+at https://github.com/Perl/perl5/issues
+EOF
     }
+
+} else {
+    save_message_to_disk($outfile);
 }
 
 exit;
@@ -194,6 +189,9 @@ EOF
     lc $alt;
 }
 
+sub HELP_MESSAGE { Help(); exit; }
+sub VERSION_MESSAGE { print "perlbug version $VERSION\n"; }
+
 sub Init {
     # -------- Setup --------
 
@@ -202,21 +200,18 @@ sub Init {
     $Is_Linux = lc($^O) eq 'linux';
     $Is_OpenBSD = lc($^O) eq 'openbsd';
 
-    if (!getopts("Adhva:s:b:f:F:r:e:SCc:to:n:T", \%opt)) { Help(); exit; };
+    # Thanks address
+    $thanksaddress = 'perl-thanks@perl.org';
+
+    # Defaults if getopts fails.
+    $outfile = (basename($0) =~ /^perlthanks/i) ? "perlthanks.rep" : "perlbug.rep";
+    $cc = $::Config{'perladmin'} || $::Config{'cf_email'} || $::Config{'cf_by'} || '';
+
+    HELP_MESSAGE() unless getopts("Adhva:s:b:f:F:r:e:SCc:to:n:T:p:", \%opt);
 
     # This comment is needed to notify metaconfig that we are
     # using the $perladmin, $cf_by, and $cf_time definitions.
-
     # -------- Configuration ---------
-
-    # perlbug address
-    $bugaddress = 'perlbug@perl.org';
-
-    # Test address
-    $testaddress = 'perlbug-test@perl.org';
-
-    # Thanks address
-    $thanksaddress = 'perl-thanks@perl.org';
 
     if (basename ($0) =~ /^perlthanks/i) {
 	# invoked as perlthanks
@@ -230,8 +225,7 @@ sub Init {
     
     $progname = $thanks ? 'perlthanks' : 'perlbug';
     # Target address
-    $address = $opt{a} || ($opt{t} ? $testaddress
-			    : $thanks ? $thanksaddress : $bugaddress);
+    $address = $opt{a} || ($thanks ? $thanksaddress : "");
 
     # Users address, used in message and in From and Reply-To headers
     $from = $opt{r} || "";
@@ -248,8 +242,23 @@ sub Init {
     # File to send as report
     $file = $opt{f} || "";
 
+    # We have one or more attachments
+    $have_attachment = ($opt{p} || 0);
+    $mime_boundary = ('-' x 12) . "$VERSION.perlbug" if $have_attachment;
+
+    # Comma-separated list of attachments
+    $attachments = $opt{p} || "";
+    $has_patch = 0; # TBD based on file type
+
+    for my $attachment (split /\s*,\s*/, $attachments) {
+        unless (-f $attachment && -r $attachment) {
+            die "The attachment $attachment is not a readable file: $!\n";
+        }
+        $has_patch = 1 if $attachment =~ m/\.(patch|diff)$/;
+    }
+
     # File to output to
-    $outfile = $opt{F} || "";
+    $outfile = $opt{F} || "$progname.rep";
 
     # Body of report
     $body = $opt{b} || "";
@@ -344,21 +353,22 @@ sub Query {
 This program provides an easy way to send a thank-you message back to the
 authors and maintainers of perl.
 
-If you wish to submit a bug report, please run it without the -T flag
+If you wish to generate a bug report, please run it without the -T flag
 (or run the program perlbug rather than perlthanks)
 EOF
 	} else {
 	    paraprint <<"EOF";
-This program provides an easy way to create a message reporting a
-bug in the core perl distribution (along with tests or patches)
-to the volunteers who maintain perl at $address.  To send a thank-you
+This program provides an easy way to generate a bug report for the core
+perl distribution (along with tests or patches).  To send a thank-you
 note to $thanksaddress instead of a bug report, please run 'perlthanks'.
 
-Please do not use $0 to send test messages, test whether perl
-works, or to report bugs in perl modules from CPAN.
+The GitHub issue tracker at https://github.com/Perl/perl5/issues is the
+best place to submit your report so it can be tracked and resolved.
 
-For help using perl, try posting to the Usenet newsgroup 
-comp.lang.perl.misc.
+Please do not use $0 to report bugs in perl modules from CPAN.
+
+Suggestions for how to find help using Perl can be found at
+https://perldoc.perl.org/perlcommunity.html
 EOF
 	}
     }
@@ -371,7 +381,7 @@ EOF
 
     unless ($subject) {
 	    print 
-"First of all, please provide a subject for the message.\n";
+"First of all, please provide a subject for the report.\n";
 	if ( not $thanks)  {
 	    paraprint <<EOF;
 This should be a concise description of your bug or problem
@@ -394,6 +404,8 @@ EOF
 	    }
 	} while (TrivialSubject($subject));
     }
+    $subject = '[PATCH] ' . $subject
+        if $has_patch && ($subject !~ m/^\[PATCH/i);
 
     # Prompt for return address, if needed
     unless ($opt{r}) {
@@ -447,7 +459,7 @@ EOF
     }
 
     # Prompt for administrator address, unless an override was given
-    if( !$opt{C} and !$opt{c} ) {
+    if( $address and !$opt{C} and !$opt{c} ) {
 	my $description =  <<EOF;
 $0 can send a copy of this report to your local perl
 administrator.  If the address below is wrong, please correct it,
@@ -537,7 +549,7 @@ EOF
 		paraprint <<EOF;
 $entry is not a "core" Perl module. Please check that you entered
 its name correctly. If it is correct, quit this program, try searching
-for $entry on http://rt.cpan.org, and report your issue there.
+for $entry on https://rt.cpan.org, and report your issue there.
 EOF
 
             $entry = '';
@@ -596,21 +608,28 @@ EOF
     }
 
     # Generate report
-    open(REP,">$filename") or die "Unable to create report file '$filename': $!\n";
+    open(REP, '>:raw', $filename) or die "Unable to create report file '$filename': $!\n";
+    binmode(REP, ':raw :crlf') if $Is_MSWin32;
+
     my $reptype = !$ok ? ($thanks ? 'thank-you' : 'bug')
 	: $opt{n} ? "build failure" : "success";
 
     print REP <<EOF;
 This is a $reptype report for perl from $from,
-generated with the help of perlbug $Version running under perl $perl_version.
+generated with the help of perlbug $VERSION running under perl $perl_version.
 
 EOF
+
+    if ($report_about_module) {
+	print REP "Module: $report_about_module\n\n";
+    }
 
     if ($body) {
 	print REP $body;
     } elsif ($usefile) {
-	open(F, "<$file")
+	open(F, '<:raw', $file)
 		or die "Unable to read report file from '$file': $!\n";
+	binmode(F, ':raw :crlf') if $Is_MSWin32;
 	while (<F>) {
 	    print REP $_
 	}
@@ -631,12 +650,25 @@ EOF
 	    print REP <<'EOF';
 
 -----------------------------------------------------------------
-[Please describe your issue here]
+<!--[Please describe your issue here]-->
+
+**Description**
+<!-- A clear and concise description of what the bug is. -->
 
 
 
-[Please do not change anything below this line]
------------------------------------------------------------------
+**Steps to Reproduce**
+<!-- A one-liner or script to reproduce the issue. -->
+
+
+
+**Expected behavior**
+<!-- A clear and concise description of what you expected to happen. -->
+
+
+
+<!--[Please do not change anything below this line]-->
+<!------------------------------------------------------------------- -->
 EOF
 	}
     }
@@ -656,24 +688,30 @@ sub Dump {
     $severity ||= 'low';
 
     print OUT <<EFF;
+
+
 ---
-Flags:
-    category=$category
-    severity=$severity
+**Flags**
+- category=$category
+- severity=$severity
 EFF
+
+    if ($has_patch) {
+        print OUT <<EFF;
+- Type=Patch
+- PatchStatus=HasPatch
+EFF
+    }
 
     if ($report_about_module ) { 
         print OUT <<EFF;
-    module=$report_about_module
-EFF
-    }
-    if ($opt{A}) {
-	print OUT <<EFF;
-    ack=no
+- module=$report_about_module
 EFF
     }
     print OUT <<EFF;
 ---
+**Perl configuration**
+```
 EFF
     print OUT "This perlbug was built using Perl $config_tag1\n",
 	    "It is being executed now by  Perl $config_tag2.\n\n"
@@ -728,6 +766,7 @@ EOF
 	    print OUT "$_='$value'\n";
 	}
     }
+    print OUT "```\n";
 } # sub Dump
 
 sub Edit {
@@ -738,7 +777,7 @@ sub Edit {
 	$ed = $entry unless $entry eq '';
     }
 
-    _edit_file($ed);
+    _edit_file($ed) unless $running_noninteractively;
 }
 
 sub _edit_file {
@@ -760,8 +799,7 @@ EOF
                 next;
             } else {
                 paraprint <<EOF;
-You may want to save your report to a file, so you can edit and
-mail it later.
+You can edit your report after saving it to a file.
 EOF
                 return;
             }
@@ -791,7 +829,7 @@ EOF
 
 sub Cancel {
     1 while unlink($filename);  # remove all versions under VMS
-    print "\nQuitting without sending your message.\n";
+    print "\nQuitting without generating a report.\n";
     exit(0);
 }
 
@@ -799,31 +837,35 @@ sub NowWhat {
     # Report is done, prompt for further action
     if( !$opt{S} ) {
 	while(1) {
+	    my $send_to = $address || 'the Perl developers';
 	    my $menu = <<EOF;
 
 
-You have finished composing your message. At this point, you have 
+You have finished composing your report. At this point, you have 
 a few options. You can:
 
-    * [Se]nd the message to $address$andcc, 
-    * [D]isplay the message on the screen,
-    * [R]e-edit the message
-    * Display or change the message's [su]bject
-    * Save the message to a [f]ile to mail at another time
-    * [Q]uit without sending a message
+    * Save the report to a [f]ile
+    * [Se]nd the report to $send_to$andcc
+    * [D]isplay the report on the screen
+    * [R]e-edit the report
+    * Display or change the report's [su]bject
+    * [Q]uit without generating the report
 
 EOF
       retry:
         print $menu;
-	    my $action =  _prompt('', "Action (Send/Display/Edit/Subject/Save to File)");;
+	    my $action =  _prompt('', "Action (Save/Send/Display/Edit/Subject/Quit)",
+	        $opt{t} ? 'q' : '');
         print "\n";
 	    if ($action =~ /^(f|sa)/i) { # <F>ile/<Sa>ve
             if ( SaveMessage() ) { exit }
 	    } elsif ($action =~ /^(d|l|sh)/i ) { # <D>isplay, <L>ist, <Sh>ow
 		# Display the message
-		open(REP, "<$filename") or die "Couldn't open file '$filename': $!\n";
-		while (<REP>) { print $_ }
-		close(REP) or die "Error closing report file '$filename': $!";
+		print _read_report($filename);
+		if ($have_attachment) {
+		    print "\n\n---\nAttachment(s):\n";
+		    for my $att (split /\s*,\s*/, $attachments) { print "    $att\n"; }
+		}
 	    } elsif ($action =~ /^su/i) { # <Su>bject
 		my $reply = _prompt( "Subject: $subject", "If the above subject is fine, press Enter. Otherwise, type a replacement now\nSubject");
 		if ($reply ne '') {
@@ -834,12 +876,20 @@ EOF
 		}
 	    } elsif ($action =~ /^se/i) { # <S>end
 		# Send the message
-		my $reply =  _prompt( "Are you certain you want to send this message?", 'Please type "yes" if you are','no');
+		if (not $thanks) {
+		    print <<EOF
+To ensure your issue can be best tracked and resolved,
+you should submit it to the GitHub issue tracker at
+https://github.com/Perl/perl5/issues
+EOF
+		}
+		my $reply =  _prompt( "Are you certain you want to send this report to $send_to$andcc?", 'Please type "yes" if you are','no');
 		if ($reply =~ /^yes$/) {
+		    $address ||= 'perl5-porters@perl.org';
 		    last;
 		} else {
 		    paraprint <<EOF;
-You didn't type "yes", so your message has not yet been sent.
+You didn't type "yes", so your report has not been sent.
 EOF
 		}
 	    } elsif ($action =~ /^[er]/i) { # <E>dit, <R>e-edit
@@ -861,7 +911,7 @@ sub TrivialSubject {
     if ($subject =~
 	/^(y(es)?|no?|help|perl( (bug|problem))?|bug|problem)$/i ||
 	length($subject) < 4 ||
-	$subject !~ /\s/) {
+	($subject !~ /\s/ && ! $opt{t})) { # non-whitespace is accepted in test mode
 	print "\nThe subject you entered wasn't very descriptive. Please try again.\n\n";
         return 1;
     } else {
@@ -870,14 +920,9 @@ sub TrivialSubject {
 }
 
 sub SaveMessage {
-    my $file_save = $outfile || "$progname.rep";
-    my $file = _prompt( '', "Name of file to save message in", $file_save );
+    my $file = _prompt( '', "Name of file to save report in", $outfile );
     save_message_to_disk($file) || return undef;
-    print "\n";
-    paraprint <<EOF;
-A copy of your message has been saved in '$file' for you to
-send to '$address' with your normal mail client.
-EOF
+    return 1;
 }
 
 sub Send {
@@ -913,7 +958,7 @@ EOF
 sub Help {
     print <<EOF;
 
-This program is designed to help you generate and send bug reports
+This program is designed to help you generate bug reports
 (and thank-you notes) about perl5 and the modules which ship with it.
 
 In most cases, you can just run "$0" interactively from a command
@@ -923,31 +968,34 @@ Advanced usage:
 
 $0  [-v] [-a address] [-s subject] [-b body | -f inpufile ] [ -F outputfile ]
     [-r returnaddress] [-e editor] [-c adminaddress | -C] [-S] [-t] [-h]
-$0  [-v] [-r returnaddress] [-A] [-ok | -okay | -nok | -nokay]
+    [-p patchfile ]
+$0  [-v] [-r returnaddress] [-ok | -okay | -nok | -nokay]
 
 
 Options:
 
   -v    Include Verbose configuration data in the report
   -f    File containing the body of the report. Use this to
-        quickly send a prepared message.
-  -F    File to output the resulting mail message to, instead of mailing.
-  -S    Send without asking for confirmation.
-  -a    Address to send the report to. Defaults to '$address'.
+        quickly send a prepared report.
+  -p    File containing a patch or other text attachment. Separate
+        multiple files with commas.
+  -F    File to output the resulting report to. Defaults to
+        '$outfile'.
+  -S    Save or send the report without asking for confirmation.
+  -a    Send the report to this address, instead of saving to a file.
   -c    Address to send copy of report to. Defaults to '$cc'.
   -C    Don't send copy to administrator.
-  -s    Subject to include with the message. You will be prompted
+  -s    Subject to include with the report. You will be prompted
         if you don't supply one on the command line.
   -b    Body of the report. If not included on the command line, or
-        in a file with -f, you will get a chance to edit the message.
+        in a file with -f, you will get a chance to edit the report.
   -r    Your return address. The program will ask you to confirm
         this if you don't give it here.
   -e    Editor to use.
-  -t    Test mode. The target address defaults to '$testaddress'.
+  -t    Test mode.
   -T    Thank-you mode. The target address defaults to '$thanksaddress'.
   -d    Data mode.  This prints out your configuration data, without mailing
         anything. You can use this with -v to get more complete data.
-  -A    Don't send a bug received acknowledgement to the return address.
   -ok   Report successful build on this system to perl porters
         (use alone or with -v). Only use -ok if *everything* was ok:
         if there were *any* problems at all, use -nok.
@@ -993,6 +1041,7 @@ sub _prompt {
     }
     print $prompt. ($default ? " [$default]" :''). ": ";
 	my $result = scalar(<>);
+    return $default if !defined $result; # got eof
     chomp($result);
 	$result =~ s/^\s*(.*?)\s*$/$1/s;
     if ($default && $result eq '') {
@@ -1013,49 +1062,117 @@ sub _build_header {
 }
 
 sub _message_headers {
-    my %headers = ( To => $address, Subject => $subject );
+    my %headers = ( To => $address || 'perl5-porters@perl.org', Subject => $subject );
     $headers{'Cc'}         = $cc        if ($cc);
     $headers{'Message-Id'} = $messageid if ($messageid);
     $headers{'Reply-To'}   = $from      if ($from);
     $headers{'From'}       = $from      if ($from);
+    if ($have_attachment) {
+        $headers{'MIME-Version'} = '1.0';
+        $headers{'Content-Type'} = qq{multipart/mixed; boundary=\"$mime_boundary\"};
+    }
     return \%headers;
+}
+
+sub _add_body_start {
+    my $body_start = <<"BODY_START";
+This is a multi-part message in MIME format.
+--$mime_boundary
+Content-Type: text/plain; format=fixed
+Content-Transfer-Encoding: 8bit
+
+BODY_START
+    return $body_start;
+}
+
+sub _add_attachments {
+    my $attach = '';
+    for my $attachment (split /\s*,\s*/, $attachments) {
+        my $attach_file = basename($attachment);
+        $attach .= <<"ATTACHMENT";
+
+--$mime_boundary
+Content-Type: text/x-patch; name="$attach_file"
+Content-Transfer-Encoding: 8bit
+Content-Disposition: attachment; filename="$attach_file"
+
+ATTACHMENT
+
+        open my $attach_fh, '<:raw', $attachment
+            or die "Couldn't open attachment '$attachment': $!\n";
+        while (<$attach_fh>) { $attach .= $_; }
+        close($attach_fh) or die "Error closing attachment '$attachment': $!";
+    }
+
+    $attach .= "\n--$mime_boundary--\n";
+    return $attach;
+}
+
+sub _read_report {
+    my $fname = shift;
+    my $content;
+    open( REP, "<:raw", $fname ) or die "Couldn't open file '$fname': $!\n";
+    binmode(REP, ':raw :crlf') if $Is_MSWin32;
+    # wrap long lines to make sure the report gets delivered
+    local $Text::Wrap::columns = 900;
+    local $Text::Wrap::huge = 'overflow';
+    while (<REP>) {
+        if ($::HaveWrap && /\S/) { # wrap() would remove empty lines
+            $content .= Text::Wrap::wrap(undef, undef, $_);
+        } else {
+            $content .= $_;
+        }
+    }
+    close(REP) or die "Error closing report file '$fname': $!";
+    return $content;
 }
 
 sub build_complete_message {
     my $content = _build_header(%{_message_headers()}) . "\n\n";
-    open( REP, "<$filename" ) or die "Couldn't open file '$filename': $!\n";
-    while (<REP>) { $content .= $_; }
-    close(REP) or die "Error closing report file '$filename': $!";
+    $content .= _add_body_start() if $have_attachment;
+    $content .= _read_report($filename);
+    $content .= _add_attachments() if $have_attachment;
     return $content;
 }
 
 sub save_message_to_disk {
     my $file = shift;
 
-	    open OUTFILE, ">$file" or do { warn  "Couldn't open '$file': $!\n"; return undef};
+        if (-e $file) {
+            my $response = _prompt( '', "Overwrite existing '$file'", 'n' );
+            return undef unless $response =~ / yes | y /xi;
+        }
+        open OUTFILE, '>:raw', $file or do { warn  "Couldn't open '$file': $!\n"; return undef};
+        binmode(OUTFILE, ':raw :crlf') if $Is_MSWin32;
+
         print OUTFILE build_complete_message();
         close(OUTFILE) or do { warn  "Error closing $file: $!"; return undef };
-	    print "\nMessage saved.\n";
+	    print "\nReport saved to '$file'. Please submit it to https://github.com/Perl/perl5/issues\n";
         return 1;
 }
 
 sub _send_message_vms {
-    if (   ( $address =~ /@/ and $address !~ /^\w+%"/ )
-        or ( $cc =~ /@/ and $cc !~ /^\w+%"/ ) ) {
-        my $prefix;
-        foreach ( qw[ IN MX SMTP UCX PONY WINS ], '' ) {
-            $prefix = "$_%", last if $ENV{"MAIL\$PROTOCOL_$_"};
+
+    my $mail_from  = $from;
+    my $rcpt_to_to = $address;
+    my $rcpt_to_cc = $cc;
+
+    map { $_ =~ s/^[^<]*<//;
+          $_ =~ s/>[^>]*//; } ($mail_from, $rcpt_to_to, $rcpt_to_cc);
+
+    if ( open my $sff_fh, '|-:raw', 'MCR TCPIP$SYSTEM:TCPIP$SMTP_SFF.EXE SYS$INPUT:' ) {
+        print $sff_fh "MAIL FROM:<$mail_from>\n";
+        print $sff_fh "RCPT TO:<$rcpt_to_to>\n";
+        print $sff_fh "RCPT TO:<$rcpt_to_cc>\n" if $rcpt_to_cc;
+        print $sff_fh "DATA\n";
+        print $sff_fh build_complete_message();
+        my $success = close $sff_fh;
+        if ($success ) {
+            print "\nMessage sent\n";
+            return;
         }
-        $address = qq[${prefix}"$address"] unless $address =~ /^\w+%"/;
-        $cc = qq[${prefix}"$cc"] unless !$cc || $cc =~ /^\w+%"/;
     }
-    $subject =~ s/"/""/g;
-    $address =~ s/"/""/g;
-    $cc      =~ s/"/""/g;
-    my $sts = system(qq[mail/Subject="$subject" $filename. "$address","$cc"]);
-    if ($sts) {
-        die "Can't spawn off mail (leaving bug report in $filename): $sts";
-    }
+    die "Mail transport failed (leaving bug report in $filename): $^E\n";
 }
 
 sub _send_message_mailsend {
@@ -1066,9 +1183,10 @@ sub _send_message_mailsend {
     }
 
     $fh = $msg->open;
-    open(REP, "<$filename") or die "Couldn't open '$filename': $!\n";
-    while (<REP>) { print $fh $_ }
-    close(REP) or die "Error closing $filename: $!";
+    binmode($fh, ':raw');
+    print $fh _add_body_start() if $have_attachment;
+    print $fh _read_report($filename);
+    print $fh _add_attachments() if $have_attachment;
     $fh->close or die "Error sending mail: $!";
 
     print "\nMessage sent.\n";
@@ -1104,14 +1222,14 @@ EOT
         paraprint(<<"EOF"), die "\n";
 $message_start
 Because of this, there's no easy way to automatically send your
-message.
+report.
 
-A copy of your message has been saved in '$filename' for you to
+A copy of your report has been saved in '$filename' for you to
 send to '$address' with your normal mail client.
 EOF
     }
 
-    open( SENDMAIL, "|-", $sendmail, "-t", "-oi", "-f", $from )
+    open( SENDMAIL, "|-:raw", $sendmail, "-t", "-oi", "-f", $from )
         || die "'|$sendmail -t -oi -f $from' failed: $!";
     print SENDMAIL build_complete_message();
     if ( close(SENDMAIL) ) {
@@ -1133,7 +1251,8 @@ sub _fingerprint_lines_in_report {
     # we can track whether the user does any editing.
     # yes, *all* whitespace is ignored.
 
-    open(REP, "<$filename") or die "Unable to open report file '$filename': $!\n";
+    open(REP, '<:raw', $filename) or die "Unable to open report file '$filename': $!\n";
+    binmode(REP, ':raw :crlf') if $Is_MSWin32;
     while (my $line = <REP>) {
         $line =~ s/\s+//g;
         $new_lines++ if (!$REP{$line});
@@ -1165,17 +1284,17 @@ B<perlbug> S<[ B<-v> ]> S<[ B<-a> I<address> ]> S<[ B<-s> I<subject> ]>
 S<[ B<-b> I<body> | B<-f> I<inputfile> ]> S<[ B<-F> I<outputfile> ]>
 S<[ B<-r> I<returnaddress> ]>
 S<[ B<-e> I<editor> ]> S<[ B<-c> I<adminaddress> | B<-C> ]>
-S<[ B<-S> ]> S<[ B<-t> ]>  S<[ B<-d> ]>  S<[ B<-A> ]>  S<[ B<-h> ]> S<[ B<-T> ]>
+S<[ B<-S> ]> S<[ B<-t> ]>  S<[ B<-d> ]>  S<[ B<-h> ]> S<[ B<-T> ]>
 
 B<perlbug> S<[ B<-v> ]> S<[ B<-r> I<returnaddress> ]>
- S<[ B<-A> ]> S<[ B<-ok> | B<-okay> | B<-nok> | B<-nokay> ]>
+ S<[ B<-ok> | B<-okay> | B<-nok> | B<-nokay> ]>
 
 B<perlthanks>
 
 =head1 DESCRIPTION
 
 
-This program is designed to help you generate and send bug reports
+This program is designed to help you generate bug reports
 (and thank-you notes) about perl5 and the modules which ship with it.
 
 In most cases, you can just run it interactively from a command
@@ -1187,17 +1306,16 @@ non-core module (such as Tk, DBI, etc), then please see the
 documentation that came with that distribution to determine the
 correct place to report bugs.
 
-If you are unable to send your report using B<perlbug> (most likely
-because your system doesn't have a way to send mail that perlbug
-recognizes), you may be able to use this tool to compose your report
-and save it to a file which you can then send to B<perlbug@perl.org>
-using your regular mail client.
+Bug reports should be submitted to the GitHub issue tracker at
+L<https://github.com/Perl/perl5/issues>. The B<perlbug@perl.org>
+address no longer automatically opens tickets. You can use this tool
+to compose your report and save it to a file which you can then submit
+to the issue tracker.
 
 In extreme cases, B<perlbug> may not work well enough on your system
 to guide you through composing a bug report. In those cases, you
-may be able to use B<perlbug -d> to get system configuration
-information to include in a manually composed bug report to
-B<perlbug@perl.org>.
+may be able to use B<perlbug -d> or B<perl -V> to get system
+configuration information to include in your issue report.
 
 
 When reporting a bug, please run through this checklist:
@@ -1210,7 +1328,7 @@ Type C<perl -v> at the command line to find out.
 
 =item Are you running the latest released version of perl?
 
-Look at http://www.perl.org/ to find out.  If you are not using the
+Look at L<http://www.perl.org/> to find out.  If you are not using the
 latest released version, please try to replicate your bug on the
 latest stable release.
 
@@ -1219,9 +1337,6 @@ those which indicate you haven't also tested the current stable
 release of Perl, are likely to receive less attention from the
 volunteers who build and maintain Perl than reports about bugs in
 the current release.
-
-This tool isn't appropriate for reporting bugs in any version
-prior to Perl 5.0.
 
 =item Are you sure what you have is a bug?
 
@@ -1271,7 +1386,7 @@ Be sure to include the B<exact> error messages, if any.
 
 If you get a core dump (or equivalent), you may use a debugger
 (B<dbx>, B<gdb>, etc) to produce a stack trace to include in the bug
-report.  
+report.
 
 NOTE: unless your Perl has been compiled with debug info
 (often B<-g>), the stack trace is likely to be somewhat hard to use
@@ -1288,11 +1403,13 @@ will help a great deal.  In other words, try to analyze the problem
 
 =item Can you fix the bug yourself?
 
-A bug report which I<includes a patch to fix it> will almost
-definitely be fixed.  When sending a patch, please use the C<diff>
-program with the C<-u> option to generate "unified" diff files.
-Bug reports with patches are likely to receive significantly more
-attention and interest than those without patches.
+If so, that's great news; bug reports with patches are likely to
+receive significantly more attention and interest than those without
+patches.  Please submit your patch via the GitHub Pull Request workflow
+as described in B<perldoc> L<perlhack>.  You may also send patches to
+B<perl5-porters@perl.org>.  When sending a patch, create it using
+C<git format-patch> if possible, though a unified diff created with
+C<diff -pu> will do nearly as well.
 
 Your patch may be returned with requests for changes, or requests for more
 detailed explanations about your fix.
@@ -1301,26 +1418,11 @@ Here are a few hints for creating high-quality patches:
 
 Make sure the patch is not reversed (the first argument to diff is
 typically the original file, the second argument your changed file).
-Make sure you test your patch by applying it with the C<patch>
-program before you send it on its way.  Try to follow the same style
-as the code you are trying to patch.  Make sure your patch really
-does work (C<make test>, if the thing you're patching is covered
+Make sure you test your patch by applying it with C<git am> or the
+C<patch> program before you send it on its way.  Try to follow the
+same style as the code you are trying to patch.  Make sure your patch
+really does work (C<make test>, if the thing you're patching is covered
 by Perl's test suite).
-
-=item Can you use C<perlbug> to submit the report?
-
-B<perlbug> will, amongst other things, ensure your report includes
-crucial information about your version of perl.  If C<perlbug> is
-unable to mail your report after you have typed it in, you may have
-to compose the message yourself, add the output produced by C<perlbug
--d> and email it to B<perlbug@perl.org>.  If, for some reason, you
-cannot run C<perlbug> at all on your system, be sure to include the
-entire output produced by running C<perl -V> (note the uppercase V).
-
-Whether you use C<perlbug> or send the email manually, please make
-your Subject line informative.  "a bug" is not informative.  Neither
-is "perl crashes" nor is "HELP!!!".  These don't help.  A compact
-description of what's wrong is fine.
 
 =item Can you use C<perlbug> to submit a thank-you note?
 
@@ -1330,6 +1432,10 @@ smile.
 
 =back
 
+Please make your issue title informative.  "a bug" is not informative.
+Neither is "perl crashes" nor is "HELP!!!".  These don't help.  A compact
+description of what's wrong is fine.
+
 Having done your bit, please be prepared to wait, to be told the
 bug is in your code, or possibly to get no reply at all.  The
 volunteers who maintain Perl are busy folks, so if your problem is
@@ -1338,13 +1444,15 @@ a duplicate of an existing report, you may not receive a personal
 reply.
 
 If it is important to you that your bug be fixed, do monitor the
-perl5-porters@perl.org mailing list and the commit logs to development
+issue tracker (you will be subscribed to notifications for issues you
+submit or comment on) and the commit logs to development
 versions of Perl, and encourage the maintainers with kind words or
 offers of frosty beverages.  (Please do be kind to the maintainers.
-Harassing or flaming them is likely to have the opposite effect of
-the one you want.)
+Harassing or flaming them is likely to have the opposite effect of the
+one you want.)
 
-Feel free to update the ticket about your bug on http://rt.perl.org
+Feel free to update the ticket about your bug on
+L<https://github.com/Perl/perl5/issues>
 if a new version of Perl is released and your bug is still present.
 
 =head1 OPTIONS
@@ -1353,34 +1461,28 @@ if a new version of Perl is released and your bug is still present.
 
 =item B<-a>
 
-Address to send the report to.  Defaults to B<perlbug@perl.org>.
-
-=item B<-A>
-
-Don't send a bug received acknowledgement to the reply address.
-Generally it is only a sensible to use this option if you are a
-perl maintainer actively watching perl porters for your message to
-arrive.
+Address to send the report to instead of saving to a file.
 
 =item B<-b>
 
 Body of the report.  If not included on the command line, or
-in a file with B<-f>, you will get a chance to edit the message.
+in a file with B<-f>, you will get a chance to edit the report.
 
 =item B<-C>
 
-Don't send copy to administrator.
+Don't send copy to administrator when sending report by mail.
 
 =item B<-c>
 
-Address to send copy of report to.  Defaults to the address of the
+Address to send copy of report to when sending report by mail.
+Defaults to the address of the
 local perl administrator (recorded when perl was built).
 
 =item B<-d>
 
 Data mode (the default if you redirect or pipe output).  This prints out
-your configuration data, without mailing anything.  You can use this
-with B<-v> to get more complete data.
+your configuration data, without saving or mailing anything.  You can use
+this with B<-v> to get more complete data.
 
 =item B<-e>
 
@@ -1389,13 +1491,11 @@ Editor to use.
 =item B<-f>
 
 File containing the body of the report.  Use this to quickly send a
-prepared message.
+prepared report.
 
 =item B<-F>
 
-File to output the results to instead of sending as an email. Useful
-particularly when running perlbug on a machine with no direct internet
-connection.
+File to output the results to.  Defaults to B<perlbug.rep>.
 
 =item B<-h>
 
@@ -1429,6 +1529,11 @@ days old.
 
 As B<-nok> except it will report on older systems.
 
+=item B<-p>
+
+The names of one or more patch files or other text attachments to be
+included with the report.  Multiple files must be separated with commas.
+
 =item B<-r>
 
 Your return address.  The program will ask you to confirm its default
@@ -1436,16 +1541,17 @@ if you don't use this option.
 
 =item B<-S>
 
-Send without asking for confirmation.
+Save or send the report without asking for confirmation.
 
 =item B<-s>
 
-Subject to include with the message.  You will be prompted if you don't
+Subject to include with the report.  You will be prompted if you don't
 supply one on the command line.
 
 =item B<-t>
 
-Test mode.  The target address defaults to B<perlbug-test@perl.org>.
+Test mode.  Makes it possible to command perlbug from a pipe or file, for
+testing purposes.
 
 =item B<-T>
 
@@ -1463,12 +1569,12 @@ Kenneth Albanowski (E<lt>kjahds@kjahds.comE<gt>), subsequently
 I<doc>tored by Gurusamy Sarathy (E<lt>gsar@activestate.comE<gt>),
 Tom Christiansen (E<lt>tchrist@perl.comE<gt>), Nathan Torkington
 (E<lt>gnat@frii.comE<gt>), Charles F. Randall (E<lt>cfr@pobox.comE<gt>),
-Mike Guy (E<lt>mjtg@cam.a.ukE<gt>), Dominic Dunlop
-(E<lt>domo@computer.orgE<gt>), Hugo van der Sanden (E<lt>hv@crypt.org<gt>),
+Mike Guy (E<lt>mjtg@cam.ac.ukE<gt>), Dominic Dunlop
+(E<lt>domo@computer.orgE<gt>), Hugo van der Sanden (E<lt>hv@crypt.orgE<gt>),
 Jarkko Hietaniemi (E<lt>jhi@iki.fiE<gt>), Chris Nandor
 (E<lt>pudge@pobox.comE<gt>), Jon Orwant (E<lt>orwant@media.mit.eduE<gt>,
-Richard Foley (E<lt>richard.foley@rfi.netE<gt>), and Jesse Vincent
-(E<lt>jesse@bestpractical.com<gt>).
+Richard Foley (E<lt>richard.foley@rfi.netE<gt>), Jesse Vincent
+(E<lt>jesse@bestpractical.comE<gt>), and Craig A. Berry (E<lt>craigberry@mac.comE<gt>).
 
 =head1 SEE ALSO
 

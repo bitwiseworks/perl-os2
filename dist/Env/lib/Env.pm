@@ -1,6 +1,6 @@
 package Env;
 
-our $VERSION = '1.03';
+our $VERSION = '1.06';
 
 =head1 NAME
 
@@ -35,7 +35,7 @@ You may access its value
 
 or modify it
 
-    $PATH .= ":.";
+    $PATH .= ":/any/path";
     push @LD_LIBRARY_PATH, $dir;
 
 however you'd like. Bear in mind, however, that each access to a tied array
@@ -44,15 +44,16 @@ variable requires splitting the environment variable's string anew.
 The code:
 
     use Env qw(@PATH);
-    push @PATH, '.';
+    push @PATH, '/any/path';
 
-is equivalent to:
+is almost equivalent to:
 
     use Env qw(PATH);
-    $PATH .= ":.";
+    $PATH .= ":/any/path";
 
 except that if C<$ENV{PATH}> started out empty, the second approach leaves
-it with the (odd) value "C<:.>", but the first approach leaves it with "C<.>".
+it with the (odd) value "C<:/any/path>", but the first approach leaves it with
+"C</any/path>".
 
 To remove a tied environment variable from
 the environment, assign it the undefined value
@@ -74,7 +75,7 @@ Gregor N. Purdy E<lt>F<gregor@focusresearch.com>E<gt>
 =cut
 
 sub import {
-    my ($callpack) = caller(0);
+    my $callpack = caller(0);
     my $pack = shift;
     my @vars = grep /^[\$\@]?[A-Za-z_]\w*$/, (@_ ? @_ : keys(%ENV));
     return unless @vars;
@@ -211,7 +212,7 @@ sub SPLICE {
     my $length = shift;
     my @temp = split($sep, $ENV{$$self});
     if (wantarray) {
-	my @result = splice @temp, $self, $offset, $length, @_;
+	my @result = splice @temp, $offset, $length, @_;
 	$ENV{$$self} = join($sep, @temp);
 	return @result;
     } else {

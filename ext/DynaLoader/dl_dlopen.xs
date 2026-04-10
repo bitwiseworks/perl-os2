@@ -12,6 +12,7 @@
  *                      basic FreeBSD support, removed ClearError
  * 29th February 2000 - Alan Burlison: Added functionality to close dlopen'd
  *                      files when the interpreter exits
+ * 2015-03-12         - rurban: Added optional 3rd dl_find_symbol argument
  *
  */
 
@@ -72,6 +73,14 @@
      dlerror the error message will be reset to a null pointer. The
      SaveError function is used to save the error as soon as it happens.
 
+     Note that the POSIX standard does not require a per-thread buffer for
+     the error message, and so on multi-threaded builds, it can be overwritten
+     by another thread before SaveError accomplishes its task.  Some systems do
+     have a per-thread buffer.  The man page on your system should tell you.
+     If your code might be run on a system where this function is not thread
+     safe, you should protect your calls with mutexes.  See "Dealing with Error
+     Messages" below.
+
 
    Return Types
    ============
@@ -87,8 +96,7 @@
    Dean Roerich's Perl 5 API document. Also, have a look in the typemap 
    file (in the ext directory) for a fairly comprehensive list of types 
    that are already supported. If you are completely stuck, I suggest you
-   post a message to perl5-porters, comp.lang.perl.misc or if you are really 
-   desperate to me.
+   post a message to perl5-porters.
 
    Remember when you are making any changes that the return value from 
    dl_load_file is used as a parameter in the dl_find_symbol 
@@ -100,7 +108,7 @@
    ============================
    In order to make the handling of dynamic linking errors as generic as
    possible you should store any error messages associated with your
-   implementation with the StoreError function.
+   implementation with the SaveError function.
 
    In the case of SunOS the function dlerror returns the error message 
    associated with the last dynamic link error. As the SunOS dynamic 
@@ -113,12 +121,18 @@
 
    Note that SaveError() takes a printf format string. Use a "%s" as
    the first parameter if the error may contain any % characters.
+   dlerror() may not be thread-safe on some systems; if this code is run on
+   any of those, a mutex should be added.  khw (who added this comment) has no
+   idea which systems aren't thread-safe, but consider this possibility when
+   debugging.
 
 */
 
 #define PERL_NO_GET_CONTEXT
+#define PERL_EXT
 
 #include "EXTERN.h"
+#define PERL_IN_DL_DLOPEN_XS
 #include "perl.h"
 #include "XSUB.h"
 
@@ -157,7 +171,7 @@ BOOT:
     (void)dl_private_init(aTHX);
 
 
-void
+SV *
 dl_load_file(filename, flags=0)
     char *	filename
     int		flags
@@ -169,10 +183,11 @@ dl_load_file(filename, flags=0)
 #if defined(DLOPEN_WONT_DO_RELATIVE_PATHS)
     char pathbuf[PATH_MAX + 2];
     if (*filename != '/' && strchr(filename, '/')) {
-	if (getcwd(pathbuf, PATH_MAX - strlen(filename))) {
-	    strcat(pathbuf, "/");
-	    strcat(pathbuf, filename);
-	    filename = pathbuf;
+        const size_t filename_len = strlen(filename);
+        if (getcwd(pathbuf, PATH_MAX - filename_len)) {
+            const size_t path_len = strlen(pathbuf);
+            pathbuf[path_len] = '/';
+            filename = (char *) memcpy(pathbuf + path_len + 1, filename, filename_len + 1);
 	}
     }
 #endif
@@ -192,12 +207,15 @@ dl_load_file(filename, flags=0)
     DLDEBUG(1,PerlIO_printf(Perl_debug_log, "dl_load_file(%s,%x):\n", filename,flags));
     handle = dlopen(filename, mode) ;
     DLDEBUG(2,PerlIO_printf(Perl_debug_log, " libref=%lx\n", (unsigned long) handle));
-    ST(0) = sv_newmortal() ;
+    RETVAL = newSV_type(SVt_IV);
     if (handle == NULL)
 	SaveError(aTHX_ "%s",dlerror()) ;
     else
-	sv_setiv( ST(0), PTR2IV(handle));
+	sv_setiv(RETVAL, PTR2IV(handle));
 }
+
+  OUTPUT:
+    RETVAL
 
 
 int
@@ -213,10 +231,11 @@ dl_unload_file(libref)
     RETVAL
 
 
-void
-dl_find_symbol(libhandle, symbolname)
+SV *
+dl_find_symbol(libhandle, symbolname, ign_err=0)
     void *	libhandle
     char *	symbolname
+    int	        ign_err
     PREINIT:
     void *sym;
     CODE:
@@ -229,11 +248,15 @@ dl_find_symbol(libhandle, symbolname)
     sym = dlsym(libhandle, symbolname);
     DLDEBUG(2, PerlIO_printf(Perl_debug_log,
 			     "  symbolref = %lx\n", (unsigned long) sym));
-    ST(0) = sv_newmortal() ;
-    if (sym == NULL)
-	SaveError(aTHX_ "%s",dlerror()) ;
-    else
-	sv_setiv( ST(0), PTR2IV(sym));
+    RETVAL = newSV_type(SVt_IV);
+    if (sym == NULL) {
+        if (!ign_err)
+	    SaveError(aTHX_ "%s", dlerror());
+    } else
+	sv_setiv(RETVAL, PTR2IV(sym));
+
+    OUTPUT:
+        RETVAL
 
 
 void
@@ -244,25 +267,27 @@ dl_undef_symbols()
 
 # These functions should not need changing on any platform:
 
-void
+SV *
 dl_install_xsub(perl_name, symref, filename="$Package")
     char *		perl_name
     void *		symref 
     const char *	filename
     CODE:
-    DLDEBUG(2,PerlIO_printf(Perl_debug_log, "dl_install_xsub(name=%s, symref=%"UVxf")\n",
+    DLDEBUG(2,PerlIO_printf(Perl_debug_log, "dl_install_xsub(name=%s, symref=%" UVxf ")\n",
 		perl_name, PTR2UV(symref)));
-    ST(0) = sv_2mortal(newRV((SV*)newXS_flags(perl_name,
+    RETVAL = newRV((SV*)newXS_flags(perl_name,
 					      DPTR2FPTR(XSUBADDR_t, symref),
 					      filename, NULL,
-					      XS_DYNAMIC_FILENAME)));
+					      XS_DYNAMIC_FILENAME));
+    OUTPUT:
+        RETVAL
 
 
-char *
+SV *
 dl_error()
     CODE:
     dMY_CXT;
-    RETVAL = dl_last_error ;
+    RETVAL = newSVsv(MY_CXT.x_dl_last_error);
     OUTPUT:
     RETVAL
 
@@ -273,11 +298,13 @@ CLONE(...)
     CODE:
     MY_CXT_CLONE;
 
+    PERL_UNUSED_VAR(items);
+
     /* MY_CXT_CLONE just does a memcpy on the whole structure, so to avoid
      * using Perl variables that belong to another thread, we create our 
      * own for this thread.
      */
-    MY_CXT.x_dl_last_error = newSVpvn("", 0);
+    MY_CXT.x_dl_last_error = newSVpvs("");
 
 #endif
 

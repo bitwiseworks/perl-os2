@@ -3,22 +3,26 @@ use 5.006;
 use Carp;
 use warnings;
 use strict;
-use vars qw($VERSION $AUTOLOAD);
-$VERSION = '0.93'; # remember to update version in POD!
+our $AUTOLOAD;
+our $VERSION = '1.03'; # remember to update version in POD!
 # $DB::single=1;
-
+my $debug= $ENV{DEBUG_ATTRIBUTE_HANDLERS} || 0;
 my %symcache;
 sub findsym {
 	my ($pkg, $ref, $type) = @_;
 	return $symcache{$pkg,$ref} if $symcache{$pkg,$ref};
 	$type ||= ref($ref);
 	no strict 'refs';
-        foreach my $sym ( values %{$pkg."::"} ) {
+	my $symtab = \%{$pkg."::"};
+	for ( keys %$symtab ) { for my $sym ( $$symtab{$_} ) {
+	    if (ref $sym && $sym == $ref) {
+		return $symcache{$pkg,$ref} = \*{"$pkg:\:$_"};
+	    }
 	    use strict;
 	    next unless ref ( \$sym ) eq 'GLOB';
             return $symcache{$pkg,$ref} = \$sym
 		if *{$sym}{$type} && *{$sym}{$type} == $ref;
-	}
+	}}
 }
 
 my %validtype = (
@@ -69,21 +73,49 @@ sub import {
 		    local $Exporter::ExportLevel = 2;
 		    $tieclass->import(eval $args);
 	        }
-		$attr =~ s/__CALLER__/caller(1)/e;
-		$attr = caller()."::".$attr unless $attr =~ /::/;
-	        eval qq{
-	            sub $attr : ATTR(VAR) {
-			my (\$ref, \$data) = \@_[2,4];
-			my \$was_arrayref = ref \$data eq 'ARRAY';
-			\$data = [ \$data ] unless \$was_arrayref;
-			my \$type = ref(\$ref)||"value (".(\$ref||"<undef>").")";
-			 (\$type eq 'SCALAR')? tie \$\$ref,'$tieclass',$tiedata
-			:(\$type eq 'ARRAY') ? tie \@\$ref,'$tieclass',$tiedata
-			:(\$type eq 'HASH')  ? tie \%\$ref,'$tieclass',$tiedata
-			: die "Can't autotie a \$type\n"
-	            } 1
-	        } or die "Internal error: $@";
-	    }
+                my $code = qq{
+                    : ATTR(VAR) {
+                        my (\$ref, \$data) = \@_[2,4];
+                        my \$was_arrayref = ref \$data eq 'ARRAY';
+                        \$data = [ \$data ] unless \$was_arrayref;
+                        my \$type = ref(\$ref)||"value (".(\$ref||"<undef>").")";
+                          (\$type eq 'SCALAR')? tie \$\$ref,'$tieclass',$tiedata
+                        :(\$type eq 'ARRAY') ? tie \@\$ref,'$tieclass',$tiedata
+                        :(\$type eq 'HASH')  ? tie \%\$ref,'$tieclass',$tiedata
+                        : die "Can't autotie a \$type\n"
+                    }
+                };
+
+                if ($attr =~ /\A__CALLER__::/) {
+                    no strict 'refs';
+                    my $add_import = caller;
+                    my $next = defined &{ $add_import . '::import' } && \&{ $add_import . '::import' };
+                    *{ $add_import . '::import' } = sub {
+                        my $caller = caller;
+                        my $full_attr = $attr;
+                        $full_attr =~ s/__CALLER__/$caller/;
+                        eval qq{ sub $full_attr $code 1; }
+                            or die "Internal error: $@";
+
+                        goto &$next
+                            if $next;
+                        my $uni = defined &UNIVERSAL::import && \&UNIVERSAL::import;
+                        for my $isa (@{ $add_import . '::ISA' }) {
+                            if (my $import = $isa->can('import')) {
+                                goto &$import
+                                    if $import != $uni;
+                            }
+                        }
+                        goto &$uni
+                            if $uni;
+                    };
+                }
+                else {
+                    $attr = caller()."::".$attr unless $attr =~ /::/;
+                    eval qq{ sub $attr $code 1; }
+                      or die "Internal error: $@";
+                }
+            }
         }
         else {
             croak "Can't understand $_"; 
@@ -135,7 +167,9 @@ sub AUTOLOAD {
 	croak "Attribute handler '$2' doesn't handle $1 attributes";
 }
 
-my $builtin = qr/lvalue|method|locked|unique|shared/;
+my $builtin = $] ge '5.027000'
+    ? qr/lvalue|method|shared/
+    : qr/lvalue|method|locked|shared|unique/;
 
 sub _gen_handler_AH_() {
 	return sub {
@@ -207,7 +241,8 @@ sub _apply_handler_AH_ {
 	my ($declaration, $phase) = @_;
 	my ($pkg, $ref, $attr, $data, $raw, $handlerphase, $filename, $linenum) = @$declaration;
 	return unless $handlerphase->{$phase};
-	# print STDERR "Handling $attr on $ref in $phase with [$data]\n";
+        print STDERR "Handling $attr on $ref in $phase with [$data]\n"
+            if $debug;
 	my $type = ref $ref;
 	my $handler = "_ATTR_${type}_${attr}";
 	my $sym = findsym($pkg, $ref);
@@ -215,12 +250,29 @@ sub _apply_handler_AH_ {
 	no warnings;
 	if (!$raw && defined($data)) {
 	    if ($data ne '') {
-		my $evaled = eval("package $pkg; no warnings; no strict;
-				   local \$SIG{__WARN__}=sub{die}; [$data]");
-		$data = $evaled unless $@;
+                # keeping the minimum amount of code inside the eval string
+                # makes debugging perl internals issues with this logic easier.
+                my $code= "package $pkg; my \$ref= [$data]; \$data= \$ref; 1";
+                print STDERR "Evaling: '$code'\n"
+                    if $debug;
+                local $SIG{__WARN__} = sub{ die };
+                no strict;
+                no warnings;
+                # Note in production we do not need to use the return value from
+                # the eval or even consult $@ after the eval - if the evaled code
+                # compiles and runs successfully then it will update $data with
+                # the compiled form, if it fails then $data stays unchanged. The
+                # return value and $@ are only used for debugging purposes.
+                # IOW we could just replace the following with eval($code);
+                eval($code) or do {
+                    print STDERR "Eval failed: $@"
+                        if $debug;
+                };
 	    }
 	    else { $data = undef }
 	}
+
+        # now call the handler with the $data decoded (maybe)
 	$pkg->$handler($sym,
 		       (ref $sym eq 'GLOB' ? *{$sym}{ref $ref}||$ref : $ref),
 		       $attr,
@@ -266,8 +318,7 @@ Attribute::Handlers - Simpler definition of attribute handlers
 
 =head1 VERSION
 
-This document describes version 0.93 of Attribute::Handlers,
-released July 20, 2011.
+This document describes version 1.03 of Attribute::Handlers.
 
 =head1 SYNOPSIS
 
@@ -366,7 +417,7 @@ Thereafter, any subroutine declared with a C<:Loud> attribute in the class
 LoudDecl:
 
     package LoudDecl;
-    
+
     sub foo: Loud {...}
 
 causes the above handler to be invoked, and passed:
@@ -581,7 +632,7 @@ variables. For example:
 
     use Attribute::Handlers;
     use Tie::Cycle;
-    
+
     sub UNIVERSAL::Cycle : ATTR(SCALAR) {
 	my ($package, $symbol, $referent, $attr, $data, $phase) = @_;
 	$data = [ $data ] unless ref $data eq 'ARRAY';
@@ -591,9 +642,9 @@ variables. For example:
     # and thereafter...
 
     package main;
-    
+
     my $next : Cycle('A'..'Z');     # $next is now a tied variable
-    
+
     while (<>) {
 	print $next;
     }
@@ -655,7 +706,7 @@ If the attribute name is unqualified, the attribute is installed in the
 current package. Otherwise it is installed in the qualifier's package:
 
     package Here;
-    
+
     use Attribute::Handlers autotie => {
          Other::Good => Tie::SecureHash, # tie attr installed in Other::
                  Bad => Tie::Taxes,      # tie attr installed in Here::
@@ -667,13 +718,13 @@ and need to export their attributes to any module that calls them. To
 facilitate this, Attribute::Handlers recognizes a special "pseudo-class" --
 C<__CALLER__>, which may be specified as the qualifier of an attribute:
 
-    package Tie::Me::Kangaroo:Down::Sport;
-    
+    package Tie::Me::Kangaroo::Down::Sport;
+
     use Attribute::Handlers autotie =>
 	 { '__CALLER__::Roo' => __PACKAGE__ };
 
 This causes Attribute::Handlers to define the C<Roo> attribute in the package
-that imports the Tie::Me::Kangaroo:Down::Sport module.
+that imports the Tie::Me::Kangaroo::Down::Sport module.
 
 Note that it is important to quote the __CALLER__::Roo identifier because
 a bug in perl 5.8 will refuse to parse it and cause an unknown error.
@@ -792,7 +843,7 @@ would cause the following handlers to be invoked:
 
 
     # my %hsh :Good(q/bye) :Omni(q/bus/);
-                              
+
     MyClass::Good:ATTR(HASH)( 'SomeOtherClass',     # class
                               'LEXICAL',            # no typeglob
                               \%hsh,                # referent
@@ -800,7 +851,7 @@ would cause the following handlers to be invoked:
                               'q/bye'               # raw attr data
                               'CHECK',              # compiler phase
                             );
-                    
+
     MyClass::Omni:ATTR(HASH)( 'SomeOtherClass',     # class
                               'LEXICAL',            # no typeglob
                               \%hsh,                # referent
@@ -878,7 +929,7 @@ C<SCALAR>, C<ARRAY>, C<HASH>, C<CODE>, or C<ANY>.
 =item C<Attribute handler %s doesn't handle %s attributes>
 
 A handler for attributes of the specified name I<was> defined, but not
-for the specified type of declaration. Typically encountered whe trying
+for the specified type of declaration. Typically encountered when trying
 to apply a C<VAR> attribute handler to a subroutine, or a C<SCALAR>
 attribute handler to some other type of variable.
 
@@ -931,6 +982,6 @@ Bug reports and other feedback are most welcome.
 
 =head1 COPYRIGHT AND LICENSE
 
-         Copyright (c) 2001-2009, Damian Conway. All Rights Reserved.
+         Copyright (c) 2001-2014, Damian Conway. All Rights Reserved.
        This module is free software. It may be used, redistributed
            and/or modified under the same terms as Perl itself.

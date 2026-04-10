@@ -10,7 +10,10 @@ BEGIN {
 
 use strict;
 
-use Test::More tests => 15;
+my $re_taint_bit = 0x00100000;
+my $re_eval_bit = 0x00200000;
+
+use Test::More tests => 16;
 require_ok( 're' );
 
 # setcolor
@@ -42,20 +45,24 @@ isnt( $ENV{PERL_RE_COLORS}, '',
 re::bits(0, 'nosuchsubpragma');
 like( $warn, qr/Unknown "re" subpragma/, 
 	'... should warn about unknown subpragma' );
-ok( re::bits(0, 'taint') & 0x00100000, '... should set taint bits' );
-ok( re::bits(0, 'eval')  & 0x00200000, '... should set eval bits' );
+ok( re::bits(0, 'taint') & $re_taint_bit, '... should set taint bits' );
+ok( re::bits(0, 'eval')  & $re_eval_bit, '... should set eval bits' );
+
+undef $warn;
+eval "use re qw(debug ALL)";
+like( $warn, qr/"Debug" not "debug"/, 'debug with debugging type should warn');
 
 local $^H;
 
 # import
 re->import('taint', 'eval');
-ok( $^H & 0x00100000, 'import should set taint bits in $^H when requested' );
-ok( $^H & 0x00200000, 'import should set eval bits in $^H when requested' );
+ok( $^H & $re_taint_bit, 'import should set taint bits in $^H when requested' );
+ok( $^H & $re_eval_bit, 'import should set eval bits in $^H when requested' );
 
 re->unimport('taint');
-ok( !( $^H & 0x00100000 ), 'unimport should clear bits in $^H when requested' );
+ok( !( $^H & $re_taint_bit ), 'unimport should clear bits in $^H when requested' );
 re->unimport('eval');
-ok( !( $^H & 0x00200000 ), '... and again' );
+ok( !( $^H & $re_eval_bit ), '... and again' );
 my $reg=qr/(foo|bar|baz|blah)/;
 close STDERR;
 eval"use re Debug=>'ALL'";

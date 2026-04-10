@@ -1,14 +1,14 @@
 #!./perl -w
 
 BEGIN {
+    chdir 't' if -d 't';
     require './test.pl';
-    skip_all_without_dynamic_extension('Encode');
-    skip_all("EBCDIC") if $::IS_EBCDIC;
-    skip_all_without_perlio();
+    skip_all("encoding.pm is no longer supported by the perl core");
 }
 
 plan tests => 72;
 
+no warnings 'deprecated';
 use encoding "greek"; # iso 8859-7
 
 # U+0391, \xC1, \301, GREEK CAPITAL LETTER ALPHA

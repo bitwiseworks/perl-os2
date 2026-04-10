@@ -10,7 +10,7 @@ BEGIN {
     require 'test.pl';		# we use runperl from 'test.pl', so can't use Test::More
 }
 
-plan tests => 159;
+plan tests => 167;
 
 require_ok("B::Concise");
 
@@ -42,7 +42,6 @@ like($out, qr/print/, "'-exec' option output has print opcode");
 
 ######## API tests v.60 
 
-use Config;	# used for perlio check
 B::Concise->import(qw( set_style set_style_standard add_callback 
 		       add_style walk_output reset_sequence ));
 
@@ -70,23 +69,18 @@ eval {  walk_output($foo) };
 is ($@, '', "walk_output() accepts obj that can print");
 
 # test that walk_output accepts a HANDLE arg
-SKIP: {
-    skip("no perlio in this build", 4)
-        unless $Config::Config{useperlio};
-
-    foreach my $foo (\*STDOUT, \*STDERR) {
-	eval {  walk_output($foo) };
-	is ($@, '', "walk_output() accepts STD* " . ref $foo);
-    }
-
-    # now test a ref to scalar
-    eval {  walk_output(\my $junk) };
-    is ($@, '', "walk_output() accepts ref-to-sprintf target");
-
-    $junk = "non-empty";
-    eval {  walk_output(\$junk) };
-    is ($@, '', "walk_output() accepts ref-to-non-empty-scalar");
+foreach my $foo (\*STDOUT, \*STDERR) {
+    eval {  walk_output($foo) };
+    is ($@, '', "walk_output() accepts STD* " . ref $foo);
 }
+
+# now test a ref to scalar
+eval {  walk_output(\my $junk) };
+is ($@, '', "walk_output() accepts ref-to-sprintf target");
+
+$junk = "non-empty";
+eval {  walk_output(\$junk) };
+is ($@, '', "walk_output() accepts ref-to-non-empty-scalar");
 
 ## add_style
 my @stylespec;
@@ -129,229 +123,224 @@ sub render {
     return $out;
 }
 
-SKIP: {
-    # tests output to GLOB, using perlio feature directly
-    skip "no perlio on this build", 127
-	unless $Config::Config{useperlio};
-    
-    set_style_standard('concise');  # MUST CALL before output needed
-    
-    @options = qw(
-		  -basic -exec -tree -compact -loose -vt -ascii
-		  -base10 -bigendian -littleendian
-		  );
-    foreach $opt (@options) {
-	($out) = render($opt, $func);
-	isnt($out, '', "got output with option $opt");
-    }
-    
-    ## test output control via walk_output
-    
-    my $treegen = B::Concise::compile('-basic', $func); # reused
-    
-    { # test output into a package global string (sprintf-ish)
-	our $thing;
-	walk_output(\$thing);
-	$treegen->();
-	ok($thing, "walk_output to our SCALAR, output seen");
-    }
-    
-    # test walkoutput acceptance of a scalar-bound IO handle
-    open (my $fh, '>', \my $buf);
-    walk_output($fh);
+# tests output to GLOB, using perlio feature directly
+set_style_standard('concise');  # MUST CALL before output needed
+
+@options = qw(
+                 -basic -exec -tree -compact -loose -vt -ascii
+                 -base10 -bigendian -littleendian
+         );
+foreach $opt (@options) {
+    ($out) = render($opt, $func);
+    isnt($out, '', "got output with option $opt");
+}
+
+## test output control via walk_output
+
+my $treegen = B::Concise::compile('-basic', $func); # reused
+
+{ # test output into a package global string (sprintf-ish)
+    our $thing;
+    walk_output(\$thing);
     $treegen->();
-    ok($buf, "walk_output to GLOB, output seen");
-    
-    ## test B::Concise::compile error checking
-    
-    # call compile on non-CODE ref items
-    if (0) {
-	# pending STASH splaying
-	
-	foreach my $ref ([], {}) {
-	    my $typ = ref $ref;
-	    walk_output(\my $out);
-	    eval { B::Concise::compile('-basic', $ref)->() };
-	    like ($@, qr/^err: not a coderef: $typ/,
-		  "compile detects $typ-ref where expecting subref");
-	    is($out,'', "no output when errd"); # announcement prints
-	}
+    ok($thing, "walk_output to our SCALAR, output seen");
+}
+
+# test walkoutput acceptance of a scalar-bound IO handle
+open (my $fh, '>', \my $buf);
+walk_output($fh);
+$treegen->();
+ok($buf, "walk_output to GLOB, output seen");
+
+## test B::Concise::compile error checking
+
+# call compile on non-CODE ref items
+if (0) {
+    # pending STASH splaying
+
+    foreach my $ref ([], {}) {
+        my $typ = ref $ref;
+        walk_output(\my $out);
+        eval { B::Concise::compile('-basic', $ref)->() };
+        like ($@, qr/^err: not a coderef: $typ/,
+              "compile detects $typ-ref where expecting subref");
+        is($out,'', "no output when errd"); # announcement prints
     }
-    
-    # test against a bogus autovivified subref.
-    # in debugger, it should look like:
-    #  1  CODE(0x84840cc)
-    #      -> &CODE(0x84840cc) in ???
+}
 
-    my ($res,$err);
-    TODO: {
-	#local $TODO = "\tdoes this handling make sense ?";
+# test against a bogus autovivified subref.
+# in debugger, it should look like:
+#  1  CODE(0x84840cc)
+#      -> &CODE(0x84840cc) in ???
 
-	sub declared_only;
-	($res,$err) = render('-basic', \&declared_only);
-	like ($res, qr/coderef CODE\(0x[0-9a-fA-F]+\) has no START/,
-	      "'sub decl_only' seen as having no START");
+my ($res,$err);
+TODO: {
+    #local $TODO = "\tdoes this handling make sense ?";
 
-	sub defd_empty {};
-	($res,$err) = render('-basic', \&defd_empty);
-	my @lines = split(/\n/, $res);
-	is(scalar @lines, 3,
-	   "'sub defd_empty {}' seen as 3 liner");
+    sub declared_only;
+    ($res,$err) = render('-basic', \&declared_only);
+    like ($res, qr/coderef CODE\(0x[0-9a-fA-F]+\) has no START/,
+          "'sub decl_only' seen as having no START");
 
-	is(1, $res =~ /leavesub/ && $res =~ /(next|db)state/,
-	   "'sub defd_empty {}' seen as 2 ops: leavesub,nextstate");
+    sub defd_empty {};
+    ($res,$err) = render('-basic', \&defd_empty);
+    my @lines = split(/\n/, $res);
+    is(scalar @lines, 3,
+       "'sub defd_empty {}' seen as 3 liner");
 
-	($res,$err) = render('-basic', \&not_even_declared);
-	like ($res, qr/coderef CODE\(0x[0-9a-fA-F]+\) has no START/,
-	      "'\&not_even_declared' seen as having no START");
+    is(1, $res =~ /leavesub/ && $res =~ /(next|db)state/,
+       "'sub defd_empty {}' seen as 2 ops: leavesub,nextstate");
 
-	{
-	    package Bar;
-	    our $AUTOLOAD = 'garbage';
-	    sub AUTOLOAD { print "# in AUTOLOAD body: $AUTOLOAD\n" }
-	}
-	($res,$err) = render('-basic', Bar::auto_func);
-	like ($res, qr/unknown function \(Bar::auto_func\)/,
-	      "Bar::auto_func seen as unknown function");
+    ($res,$err) = render('-basic', \&not_even_declared);
+    like ($res, qr/coderef CODE\(0x[0-9a-fA-F]+\) has no START/,
+          "'\&not_even_declared' seen as having no START");
 
-	($res,$err) = render('-basic', \&Bar::auto_func);
-	like ($res, qr/coderef CODE\(0x[0-9a-fA-F]+\) has no START/,
-	      "'\&Bar::auto_func' seen as having no START");
-
-	($res,$err) = render('-basic', \&Bar::AUTOLOAD);
-	like ($res, qr/in AUTOLOAD body: /, "found body of Bar::AUTOLOAD");
-
+    {
+        package Bar;
+        our $AUTOLOAD = 'garbage';
+        sub AUTOLOAD { print "# in AUTOLOAD body: $AUTOLOAD\n" }
     }
-    ($res,$err) = render('-basic', Foo::bar);
-    like ($res, qr/unknown function \(Foo::bar\)/,
-	  "BC::compile detects fn-name as unknown function");
+    ($res,$err) = render('-basic', Bar::auto_func);
+    like ($res, qr/unknown function \(Bar::auto_func\)/,
+          "Bar::auto_func seen as unknown function");
 
-    # v.62 tests
+    ($res,$err) = render('-basic', \&Bar::auto_func);
+    like ($res, qr/coderef CODE\(0x[0-9a-fA-F]+\) has no START/,
+          "'\&Bar::auto_func' seen as having no START");
 
-    pass ("TEST POST-COMPILE OPTION-HANDLING IN WALKER SUBROUTINE");
-    
-    my $sample;
+    ($res,$err) = render('-basic', \&Bar::AUTOLOAD);
+    like ($res, qr/in AUTOLOAD body: /, "found body of Bar::AUTOLOAD");
 
-    my $walker = B::Concise::compile('-basic', $func);
-    walk_output(\$sample);
-    $walker->('-exec');
-    like($sample, qr/goto/m, "post-compile -exec");
+}
+($res,$err) = render('-basic', Foo::bar);
+like ($res, qr/unknown function \(Foo::bar\)/,
+      "BC::compile detects fn-name as unknown function");
 
-    walk_output(\$sample);
-    $walker->('-basic');
-    unlike($sample, qr/goto/m, "post-compile -basic");
+# v.62 tests
+
+pass ("TEST POST-COMPILE OPTION-HANDLING IN WALKER SUBROUTINE");
+
+my $sample;
+
+my $walker = B::Concise::compile('-basic', $func);
+walk_output(\$sample);
+$walker->('-exec');
+like($sample, qr/goto/m, "post-compile -exec");
+
+walk_output(\$sample);
+$walker->('-basic');
+unlike($sample, qr/goto/m, "post-compile -basic");
 
 
-    # bang at it combinatorically
-    my %combos;
-    my @modes = qw( -basic -exec );
-    my @styles = qw( -concise -debug -linenoise -terse );
+# bang at it combinatorically
+my %combos;
+my @modes = qw( -basic -exec );
+my @styles = qw( -concise -debug -linenoise -terse );
 
-    # prep samples
+# prep samples
+for $style (@styles) {
+    for $mode (@modes) {
+        walk_output(\$sample);
+        reset_sequence();
+        $walker->($style, $mode);
+        $combos{"$style$mode"} = $sample;
+    }
+}
+# crosscheck that samples are all text-different
+@list = sort keys %combos;
+for $i (0..$#list) {
+    for $j ($i+1..$#list) {
+        isnt ($combos{$list[$i]}, $combos{$list[$j]},
+              "combos for $list[$i] and $list[$j] are different, as expected");
+    }
+}
+
+# add samples with styles in different order
+for $mode (@modes) {
     for $style (@styles) {
-	for $mode (@modes) {
-	    walk_output(\$sample);
-	    reset_sequence();
-	    $walker->($style, $mode);
-	    $combos{"$style$mode"} = $sample;
-	}
+        reset_sequence();
+        walk_output(\$sample);
+        $walker->($mode, $style);
+        $combos{"$mode$style"} = $sample;
     }
-    # crosscheck that samples are all text-different
-    @list = sort keys %combos;
-    for $i (0..$#list) {
-	for $j ($i+1..$#list) {
-	    isnt ($combos{$list[$i]}, $combos{$list[$j]},
-		  "combos for $list[$i] and $list[$j] are different, as expected");
-	}
-    }
-    
-    # add samples with styles in different order
-    for $mode (@modes) {
-	for $style (@styles) {
-	    reset_sequence();
-	    walk_output(\$sample);
-	    $walker->($mode, $style);
-	    $combos{"$mode$style"} = $sample;
-	}
-    }
-    # test commutativity of flags, ie that AB == BA
-    for $mode (@modes) {
-	for $style (@styles) {
-	    is ( $combos{"$style$mode"},
-		 $combos{"$mode$style"},
-		 "results for $style$mode vs $mode$style are the same" );
-	}
-    }
-
-    my %save = %combos;
-    %combos = ();	# outputs for $mode=any($order) and any($style)
-
-    # add more samples with switching modes & sticky styles
+}
+# test commutativity of flags, ie that AB == BA
+for $mode (@modes) {
     for $style (@styles) {
-	walk_output(\$sample);
-	reset_sequence();
-	$walker->($style);
-	for $mode (@modes) {
-	    walk_output(\$sample);
-	    reset_sequence();
-	    $walker->($mode);
-	    $combos{"$style/$mode"} = $sample;
-	}
+        is ( $combos{"$style$mode"},
+             $combos{"$mode$style"},
+             "results for $style$mode vs $mode$style are the same" );
     }
-    # crosscheck that samples are all text-different
-    @nm = sort keys %combos;
-    for $i (0..$#nm) {
-	for $j ($i+1..$#nm) {
-	    isnt ($combos{$nm[$i]}, $combos{$nm[$j]},
-		  "results for $nm[$i] and $nm[$j] are different, as expected");
-	}
-    }
-    
-    # add samples with switching styles & sticky modes
+}
+
+my %save = %combos;
+%combos = ();	# outputs for $mode=any($order) and any($style)
+
+# add more samples with switching modes & sticky styles
+for $style (@styles) {
+    walk_output(\$sample);
+    reset_sequence();
+    $walker->($style);
     for $mode (@modes) {
-	walk_output(\$sample);
-	reset_sequence();
-	$walker->($mode);
-	for $style (@styles) {
-	    walk_output(\$sample);
-	    reset_sequence();
-	    $walker->($style);
-	    $combos{"$mode/$style"} = $sample;
-	}
+        walk_output(\$sample);
+        reset_sequence();
+        $walker->($mode);
+        $combos{"$style/$mode"} = $sample;
     }
-    # test commutativity of flags, ie that AB == BA
-    for $mode (@modes) {
-	for $style (@styles) {
-	    is ( $combos{"$style/$mode"},
-		 $combos{"$mode/$style"},
-		 "results for $style/$mode vs $mode/$style are the same" );
-	}
+}
+# crosscheck that samples are all text-different
+@nm = sort keys %combos;
+for $i (0..$#nm) {
+    for $j ($i+1..$#nm) {
+        isnt ($combos{$nm[$i]}, $combos{$nm[$j]},
+              "results for $nm[$i] and $nm[$j] are different, as expected");
     }
+}
+
+# add samples with switching styles & sticky modes
+for $mode (@modes) {
+    walk_output(\$sample);
+    reset_sequence();
+    $walker->($mode);
+    for $style (@styles) {
+        walk_output(\$sample);
+        reset_sequence();
+        $walker->($style);
+        $combos{"$mode/$style"} = $sample;
+    }
+}
+# test commutativity of flags, ie that AB == BA
+for $mode (@modes) {
+    for $style (@styles) {
+        is ( $combos{"$style/$mode"},
+             $combos{"$mode/$style"},
+             "results for $style/$mode vs $mode/$style are the same" );
+    }
+}
 
 
-    #now do double crosschecks: commutativity across stick / nostick
-    %combos = (%combos, %save);
+#now do double crosschecks: commutativity across stick / nostick
+%combos = (%combos, %save);
 
-    # test commutativity of flags, ie that AB == BA
-    for $mode (@modes) {
-	for $style (@styles) {
+# test commutativity of flags, ie that AB == BA
+for $mode (@modes) {
+    for $style (@styles) {
 
-	    is ( $combos{"$style$mode"},
-		 $combos{"$style/$mode"},
-		 "$style$mode VS $style/$mode are the same" );
+        is ( $combos{"$style$mode"},
+             $combos{"$style/$mode"},
+             "$style$mode VS $style/$mode are the same" );
 
-	    is ( $combos{"$mode$style"},
-		 $combos{"$mode/$style"},
-		 "$mode$style VS $mode/$style are the same" );
+        is ( $combos{"$mode$style"},
+             $combos{"$mode/$style"},
+             "$mode$style VS $mode/$style are the same" );
 
-	    is ( $combos{"$style$mode"},
-		 $combos{"$mode/$style"},
-		 "$style$mode VS $mode/$style are the same" );
+        is ( $combos{"$style$mode"},
+             $combos{"$mode/$style"},
+             "$style$mode VS $mode/$style are the same" );
 
-	    is ( $combos{"$mode$style"},
-		 $combos{"$style/$mode"},
-		 "$mode$style VS $style/$mode are the same" );
-	}
+        is ( $combos{"$mode$style"},
+             $combos{"$style/$mode"},
+             "$mode$style VS $style/$mode are the same" );
     }
 }
 
@@ -381,9 +370,7 @@ like($out, qr/Config::AUTOLOAD exists in stash, but has no START/,
     "coderef properly undefined");
 
 # test -stash and -src rendering
-# todo: stderr=1 puts '-e syntax OK' into $out,
-# conceivably fouling one of the lines that are tested
-$out = runperl ( switches => ["-MO=Concise,-stash=B::Concise,-src"],
+$out = runperl ( switches => ["-MO=-qq,Concise,-stash=B::Concise,-src"],
 		 prog => '-e 1', stderr => 1 );
 
 like($out, qr/FUNC: \*B::Concise::concise_cv_obj/,
@@ -399,7 +386,7 @@ $out = runperl ( switches => ["-MStorable", "-MO=Concise,-stash=Storable,-src"],
 		 prog => '-e 1', stderr => 1 );
 
 like($out, qr/FUNC: \*Storable::BIN_MAJOR/,
-     "stash rendering includes constant sub: PAD_FAKELEX_MULTI");
+     "stash rendering has constant sub: Storable::BIN_MAJOR");
 
 like($out, qr/BIN_MAJOR is a constant sub, optimized to a IV/,
      "stash rendering identifies it as constant");
@@ -413,8 +400,12 @@ like($out, qr/FUNC: \*ExtUtils::Mksymlists::_write_vms/,
 $out = runperl ( switches => ["-MO=Concise,-stash=Data::Dumper,-src,-exec"],
 		 prog => '-e 1', stderr => 1 );
 
-like($out, qr/FUNC: \*Data::Dumper::format_refaddr/,
-     "stash rendering loads package as needed");
+SKIP: {
+    skip "Data::Dumper is statically linked", 1
+	if $Config::Config{static_ext} =~ m|\bData/Dumper\b|;
+    like($out, qr/FUNC: \*Data::Dumper::format_refaddr/,
+	"stash rendering loads package as needed");
+}
 
 my $prog = q{package FOO; sub bar { print q{bar} } package main; FOO::bar(); };
 
@@ -447,5 +438,79 @@ ok index $out=~s/\r\n/\n/gr=~s/gvsv\(\*_\)/gvsv[*_]/r, <<'end'=~s/\r\n/\n/gr =>>
                 `-<5>print-+-<3>pushmark
                            `-ex-rv2sv---<4>gvsv[*_]
 end
+
+# -nobanner
+$out =
+ runperl(
+  switches => ["-MO=Concise,-nobanner,foo"], prog=>'sub foo{}', stderr => 1
+ );
+unlike $out, qr/main::foo/, '-nobanner';
+
+# glob
+$out =
+ runperl(
+  switches => ["-MO=Concise"], prog=>'glob(q{.})', stderr => 1
+ );
+like $out, qr/\*<none>::/, 'glob(q{.})';
+
+# Test op_other in -debug
+$out = runperl(
+    switches => ["-MO=Concise,-debug,xx"],
+    prog => q{sub xx { if ($a) { return $b } }},
+    stderr => 1,
+);
+
+$out =~s/\r\n/\n/g;
+
+# Look for OP_AND
+$end = <<'EOF';
+LOGOP \(0x\w+\)
+	op_next		0x\w+
+	op_other	(0x\w+)
+	op_sibling	0
+	op_ppaddr	PL_ppaddr\[OP_AND\]
+EOF
+
+$end =~ s/\r\n/\n/g;
+
+like $out, qr/$end/, 'OP_AND has op_other';
+
+# like(..) above doesn't fill in $1
+$out =~ $end;
+my $next = $1;
+
+# Check it points to a PUSHMARK
+$end = <<'EOF';
+OP \(<NEXT>\)
+	op_next		0x\w+
+	op_sibling	0x\w+
+	op_ppaddr	PL_ppaddr\[OP_PUSHMARK\]
+EOF
+
+$end =~ s/<NEXT>/$next/;
+
+like $out, qr/$end/, 'OP_AND->op_other points correctly';
+
+# test nextstate hints display
+
+{
+
+    $out = runperl(
+        switches => ["-MO=Concise"],
+        prog => q{my $x; use strict; use warnings; $x++; use feature q(:5.11); $x++},
+        stderr => 1,
+    );
+
+    my @hints = $out =~ /nextstate\([^)]+\) (.*) ->/g;
+
+    # handle test script run with PERL_UNICODE=""
+    s/>,<,// for @hints;
+    s/%,// for @hints;
+
+    is(scalar(@hints), 3, "3 hints");
+    is($hints[0], 'v:{',                           "hints[0]");
+    is($hints[1], 'v:*,&,{,x*,x&,x$,$',            "hints[1]");
+    is($hints[2], 'v:us,*,&,{,x*,x&,x$,$,fea=15',  "hints[2]");
+}
 
 __END__

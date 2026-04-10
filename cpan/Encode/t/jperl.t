@@ -1,10 +1,10 @@
 #
-# $Id: jperl.t,v 2.1 2006/05/03 18:24:10 dankogai Exp $
+# $Id: jperl.t,v 2.7 2023/11/10 01:10:50 dankogai Exp $
 #
 # This script is written in euc-jp
 
 BEGIN {
-    require Config; import Config;
+    require Config; Config->import();
     if ($Config{'extensions'} !~ /\bEncode\b/) {
       print "1..0 # Skip: Encode was not built\n";
       exit 0;
@@ -17,6 +17,10 @@ BEGIN {
     print "1..0 # Skip: EBCDIC\n";
     exit 0;
     }
+    if ($] >= 5.025 and !$Config{usecperl}) {
+    print "1..0 # Skip: encoding pragma not supported in Perl 5.25 or later\n";
+    exit(0);
+    }
     $| = 1;
 }
 
@@ -27,6 +31,7 @@ use strict;
 use Test::More tests => 15; # black magic tests commented out
 my $Debug = shift;
 
+no warnings "deprecated";
 no encoding; # ensure
 my $Enamae = "\xbe\xae\xbb\xf4\x20\xc3\xc6"; # euc-jp, with \x escapes
 use encoding "euc-jp";

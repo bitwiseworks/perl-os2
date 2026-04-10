@@ -1,11 +1,13 @@
-# copied over from JSON::PP::XS and modified to use JSON::PP
-use strict;
-use Test::More;
+# copied over from JSON::XS and modified to use JSON::PP
 
-BEGIN { plan tests => 76 };
+use strict;
+use warnings;
+use Test::More;
+BEGIN { plan tests => 78 + 2 };
 
 BEGIN { $ENV{PERL_JSON_BACKEND} = 0; }
 
+use utf8;
 use JSON::PP;
 
 
@@ -21,6 +23,8 @@ ok ($false == !$true);
 ok (JSON::PP::is_bool $false);
 ok (++$false == 1);
 ok (!JSON::PP::is_bool $false);
+ok (!JSON::PP::is_bool "JSON::PP::Boolean");
+ok (!JSON::PP::is_bool {}); # GH-34
 
 ok (JSON::PP->new->allow_nonref (1)->decode ('5') == 5);
 ok (JSON::PP->new->allow_nonref (1)->decode ('-5') == -5);
@@ -42,6 +46,14 @@ ok ('[false]' eq encode_json [\0]);
 ok ('[null]'  eq encode_json [undef]);
 ok ('[true]'  eq encode_json [JSON::PP::true]);
 ok ('[false]' eq encode_json [JSON::PP::false]);
+
+SKIP: {
+  skip "core booleans not supported", 2
+    unless JSON::PP->can("CORE_BOOL") && JSON::PP::CORE_BOOL();
+
+  ok ('[true]'  eq encode_json [!!1]);
+  ok ('[false]' eq encode_json [!!0]);
+}
 
 for my $v (1, 2, 3, 5, -1, -2, -3, -4, 100, 1000, 10000, -999, -88, -7, 7, 88, 999, -1e5, 1e6, 1e7, 1e8) {
    ok ($v == ((decode_json "[$v]")->[0]));

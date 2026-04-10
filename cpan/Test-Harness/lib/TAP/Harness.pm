@@ -1,17 +1,14 @@
 package TAP::Harness;
 
 use strict;
+use warnings;
 use Carp;
 
 use File::Spec;
 use File::Path;
 use IO::Handle;
 
-use TAP::Base;
-
-use vars qw($VERSION @ISA);
-
-@ISA = qw(TAP::Base);
+use base 'TAP::Base';
 
 =head1 NAME
 
@@ -19,11 +16,11 @@ TAP::Harness - Run test scripts with statistics
 
 =head1 VERSION
 
-Version 3.23
+Version 3.50
 
 =cut
 
-$VERSION = '3.23';
+our $VERSION = '3.50';
 
 $ENV{HARNESS_ACTIVE}  = 1;
 $ENV{HARNESS_VERSION} = $VERSION;
@@ -84,6 +81,7 @@ BEGIN {
         test_args         => sub { shift; shift },
         ignore_exit       => sub { shift; shift },
         rules             => sub { shift; shift },
+        rulesfile         => sub { shift; shift },
         sources           => sub { shift; shift },
         version           => sub { shift; shift },
         trap              => sub { shift; shift },
@@ -248,7 +246,7 @@ I<NEW to 3.18>.
 
 If set, C<sources> must be a hashref containing the names of the
 L<TAP::Parser::SourceHandler>s to load and/or configure.  The values are a
-hash of configuration that will be accessible to to the source handlers via
+hash of configuration that will be accessible to the source handlers via
 L<TAP::Parser::Source/config_for>.
 
 For example:
@@ -330,20 +328,68 @@ run only one test at a time.
 
 =item * C<rules>
 
-A reference to a hash of rules that control which tests may be
-executed in parallel. This is an experimental feature and the
-interface may change.
+A reference to a hash of rules that control which tests may be executed in
+parallel. If no rules are declared and L<CPAN::Meta::YAML> is available,
+C<TAP::Harness> attempts to load rules from a YAML file specified by the
+C<rulesfile> parameter. If no rules file exists, the default is for all
+tests to be eligible to be run in parallel.
 
-    $harness->rules(
-        {   par => [
-                { seq => '../ext/DB_File/t/*' },
-                { seq => '../ext/IO_Compress_Zlib/t/*' },
-                { seq => '../lib/CPANPLUS/*' },
-                { seq => '../lib/ExtUtils/t/*' },
-                '*'
-            ]
-        }
-    );
+Here some simple examples. For the full details of the data structure
+and the related glob-style pattern matching, see
+L<TAP::Parser::Scheduler/"Rules data structure">.
+
+    # Run all tests in sequence, except those starting with "p"
+    $harness->rules({
+        par => 't/p*.t'
+    });
+
+    # Equivalent YAML file
+    ---
+    par: t/p*.t
+
+    # Run all tests in parallel, except those starting with "p"
+    $harness->rules({
+        seq => [
+                  { seq => 't/p*.t' },
+                  { par => '**'     },
+               ],
+    });
+
+    # Equivalent YAML file
+    ---
+    seq:
+        - seq: t/p*.t
+        - par: **
+
+    # Run some  startup tests in sequence, then some parallel tests than some
+    # teardown tests in sequence.
+    $harness->rules({
+        seq => [
+            { seq => 't/startup/*.t' },
+            { par => ['t/a/*.t','t/b/*.t','t/c/*.t'], }
+            { seq => 't/shutdown/*.t' },
+        ],
+
+    });
+
+    # Equivalent YAML file
+    ---
+    seq:
+        - seq: t/startup/*.t
+        - par:
+            - t/a/*.t
+            - t/b/*.t
+            - t/c/*.t
+        - seq: t/shutdown/*.t
+
+This is an experimental feature and the interface may change.
+
+=item * C<rulesfiles>
+
+This specifies where to find a YAML file of test scheduling rules.  If not
+provided, it looks for a default file to use.  It first checks for a file given
+in the C<HARNESS_RULESFILE> environment variable, then it checks for
+F<testrules.yml> and then F<t/testrules.yml>.
 
 =item * C<stdout>
 
@@ -401,6 +447,10 @@ Any keys for which the value is C<undef> will be ignored.
 
         $self->jobs(1) unless defined $self->jobs;
 
+        if ( ! defined $self->rules ) {
+            $self->_maybe_load_rulesfile;
+        }
+
         local $default_class{formatter_class} = 'TAP::Formatter::File'
           unless -t ( $arg_for{stdout} || \*STDOUT ) && !$ENV{HARNESS_NOTTY};
 
@@ -430,6 +480,29 @@ Any keys for which the value is C<undef> will be ignored.
         }
 
         return $self;
+    }
+
+    sub _maybe_load_rulesfile {
+        my ($self) = @_;
+
+        my ($rulesfile) =   defined $self->rulesfile ? $self->rulesfile :
+                            defined($ENV{HARNESS_RULESFILE}) ? $ENV{HARNESS_RULESFILE} :
+                            grep { -r } qw(./testrules.yml t/testrules.yml);
+
+        if ( defined $rulesfile && -r $rulesfile ) {
+            if ( ! eval { require CPAN::Meta::YAML; 1} ) {
+               warn "CPAN::Meta::YAML required to process $rulesfile" ;
+               return;
+            }
+            my $layer = $] lt "5.008" ? "" : ":encoding(UTF-8)";
+            open my $fh, "<$layer", $rulesfile
+                or die "Couldn't open $rulesfile: $!";
+            my $yaml_text = do { local $/; <$fh> };
+            my $yaml = CPAN::Meta::YAML->read_string($yaml_text)
+                or die CPAN::Meta::YAML->errstr;
+            $self->rules( $yaml->[0] );
+        }
+        return;
     }
 }
 
@@ -482,8 +555,15 @@ sub runtests {
         $self->_make_callback( 'after_runtests', $aggregate );
     };
     my $run = sub {
-        $self->aggregate_tests( $aggregate, @tests );
+        my $bailout;
+        eval { $self->aggregate_tests( $aggregate, @tests ); 1 }
+            or do { $bailout = $@ || 'unknown_error' };
+        die $bailout if defined $bailout;
         $finish->();
+    };
+    $self->{bail_summary} = sub{
+        print "\n";
+        $finish->(1);
     };
 
     if ( $self->trap ) {
@@ -522,8 +602,14 @@ sub _after_test {
 }
 
 sub _bailout {
-    my ( $self, $result ) = @_;
+    my ( $self, $result, $parser, $session, $aggregate, $job ) = @_;
+
+    $self->finish_parser( $parser, $session );
+    $self->_after_test( $aggregate, $job, $parser );
+    $job->finish;
+
     my $explanation = $result->explanation;
+    $self->{bail_summary}() if $self->{bail_summary};
     die "FAILED--Further testing stopped"
       . ( $explanation ? ": $explanation\n" : ".\n" );
 }
@@ -546,13 +632,18 @@ sub _aggregate_parallel {
 
             my ( $parser, $session ) = $self->make_parser($job);
             $mux->add( $parser, [ $session, $job ] );
+
+            # The job has started: begin the timers
+            $parser->start_time( $parser->get_time );
+            $parser->start_times( $parser->get_times );
         }
 
         if ( my ( $parser, $stash, $result ) = $mux->next ) {
             my ( $session, $job ) = @$stash;
             if ( defined $result ) {
                 $session->result($result);
-                $self->_bailout($result) if $result->is_bailout;
+                $self->_bailout($result, $parser, $session, $aggregate, $job )
+                    if $result->is_bailout;
             }
             else {
 
@@ -584,7 +675,7 @@ sub _aggregate_single {
                 # Keep reading until input is exhausted in the hope
                 # of allowing any pending diagnostics to show up.
                 1 while $parser->next;
-                $self->_bailout($result);
+                $self->_bailout($result, $parser, $session, $aggregate, $job );
             }
         }
 
@@ -888,7 +979,7 @@ parameter to C<new>, typically from your C<Build.PL>.  For example:
                   extensions => ['.tap', '.txt'],
               },
           },
-          formatter => 'TAP::Formatter::HTML',
+          formatter_class => 'TAP::Formatter::HTML',
       },
       build_requires     => {
           'Module::Build' => '0.30',

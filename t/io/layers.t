@@ -4,8 +4,8 @@ my $PERLIO;
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
     require './test.pl';
+    set_up_inc('../lib');
     skip_all_without_perlio();
     # FIXME - more of these could be tested without Encode or full perl
     skip_all_without_dynamic_extension('Encode');
@@ -19,8 +19,7 @@ BEGIN {
 
 use Config;
 
-my $DOSISH    = $^O =~ /^(?:MSWin32|os2|dos|NetWare)$/ ? 1 : 0;
-   $DOSISH    = 1 if !$DOSISH and $^O =~ /^uwin/;
+my $DOSISH    = $^O =~ /^(?:MSWin32|os2)$/ ? 1 : 0;
 my $NONSTDIO  = exists $ENV{PERLIO} && $ENV{PERLIO} ne 'stdio'     ? 1 : 0;
 my $FASTSTDIO = $Config{d_faststdio} && $Config{usefaststdio}      ? 1 : 0;
 my $UTF8_STDIN;
@@ -35,7 +34,7 @@ if (${^UNICODE} & 1) {
 } else {
     $UTF8_STDIN = 0;
 }
-my $NTEST = 60 - (($DOSISH || !$FASTSTDIO) ? 7 : 0) - ($DOSISH ? 7 : 0)
+my $NTEST = 62 - (($DOSISH || !$FASTSTDIO) ? 7 : 0) - ($DOSISH ? 7 : 0)
     + $UTF8_STDIN;
 
 sub PerlIO::F_UTF8 () { 0x00008000 } # from perliol.h
@@ -194,6 +193,10 @@ __EOH__
 	  [ "stdio" ],
 	  "binmode");
 
+    check([ PerlIO::get_layers(*F{IO}) ],
+	  [ "stdio" ],
+	  "binmode");
+
     # RT78844
     {
         local $@ = "foo";
@@ -223,7 +226,7 @@ __EOH__
 
     # Check that PL_sigwarn's reference count is correct, and that 
     # &PerlIO::Layer::NoWarnings isn't prematurely freed.
-    fresh_perl_like (<<"EOT", qr/^CODE/);
+    fresh_perl_like (<<"EOT", qr/^CODE/, {}, "Check PL_sigwarn's reference count");
 open(UTF, "<:raw:encoding(utf8)", '$afile') or die \$!;
 print ref *PerlIO::Layer::NoWarnings{CODE};
 EOT

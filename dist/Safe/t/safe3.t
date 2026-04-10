@@ -1,23 +1,19 @@
 #!perl -w
 
-BEGIN {
-    require Config; import Config;
-    if ($Config{'extensions'} !~ /\bOpcode\b/
-	&& $Config{'extensions'} !~ /\bPOSIX\b/
-	&& $Config{'osname'} ne 'VMS')
-    {
-	print "1..0\n";
-	exit 0;
-    }
-}
+use Config;
+use Test::More
+    $Config{'extensions'} =~ /\bOpcode\b/
+	|| $Config{'extensions'} =~ /\bPOSIX\b/
+	|| $Config{'osname'} eq 'VMS'
+    ? (tests => 2)
+    : (skip_all => "no Opcode and POSIX extensions and we're not on VMS");
 
 use strict;
 use warnings;
 use POSIX qw(ceil);
-use Test::More tests => 2;
 use Safe;
 
-my $safe = new Safe;
+my $safe = Safe->new;
 $safe->deny('add');
 
 my $masksize = ceil( Opcode::opcodes / 8 );
@@ -30,7 +26,7 @@ $safe->reval( q{$x + $y} );
 ok( $@ =~ /^'?addition \(\+\)'? trapped by operation mask/,
 	    'opmask still in place with reval' );
 
-my $safe2 = new Safe;
+my $safe2 = Safe->new;
 $safe2->deny('add');
 
 open my $fh, '>nasty.pl' or die "Can't write nasty.pl: $!\n";
@@ -38,7 +34,7 @@ print $fh <<EOF;
 \$_[1] = "\0" x $masksize;
 EOF
 close $fh;
-$safe2->rdo('nasty.pl');
+$safe2->rdo('./nasty.pl');
 $safe2->reval( q{$x + $y} );
 # Written this way to keep the Test::More that comes with perl 5.6.2 happy
 ok( $@ =~ /^'?addition \(\+\)'? trapped by operation mask/,

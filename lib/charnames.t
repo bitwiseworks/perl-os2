@@ -5,11 +5,13 @@ use strict;
 # selection of names is tested, a higher percentage of regular names is tested
 # than algorithmically-determined names.
 
+my $run_slow_tests = $ENV{PERL_RUN_SLOW_TESTS} || 0;
+
 my $RUN_SLOW_TESTS_EVERY_CODE_POINT = 100;
 
 # If $ENV{PERL_RUN_SLOW_TESTS} is at least 1 and less than the number above,
-# all code points with names are tested.  If it is at least that number, all
-# 1,114,112 Unicode code points are tested.
+# all code points with names are tested, including wildcard search names.  If
+# it is at least that number, all 1,114,112 Unicode code points are tested.
 
 # Because \N{} is compile time, any warnings will get generated before
 # execution, so have to have an array, and arrange things so no warning
@@ -41,7 +43,7 @@ use charnames ":full";
 1
 EOE
 
-    like($@, "above 0xFF", "Verify get warning for \\N{above ff} under 'use bytes' with :full");
+    like($@, qr/above 0xFF/, "Verify get warning for \\N{above ff} under 'use bytes' with :full");
     ok(! defined $res, "... and result is undefined");
 
     $res = eval <<'EOE';
@@ -49,7 +51,7 @@ use charnames 'cyrillic';
 "Here: \N{Be}!";
 1
 EOE
-    like($@, "CYRILLIC CAPITAL LETTER BE.*above 0xFF", "Verify get warning under 'use bytes' with explicit script");
+    like($@, qr/CYRILLIC CAPITAL LETTER BE.*above 0xFF/, "Verify get warning under 'use bytes' with explicit script");
     ok(! defined $res, "... and result is undefined");
 
     $res = eval <<'EOE';
@@ -62,12 +64,13 @@ EOE
 
 {
 
-    use charnames ':full', ":alias" => { mychar1 => "0xE8000",
-                                         mychar2 => 983040,  # U+F0000
-                                         mychar3 => "U+100000",
-                                         myctrl => 0x80,
-                                         mylarge => "U+111000",
-                                       };
+    use charnames ":alias" => { mychar1 => "0xE8000",
+                                mychar2 => 983040,  # U+F0000
+                                mychar3 => "U+100000",
+                                myctrl => utf8::unicode_to_native(0x80),
+                                mylarge => "U+111000",
+                              };
+    is ("\N{PILE OF POO}", chr(0x1F4A9), "Verify :alias alone implies :full");
     is ("\N{mychar1}", chr(0xE8000), "Verify that can define hex alias");
     is (charnames::viacode(0xE8000), "mychar1", "And that can get the alias back");
     is ("\N{mychar2}", chr(0xF0000), "Verify that can define decimal alias");
@@ -76,29 +79,14 @@ EOE
     is (charnames::viacode(0x100000), "mychar3", "And that can get the alias back");
     is ("\N{mylarge}", chr(0x111000), "Verify that can define alias beyond Unicode");
     is (charnames::viacode(0x111000), "mylarge", "And that can get the alias back");
-    is (charnames::viacode(0x80), "myctrl", "Verify that can name a nameless control");
+    is (charnames::viacode(utf8::unicode_to_native(0x80)), "myctrl", "Verify that can name a nameless control");
 
 }
 
-my $encoded_be;
-my $encoded_alpha;
-my $encoded_bet;
-my $encoded_deseng;
-
-# If octal representation of unicode char is \0xyzt, then the utf8 is \3xy\2zt
-if (ord('A') == 65) { # as on ASCII or UTF-8 machines
-    $encoded_be = "\320\261";
-    $encoded_alpha = "\316\261";
-    $encoded_bet = "\327\221";
-    $encoded_deseng = "\360\220\221\215";
-}
-else { # EBCDIC where UTF-EBCDIC may be used (this may be 1047 specific since
-       # UTF-EBCDIC is codepage specific)
-    $encoded_be = "\270\102\130";
-    $encoded_alpha = "\264\130";
-    $encoded_bet = "\270\125\130";
-    $encoded_deseng = "\336\102\103\124";
-}
+my $encoded_be = byte_utf8a_to_utf8n("\320\261");
+my $encoded_alpha = byte_utf8a_to_utf8n("\316\261");
+my $encoded_bet = byte_utf8a_to_utf8n("\327\221");
+my $encoded_deseng = byte_utf8a_to_utf8n("\360\220\221\215");
 
 sub to_bytes {
     unpack"U0a*", shift;
@@ -126,6 +114,7 @@ sub get_loose_name ($) { # Modify name to stress the loose tests.
 }
 
 sub test_vianame ($$$) {
+    CORE::state $wildcard_count = 0;
 
     # Run the vianame tests on a code point, both loose and full
 
@@ -138,19 +127,63 @@ sub test_vianame ($$$) {
     # Get a copy of the name modified to stress the loose tests.
     my $loose_name = get_loose_name($name);
 
+    my $right_anchor;
+
     # Switch loose and full in vianame vs string_vianame half the time
     if (rand() < .5) {
         use charnames ":full";
-        $all_pass &= is(charnames::vianame($name), $i, "Verify vianame(\"$name\") is 0x$hex");
+        $all_pass &= is(charnames::vianame($name), $i,
+                        "Verify vianame(\"$name\") is 0x$hex");
         use charnames ":loose";
-        $all_pass &= is(charnames::string_vianame($loose_name), chr($i), "Verify string_vianame(\"$loose_name\") is chr(0x$hex)");
+        $all_pass &= is(charnames::string_vianame($loose_name), chr($i),
+                    "Verify string_vianame(\"$loose_name\") is chr(0x$hex)");
+        $right_anchor = '\\Z';
     }
     else {
         use charnames ":loose";
-        $all_pass &= is(charnames::vianame($loose_name), $i, "Verify vianame(\"$loose_name\") is 0x$hex");
+        $all_pass &= is(charnames::vianame($loose_name), $i,
+                        "Verify vianame(\"$loose_name\") is 0x$hex");
         use charnames ":full";
-        $all_pass &= is(charnames::string_vianame($name), chr($i), "Verify string_vianame(\"$name\") is chr(0x$hex)");
+        $all_pass &= is(charnames::string_vianame($name), chr($i),
+                        "Verify string_vianame(\"$name\") is chr(0x$hex)");
+        $right_anchor = '\\z';
     }
+
+    my $left_anchor = (rand() < .5) ? '^' : '\\A';
+
+    # \p{name=} is always loose matching
+    $all_pass &= like(chr($i), qr/^\p{name=$loose_name}$/,
+                      "Verify /\\p{name=$loose_name}/ matches chr(0x$hex)");
+
+    $wildcard_count++;
+
+    # XXX temporary to see if the failure we are occasionally seeing is
+    # confined to this code point.  GH #17671
+    next if $i == 0;
+
+    # Because wildcard name matching is so real-time intensive, do it less
+    # frequently than the others
+    if ($wildcard_count >= 10) {
+        $wildcard_count = 0;
+
+        # A few control characters have anomalous names containing
+        # parentheses, which need to be escaped.
+        my $name_ref = \$name;
+        my $mod_name;
+        if ($i <= 0x85) {   # NEL in ASCII; affected controls are lower than
+                            # this in EBCDIC
+            $mod_name = $name =~ s/([()])/\\$1/gr;
+            $name_ref = \$mod_name;
+        }
+
+        # We anchor the name, randomly with the possible anchors.
+        my $assembled = $left_anchor. $$name_ref . $right_anchor;
+
+        # \p{name=/.../} is always full matching
+        $all_pass &= like(chr($i), qr!^\p{name=/$assembled/}!,
+                          "Verify /\\p{name=/$assembled/} matches chr(0x$hex)");
+    }
+
     return $all_pass;
 }
 
@@ -165,6 +198,42 @@ sub test_vianame ($$$) {
   is(to_bytes("\N{be},\N{alpha},\N{hebrew:bet}"),
                                     "$encoded_be,$encoded_alpha,$encoded_bet",
               'Verify using scripts gives the correct UTF8');
+}
+
+{
+  my $caught_error;
+  local $SIG{__WARN__} = sub { $caught_error = shift; };
+  eval q{
+    use charnames qw(runic greek);
+    is($caught_error, undef, "no letter name clashes between runic and greek");
+  };
+}
+
+{
+  my $caught_error;
+  local $SIG{__WARN__} = sub { $caught_error = shift; };
+  eval q{
+    use charnames qw(hebrew arabic :full);
+    like(
+      $caught_error,
+      qr/charnames: some short character names may clash in \[ARABIC, HEBREW\], for example ALEF/,
+      "warned about potential character name clashes when asking for 'hebrew' and 'arabic'"
+    );
+    ok("\N{alef}"  eq "\N{HEBREW LETTER ALEF}",  '\N{alef} gives HEBREW LETTER ALEF because we asked for Hebrew first');
+    ok("\N{bet}"   eq "\N{HEBREW LETTER BET}",   '\N{bet} gives HEBREW LETTER BET');
+    ok("\N{sheen}" eq "\N{ARABIC LETTER SHEEN}", 'and \N{sheen} gives ARABIC LETTER SHEEN');
+  };
+  eval q{
+    use charnames qw(arabic hebrew :full);
+    like(
+      $caught_error,
+      qr/charnames: some short character names may clash in \[ARABIC, HEBREW\], for example ALEF/,
+      "warned about potential character name clashes when asking for 'arabic' and 'hebrew'"
+    );
+    ok("\N{alef}"  eq "\N{ARABIC LETTER ALEF}",  '\N{alef} gives ARABIC LETTER ALEF because we asked for Arabic first');
+    ok("\N{bet}"   eq "\N{HEBREW LETTER BET}",   '\N{bet} gives HEBREW LETTER BET');
+    ok("\N{sheen}" eq "\N{ARABIC LETTER SHEEN}", 'and \N{sheen} gives ARABIC LETTER SHEEN');
+  };
 }
 
 {
@@ -202,16 +271,16 @@ sub test_vianame ($$$) {
 }
 
 {
-    # 20001114.001
+    # 20001114.001 (#4690)
 
     no utf8; # naked Latin-1
 
     use charnames ':full';
     my $text = "\N{LATIN CAPITAL LETTER A WITH DIAERESIS}";
-    is($text, latin1_to_native("\xc4"), 'Verify \N{} returns correct string under "no utf8"');
+    is($text, chr utf8::unicode_to_native(0xc4), 'Verify \N{} returns correct string under "no utf8"');
 
     # I'm not sure that this tests anything different from the above.
-    cmp_ok(ord($text), '==', ord(latin1_to_native("\xc4")), '... and ords are ok');
+    cmp_ok(ord($text), '==', utf8::unicode_to_native(0xc4), '... and ords are ok');
 }
 
 {
@@ -231,10 +300,18 @@ sub test_vianame ($$$) {
     cmp_ok($warning_count, '==', scalar @WARN, "Verify vianame doesn't warn on unknown names");
     ok (! defined charnames::string_vianame("MORE NONE SUCH"), "Verify string_vianame returns undef for an undefined name");
     cmp_ok($warning_count, '==', scalar @WARN, "Verify string_vianame doesn't warn on unknown names");
+    ok (! defined charnames::vianame(""), "Verify vianame returns undef for an empty value");
+    cmp_ok($warning_count, '==', scalar @WARN, "... and no warning is generated");
+    ok (! defined charnames::string_vianame(""), "Verify string_vianame returns undef for an empty value");
+    cmp_ok($warning_count, '==', scalar @WARN, "... and no warning is generated");
+
+    eval "qr/\\p{name=MORE NONE SUCH}/";
+    like($@, qr/Can't find Unicode property definition "name=MORE NONE SUCH"/,
+            '\p{name=} returns an appropriate error message on an undefined name');
 
     use bytes;
     is(charnames::vianame("GOTHIC LETTER AHSA"), 0x10330, "Verify vianame \\N{name} is unaffected by 'use bytes'");
-    is(charnames::vianame("U+FF"), chr(0xFF), "Verify vianame \\N{U+FF} is unaffected by 'use bytes'");
+    is(charnames::vianame("U+FF"), chr(utf8::unicode_to_native(0xFF)), "Verify vianame \\N{U+FF} is unaffected by 'use bytes'");
     cmp_ok($warning_count, '==', scalar @WARN, "Verify vianame doesn't warn on legal inputs under 'use bytes'");
     ok(! defined charnames::vianame("U+100"), "Verify vianame \\N{U+100} is undef under 'use bytes'");
     ok($warning_count == scalar @WARN - 1 && $WARN[-1] =~ /above 0xFF/, "Verify vianame gives appropriate warning for previous test");
@@ -243,9 +320,11 @@ sub test_vianame ($$$) {
     ok(! defined charnames::string_vianame("GOTHIC LETTER AHSA"), "Verify string_vianame(\"GOTHIC LETTER AHSA\") is undefined under 'use bytes'");
     ok($warning_count == scalar @WARN - 1 && $WARN[-1] =~ /above 0xFF/, "Verify string_vianame gives appropriate warning for previous test");
     $warning_count = @WARN;
-    is(charnames::string_vianame("U+FF"), chr(0xFF), "Verify string_vianame(\"U+FF\") is chr(0xFF) under 'use bytes'");
+    eval "qr/\\p{name=GOTHIC LETTER AHSA}/";
+    is($@, "", '\p{name=...} is unaffect by "use bytes"');
+    is(charnames::string_vianame("U+FF"), chr(utf8::unicode_to_native(0xFF)), "Verify string_vianame(\"U+FF\") is chr(0xFF) under 'use bytes'");
     cmp_ok($warning_count, '==', scalar @WARN, "Verify string_vianame doesn't warn on legal inputs under 'use bytes'");
-    is(charnames::string_vianame("LATIN SMALL LETTER Y WITH DIAERESIS"), chr(0xFF), "Verify string_vianame(\"LATIN SMALL LETTER Y WITH DIAERESIS\") is chr(0xFF) under 'use bytes'");
+    is(charnames::string_vianame("LATIN SMALL LETTER Y WITH DIAERESIS"), chr(utf8::unicode_to_native(0xFF)), "Verify string_vianame(\"LATIN SMALL LETTER Y WITH DIAERESIS\") is chr(native 0xFF) under 'use bytes'");
     cmp_ok($warning_count, '==', scalar @WARN, "Verify string_vianame doesn't warn on legal inputs under 'use bytes'");
     ok(! defined charnames::string_vianame("U+100"), "Verify string_vianame \\N{U+100} is undef under 'use bytes'");
     ok($warning_count == scalar @WARN - 1 && $WARN[-1] =~ /above 0xFF/, "Verify string_vianame gives appropriate warning for previous test");
@@ -278,7 +357,7 @@ is("\N{LINE FEED (LF)}", "\n", 'Verify "\N{LINE FEED (LF)}" eq "\n"');
 is("\N{LINE FEED}", "\n", 'Verify "\N{LINE FEED}" eq "\n"');
 is("\N{LF}", "\n", 'Verify "\N{LF}" eq "\n"');
 
-my $nel = latin1_to_native("\x85");
+my $nel = chr utf8::unicode_to_native(0x85);
 $nel = qr/^$nel$/;
 
 like("\N{NEXT LINE (NEL)}", $nel, 'Verify "\N{NEXT LINE (NEL)}" is correct');
@@ -295,11 +374,11 @@ is("\N{BOM}", chr(0xFEFF), 'Verify "\N{BOM}" is correct');
     my $ok = ! grep { /"HORIZONTAL TABULATION" is deprecated.*"CHARACTER TABULATION"/ } @WARN;
     ok($ok, '... and doesnt give deprecated warning');
 
-    # XXX These tests should be changed for 5.16, when we convert BELL to the
-    # Unicode version.
-    is("\N{BELL}", "\a", 'Verify "\N{BELL}" eq "\a"');
-    my $ok = grep { /"BELL" is deprecated.*"ALERT"/ } @WARN;
-    ok($ok, '... and that gives correct deprecated warning');
+    if ($^V lt v5.17.0) {
+        is("\N{BELL}", "\a", 'Verify "\N{BELL}" eq "\a"');
+        my $ok = grep { /"BELL" is deprecated.*"ALERT"/ } @WARN;
+        ok($ok, '... and that gives correct deprecated warning');
+    }
 
     no warnings 'deprecated';
 
@@ -349,8 +428,16 @@ ok(! defined charnames::viacode(0x110000),
 ok((grep { /\Qyou asked for U+110000/ } @WARN), '... and gives warning');
 
 is(charnames::viacode(0), "NULL", 'Verify charnames::viacode(0) eq "NULL"');
-is(charnames::viacode("BE"), "VULGAR FRACTION THREE QUARTERS", 'Verify charnames::viacode("BE") eq "VULGAR FRACTION THREE QUARTERS"');
+my $three_quarters = sprintf("%2X", utf8::unicode_to_native(0xBE));
+is(charnames::viacode("$three_quarters"), "VULGAR FRACTION THREE QUARTERS", 'Verify charnames::viacode(native "BE") eq "VULGAR FRACTION THREE QUARTERS"');
 is(charnames::viacode("U+00000000000FEED"), "ARABIC LETTER WAW ISOLATED FORM", 'Verify charnames::viacode("U+00000000000FEED") eq "ARABIC LETTER WAW ISOLATED FORM"');
+
+test_vianame(0x116C, "116C", "HANGUL JUNGSEONG OE");
+test_vianame(0x1180, "1180", "HANGUL JUNGSEONG O-E");
+like(chr(0x59C3), qr/\p{name=\/\ACJK UNIFIED IDEOGRAPH-59C3\z\/}/,
+         'Verify name wildcards delimitters can be escaped');
+like(chr(0xD800), qr!\p{name=/\A\z/}!,
+                                'Verify works on matching an empty name');
 
 {
     no warnings 'deprecated';
@@ -365,7 +452,7 @@ is(charnames::viacode("U+00000000000FEED"), "ARABIC LETTER WAW ISOLATED FORM", '
     is("\N{EOT}", "\N{END OF TRANSMISSION}", 'Verify "\N{EOT}" eq "\N{END OF TRANSMISSION}"');
     is("\N{ENQ}", "\N{ENQUIRY}", 'Verify "\N{ENQ}" eq "\N{ENQUIRY}"');
     is("\N{ACK}", "\N{ACKNOWLEDGE}", 'Verify "\N{ACK}" eq "\N{ACKNOWLEDGE}"');
-    is("\N{BEL}", "\N{BELL}", 'Verify "\N{BEL}" eq "\N{BELL}"');
+    is("\N{BEL}", "\N{BELL}", 'Verify "\N{BEL}" eq "\N{BELL}"') if $^V lt v5.17.0;
     is("\N{BS}", "\N{BACKSPACE}", 'Verify "\N{BS}" eq "\N{BACKSPACE}"');
     is("\N{HT}", "\N{HORIZONTAL TABULATION}", 'Verify "\N{HT}" eq "\N{HORIZONTAL TABULATION}"');
     is("\N{LF}", "\N{LINE FEED (LF)}", 'Verify "\N{LF}" eq "\N{LINE FEED (LF)}"');
@@ -741,12 +828,12 @@ is($_, 'foobar', 'Verify charnames.pm doesnt clobbers $_');
 # SADAHIRO Tomoyuki's suggestion is to ensure that the UTF-8ness of both
 # arguments are identical before calling index.
 # To do this can take advantage of the fact that unicore/Name.pl is 7 bit
-# (or at least should be). So assert that that it's true here.  EBCDIC
+# (or at least should be). So assert that that is true here.  EBCDIC
 # may be a problem (khw).
 
 my $names = do "unicore/Name.pl";
 ok(defined $names, "Verify can read 'unicore/Name.pl'");
-my $non_ascii = native_to_latin1($names) =~ tr/\0-\177//c;
+my $non_ascii = native_to_uni($names) =~ tr/\0-\177//c;
 ok(! $non_ascii, "Verify all official names are ASCII-only");
 
 # Verify that charnames propagate to eval("")
@@ -776,7 +863,7 @@ is("\N{U+1D0C5}", "\N{BYZANTINE MUSICAL SYMBOL FTHORA SKLIRON CHROMA VASIS}", 'V
     $res .= '-' . ($^H{73174} // "");
     $res .= '-2' if ":" =~ /\N{COLON}/;
     $res .= '-3' if ":" =~ /\N{COLON}/i;
-    is($res, "foo-foo-1--2-3", "Verify %^H doesn't get reset by \N{...}");
+    is($res, "foo-foo-1--2-3", "Verify %^H doesn't get reset by \\N{...}");
 }
 
 {   use charnames qw(.*);
@@ -803,16 +890,28 @@ is("\N{U+1D0C5}", "\N{BYZANTINE MUSICAL SYMBOL FTHORA SKLIRON CHROMA VASIS}", 'V
     is("\N{mychar1}", "e", "Outer block: verify that \\N{mychar1} works");
     is(charnames::vianame("mychar1"), ord("e"), "Outer block: verify that vianame(mychar1) works");
     is(charnames::string_vianame("mychar1"), "e", "Outer block: verify that string_vianame(mychar1) works");
+    eval "qr/\\p{name=mychar1}/";
+    like($@, qr/Can't find Unicode property definition "name=mychar1"/,
+            '\p{name=} returns an appropriate error message on an alias');
     is("\N{mychar2}", "A", "Outer block: verify that \\N{mychar2} works");
     is(charnames::vianame("mychar2"), ord("A"), "Outer block: verify that vianame(mychar2) works");
     is(charnames::string_vianame("mychar2"), "A", "Outer block: verify that string_vianame(mychar2) works");
+    eval "qr/\\p{name=mychar2}/";
+    like($@, qr/Can't find Unicode property definition "name=mychar2"/,
+            '\p{name=} returns an appropriate error message on an alias');
     is("\N{myprivate1}", "\x{E8000}", "Outer block: verify that \\N{myprivate1} works");
     cmp_ok(charnames::vianame("myprivate1"), "==", 0xE8000, "Outer block: verify that vianame(myprivate1) works");
     is(charnames::string_vianame("myprivate1"), chr(0xE8000), "Outer block: verify that string_vianame(myprivate1) works");
+    eval "qr/\\p{name=myprivate1}/";
+    like($@, qr/Can't find Unicode property definition "name=myprivate1"/,
+            '\p{name=} returns an appropriate error message on an alias');
     is(charnames::viacode(0xE8000), "myprivate1", "Outer block: verify that myprivate1 viacode works");
     is("\N{myprivate2}", "\x{100000}", "Outer block: verify that \\N{myprivate2} works");
     cmp_ok(charnames::vianame("myprivate2"), "==", 0x100000, "Outer block: verify that vianame(myprivate2) works");
     is(charnames::string_vianame("myprivate2"), chr(0x100000), "Outer block: verify that string_vianame(myprivate2) works");
+    eval "qr/\\p{name=myprivate2}/";
+    like($@, qr/Can't find Unicode property definition "name=myprivate2"/,
+            '\p{name=} returns an appropriate error message on an alias');
     is(charnames::viacode(0x100000), "myprivate2", "Outer block: verify that myprivate2 viacode works");
     is("\N{BE}", "\N{KATAKANA LETTER BE}", "Outer block: verify that \\N uses the correct script ");
     cmp_ok(charnames::vianame("BE"), "==", ord("\N{KATAKANA LETTER BE}"), "Outer block: verify that vianame uses the correct script");
@@ -820,6 +919,9 @@ is("\N{U+1D0C5}", "\N{BYZANTINE MUSICAL SYMBOL FTHORA SKLIRON CHROMA VASIS}", 'V
     is("\N{Hiragana: BE}", $hiragana_be, "Outer block: verify that :short works with \\N");
     cmp_ok(charnames::vianame("Hiragana: BE"), "==", ord($hiragana_be), "Outer block: verify that :short works with vianame");
     cmp_ok(charnames::string_vianame("Hiragana: BE"), "==", $hiragana_be, "Outer block: verify that :short works with string_vianame");
+    eval "qr/\\p{name=Hiragana: BE}/";
+    like($@, qr/Can't find Unicode property definition "name=Hiragana: BE"/,
+            '\p{name=} returns an appropriate error message on :short attempt');
 
     {
         use charnames ":full",
@@ -836,7 +938,8 @@ is("\N{U+1D0C5}", "\N{BYZANTINE MUSICAL SYMBOL FTHORA SKLIRON CHROMA VASIS}", 'V
         is("\N{mychar1}", "f", "Inner block: verify that \\N{mychar1} is redefined");
         is(charnames::vianame("mychar1"), ord("f"), "Inner block: verify that vianame(mychar1) is redefined");
         is(charnames::string_vianame("mychar1"), "f", "Inner block: verify that string_vianame(mychar1) is redefined");
-        is("\N{mychar2}", "\x{FFFD}", "Inner block: verify that \\N{mychar2} outer definition didn't leak");
+        eval '"\N{mychar2}"';
+        like($@, qr/Unknown charname 'mychar2'/, "Inner block: verify that \\N{mychar2} outer definition didn't leak");
         ok( ! defined charnames::vianame("mychar2"), "Inner block: verify that vianame(mychar2) outer definition didn't leak");
         ok( ! defined charnames::string_vianame("mychar2"), "Inner block: verify that string_vianame(mychar2) outer definition didn't leak");
         is("\N{myprivate1}", "\x{E8001}", "Inner block: verify that \\N{myprivate1} is redefined ");
@@ -844,38 +947,46 @@ is("\N{U+1D0C5}", "\N{BYZANTINE MUSICAL SYMBOL FTHORA SKLIRON CHROMA VASIS}", 'V
         is(charnames::string_vianame("myprivate1"), chr(0xE8001), "Inner block: verify that string_vianame(myprivate1) is redefined");
         is(charnames::viacode(0xE8001), "myprivate1", "Inner block: verify that myprivate1 viacode is redefined");
         ok(! defined charnames::viacode(0xE8000), "Inner block: verify that outer myprivate1 viacode didn't leak");
-        is("\N{myprivate2}", "\x{FFFD}", "Inner block: verify that \\N{myprivate2} outer definition didn't leak");
+        eval '"\N{myprivate2}"';
+        like($@, qr/Unknown charname 'myprivate2'/, "Inner block: verify that \\N{myprivate2} outer definition didn't leak");
         ok(! defined charnames::vianame("myprivate2"), "Inner block: verify that vianame(myprivate2) outer definition didn't leak");
         ok(! defined charnames::string_vianame("myprivate2"), "Inner block: verify that string_vianame(myprivate2) outer definition didn't leak");
         ok(! defined charnames::viacode(0x100000), "Inner block: verify that myprivate2 viacode outer definition didn't leak");
         is("\N{BE}", $hiragana_be, "Inner block: verify that \\N uses the correct script");
         cmp_ok(charnames::vianame("BE"), "==", ord($hiragana_be), "Inner block: verify that vianame uses the correct script");
         cmp_ok(charnames::string_vianame("BE"), "==", $hiragana_be, "Inner block: verify that string_vianame uses the correct script");
-        is("\N{Hiragana: BE}", "\x{FFFD}", "Inner block without :short: \\N with short doesn't work");
+        eval '"\N{Hiragana: BE}"';
+        like($@, qr/Unknown charname 'Hiragana: BE'/, "Inner block without :short: \\N with short doesn't work");
         ok(! defined charnames::vianame("Hiragana: BE"), "Inner block without :short: verify that vianame with short doesn't work");
         ok(! defined charnames::string_vianame("Hiragana: BE"), "Inner block without :short: verify that string_vianame with short doesn't work");
 
         {   # An inner block where only :short definitions are valid.
             use charnames ":short";
-            is("\N{mychar1}", "\x{FFFD}", "Inner inner block: verify that mychar1 outer definition didn't leak with \\N");
+            eval '"\N{mychar1}"';
+            like($@, qr/Unknown charname 'mychar1'/, "Inner inner block: verify that mychar1 outer definition didn't leak with \\N");
             ok( ! defined charnames::vianame("mychar1"), "Inner inner block: verify that mychar1 outer definition didn't leak with vianame");
             ok( ! defined charnames::string_vianame("mychar1"), "Inner inner block: verify that mychar1 outer definition didn't leak with string_vianame");
-            is("\N{mychar2}", "\x{FFFD}", "Inner inner block: verify that mychar2 outer definition didn't leak with \\N");
+            eval '"\N{mychar2}"';
+            like($@, qr/Unknown charname 'mychar2'/, "Inner inner block: verify that mychar2 outer definition didn't leak with \\N");
             ok( ! defined charnames::vianame("mychar2"), "Inner inner block: verify that mychar2 outer definition didn't leak with vianame");
             ok( ! defined charnames::string_vianame("mychar2"), "Inner inner block: verify that mychar2 outer definition didn't leak with string_vianame");
-            is("\N{myprivate1}", "\x{FFFD}", "Inner inner block: verify that myprivate1 outer definition didn't leak with \\N");
+            eval '"\N{myprivate1}"';
+            like($@, qr/Unknown charname 'myprivate1'/, "Inner inner block: verify that myprivate1 outer definition didn't leak with \\N");
             ok(! defined charnames::vianame("myprivate1"), "Inner inner block: verify that myprivate1 outer definition didn't leak with vianame");
             ok(! defined charnames::string_vianame("myprivate1"), "Inner inner block: verify that myprivate1 outer definition didn't leak with string_vianame");
-            is("\N{myprivate2}", "\x{FFFD}", "Inner inner block: verify that myprivate2 outer definition didn't leak with \\N");
+            eval '"\N{myprivate2}"';
+            like($@, qr/Unknown charname 'myprivate2'/, "Inner inner block: verify that myprivate2 outer definition didn't leak with \\N");
             ok(! defined charnames::vianame("myprivate2"), "Inner inner block: verify that myprivate2 outer definition didn't leak with vianame");
             ok(! defined charnames::string_vianame("myprivate2"), "Inner inner block: verify that myprivate2 outer definition didn't leak with string_vianame");
             ok(! defined charnames::viacode(0xE8000), "Inner inner block: verify that mychar1 outer outer definition didn't leak with viacode");
             ok(! defined charnames::viacode(0xE8001), "Inner inner block: verify that mychar1 outer definition didn't leak with viacode");
             ok(! defined charnames::viacode(0x100000), "Inner inner block: verify that mychar2 outer definition didn't leak with viacode");
-            is("\N{BE}", "\x{FFFD}", "Inner inner block without script: verify that outer :script didn't leak with \\N");
+            eval '"\N{BE}"';
+            like($@, qr/Unknown charname 'BE'/, "Inner inner block without script: verify that outer :script didn't leak with \\N");
             ok(! defined charnames::vianame("BE"), "Inner inner block without script: verify that outer :script didn't leak with vianames");
             ok(! defined charnames::string_vianame("BE"), "Inner inner block without script: verify that outer :script didn't leak with string_vianames");
-            is("\N{HIRAGANA LETTER BE}", "\x{FFFD}", "Inner inner block without :full: verify that outer :full didn't leak with \\N");
+            eval '"\N{HIRAGANA LETTER BE}"';
+            like($@, qr/Unknown charname 'HIRAGANA LETTER BE'/, "Inner inner block without :full: verify that outer :full didn't leak with \\N");
             is("\N{Hiragana: BE}", $hiragana_be, "Inner inner block with :short: verify that \\N works with :short");
             cmp_ok(charnames::vianame("Hiragana: BE"), "==", ord($hiragana_be), "Inner inner block with :short: verify that vianame works with :short");
             cmp_ok(charnames::string_vianame("Hiragana: BE"), "==", $hiragana_be, "Inner inner block with :short: verify that string_vianame works with :short");
@@ -885,7 +996,8 @@ is("\N{U+1D0C5}", "\N{BYZANTINE MUSICAL SYMBOL FTHORA SKLIRON CHROMA VASIS}", 'V
         is("\N{mychar1}", "f", "Inner block: verify that \\N{mychar1} is redefined");
         is(charnames::vianame("mychar1"), ord("f"), "Inner block: verify that vianame(mychar1) is redefined");
         is(charnames::string_vianame("mychar1"), "f", "Inner block: verify that string_vianame(mychar1) is redefined");
-        is("\N{mychar2}", "\x{FFFD}", "Inner block: verify that \\N{mychar2} outer definition didn't leak");
+        eval '"\N{mychar2}"';
+        like($@, qr/Unknown charname 'mychar2'/, "Inner block: verify that \\N{mychar2} outer definition didn't leak");
         ok( ! defined charnames::vianame("mychar2"), "Inner block: verify that vianame(mychar2) outer definition didn't leak");
         ok( ! defined charnames::string_vianame("mychar2"), "Inner block: verify that string_vianame(mychar2) outer definition didn't leak");
         is("\N{myprivate1}", "\x{E8001}", "Inner block: verify that \\N{myprivate1} is redefined ");
@@ -893,14 +1005,16 @@ is("\N{U+1D0C5}", "\N{BYZANTINE MUSICAL SYMBOL FTHORA SKLIRON CHROMA VASIS}", 'V
         is(charnames::string_vianame("myprivate1"), chr(0xE8001), "Inner block: verify that string_vianame(myprivate1) is redefined");
         is(charnames::viacode(0xE8001), "myprivate1", "Inner block: verify that myprivate1 viacode is redefined");
         ok(! defined charnames::viacode(0xE8000), "Inner block: verify that outer myprivate1 viacode didn't leak");
-        is("\N{myprivate2}", "\x{FFFD}", "Inner block: verify that \\N{myprivate2} outer definition didn't leak");
+        eval '"\N{myprivate2}"';
+        like($@, qr/Unknown charname 'myprivate2'/, "Inner block: verify that \\N{myprivate2} outer definition didn't leak");
         ok(! defined charnames::vianame("myprivate2"), "Inner block: verify that vianame(myprivate2) outer definition didn't leak");
         ok(! defined charnames::string_vianame("myprivate2"), "Inner block: verify that string_vianame(myprivate2) outer definition didn't leak");
         ok(! defined charnames::viacode(0x100000), "Inner block: verify that myprivate2 viacode outer definition didn't leak");
         is("\N{BE}", $hiragana_be, "Inner block: verify that \\N uses the correct script");
         cmp_ok(charnames::vianame("BE"), "==", ord($hiragana_be), "Inner block: verify that vianame uses the correct script");
         cmp_ok(charnames::string_vianame("BE"), "==", $hiragana_be, "Inner block: verify that string_vianame uses the correct script");
-        is("\N{Hiragana: BE}", "\x{FFFD}", "Inner block without :short: \\N with short doesn't work");
+        eval '"\N{Hiragana: BE}"';
+        like($@, qr/Unknown charname 'Hiragana: BE'/, "Inner block without :short: \\N with short doesn't work");
         ok(! defined charnames::vianame("Hiragana: BE"), "Inner block without :short: verify that vianame with short doesn't work");
         ok(! defined charnames::string_vianame("Hiragana: BE"), "Inner block without :short: verify that string_vianame with short doesn't work");
     }
@@ -933,7 +1047,8 @@ is("\N{U+1D0C5}", "\N{BYZANTINE MUSICAL SYMBOL FTHORA SKLIRON CHROMA VASIS}", 'V
         is(charnames::string_vianame("O-i"), chr(0x10426), "Verify that loose script list matching works with string_vianame");
         is(charnames::vianame("o i"), 0x1044E, "Verify that loose script list matching works with vianame");
     }
-    is ("\N{latincapitallettera}", "\x{FFFD}", "Verify that loose matching caching doesn't leak outside of scope");
+    eval '"\N{latincapitallettera}"';
+    like($@, qr/Unknown charname 'latincapitallettera'/, "Verify that loose matching caching doesn't leak outside of scope");
     {
         use charnames qw(:loose :short);
         cmp_ok("\N{co pt-ic:she-i}", "==", chr(0x3E3), "Verify that loose :short matching works");
@@ -960,11 +1075,9 @@ is("\N{U+1D0C5}", "\N{BYZANTINE MUSICAL SYMBOL FTHORA SKLIRON CHROMA VASIS}", 'V
         $seed = srand;
     }
 
-    my $run_slow_tests = $ENV{PERL_RUN_SLOW_TESTS} || 0;
-
     # We will look at the data grouped in "blocks" of the following
     # size.
-    my $block_size_bits = 7;   # above 16 is not sensible
+    my $block_size_bits = 8;   # above 16 is not sensible
     my $block_size = 2**$block_size_bits;
 
     # There are the regular names, like "SPACE", plus the ones
@@ -973,7 +1086,7 @@ is("\N{U+1D0C5}", "\N{BYZANTINE MUSICAL SYMBOL FTHORA SKLIRON CHROMA VASIS}", 'V
     # of the character.  The percentage of each type to test is
     # fuzzily independently settable.  This breaks down when the block size is
     # 1 or is large enough that both types of names occur in the same block
-    my $percentage_of_regular_names = ($run_slow_tests) ? 100 : 13;
+    my $percentage_of_regular_names = ($run_slow_tests) ? 100 : 10;
     my $percentage_of_algorithmic_names = (100 / $block_size); # 1 test/block
 
     # If wants everything tested, do so by changing the block size to 1 so
@@ -1009,18 +1122,21 @@ is("\N{U+1D0C5}", "\N{BYZANTINE MUSICAL SYMBOL FTHORA SKLIRON CHROMA VASIS}", 'V
         die "Can't open ../../lib/unicore/UnicodeData.txt: $!";
     while (<$fh>) {
         chomp;
-        my ($code, $name, undef, undef, undef, undef, undef, undef, undef, undef, $u1name) = split ";";
-        my $decimal = hex $code;
+        my ($code, $name, $category, undef, undef, undef, undef, undef, undef, undef, $u1name) = split ";";
+        my $decimal = utf8::unicode_to_native(hex $code);
+        $code = sprintf("%04X", $decimal) unless $::IS_ASCII;
+
+        $decimal = hex $code;
 
         # The Unicode version 1 name is used instead of any that are
-        # marked <control>
+        # marked <control>.
         $name = $u1name if $name eq "<control>";
 
-        $name = 'ALERT' if $decimal == 7;
+        # In earlier Perls, we reject this code point's name (BELL)
+        $name = "" if $^V lt v5.17.0 && $decimal == 0x1F514;
 
-        # XXX This test should be changed for 5.16 when we convert to use
-        # Unicode's BELL
-        $name = "" if $decimal == 0x1F514;
+        # ALERT overrides BELL
+        $name = 'ALERT' if $decimal == utf8::unicode_to_native(7);
 
         # Some don't have names, leave those array elements undefined
         next unless $name;
@@ -1039,12 +1155,26 @@ is("\N{U+1D0C5}", "\N{BYZANTINE MUSICAL SYMBOL FTHORA SKLIRON CHROMA VASIS}", 'V
             /^(.*?);/;
             my $end_decimal = hex $1;
 
-            # Only the CJK (and the Hangul which are instead dealt with below)
-            # ones have names, and they all have the code point as part of the
-            # name, which we can construct
-            if ($name =~ /^<CJK/) {
+            # Only the ones whose category is a letter currently have names,
+            # and of those the Hangul Syllables are dealt with below
+            if ( $category eq 'Lo' && $name !~ /^Hangul/i) {
+
+                # The CJK ones all get translated to a particular form; we
+                # just capitalize any others in the hopes that Unicode will
+                # use the correct term in any future ones it might add.
+                if ($name =~ /^<CJK/) {
+                    $name = "CJK UNIFIED IDEOGRAPH";
+                }
+                else {
+                    $name =~ s/<//;
+                    $name =~ s/,.*//;
+                    $name = uc($name);
+                }
+
+                # They all have the code point as part of the name, which we
+                # can construct
                 for my $i ($decimal .. $end_decimal) {
-                    $names[$i] = sprintf "CJK UNIFIED IDEOGRAPH-%04X", $i;
+                    $names[$i] = sprintf "$name-%04X", $i;
                     my $block = $i >> $block_size_bits;
                     $algorithmic_names_count[$block]++;
                 }
@@ -1053,23 +1183,67 @@ is("\N{U+1D0C5}", "\N{BYZANTINE MUSICAL SYMBOL FTHORA SKLIRON CHROMA VASIS}", 'V
     }
     close $fh;
 
-    # The Hangul syllable names aren't in the file above; their names
-    # are algorithmically determinable, but to avoid perpetuating any
-    # programming errors, this file contains the complete list, gathered
-    # from the web.
-    while (<DATA>) {
-        chomp;
-        next unless $_;     # Guard against empty lines getting inserted.
-        my ($code, $name) = split ";";
-        my $decimal = hex $code;
-        $names[$decimal] = $name;
-        my $block = $decimal >> $block_size_bits;
-        $algorithmic_names_count[$block] = 1;
+    use Unicode::UCD;
+    if (pack("C*", split /\./, Unicode::UCD::UnicodeVersion()) gt v1.1.5) {
+        # The Hangul syllable names aren't in the file above; their names
+        # are algorithmically determinable, but to avoid perpetuating any
+        # programming errors, this file contains the complete list, gathered
+        # from the web.
+        while (<DATA>) {
+            chomp;
+            next unless $_;     # Guard against empty lines getting inserted.
+            my ($code, $name) = split ";";
+            my $decimal = hex $code;
+            $names[$decimal] = $name;
+            my $block = $decimal >> $block_size_bits;
+            $algorithmic_names_count[$block] = 1;
+        }
     }
 
-    open $fh, "<", "../../lib/unicore/NameAliases.txt" or
-        die "Can't open ../../lib/unicore/NameAliases.txt: $!";
-    while (<$fh>) {
+    my @name_aliases;
+    use Unicode::UCD;
+    if (ord('A') == 65
+        && pack( "C*", split /\./, Unicode::UCD::UnicodeVersion()) ge v6.1.0)
+    {
+        open my $fh, "<", "../../lib/unicore/NameAliases.txt"
+            or die "Can't open ../../lib/unicore/NameAliases.txt: $!";
+        @name_aliases = <$fh>
+    }
+    else {
+
+        # If this Unicode version doesn't have the full .txt file, or are on
+        # an EBCDIC platform where they need to be translated, get the data
+        # from prop_invmap() (which should do the translation) and convert it
+        # to the file's format
+        use Unicode::UCD 'prop_invmap';
+        my ($invlist_ref, $invmap_ref, undef, $default)
+                                                = prop_invmap('Name_Alias');
+        for my $i (0 .. @$invlist_ref - 1) {
+
+            # Convert the aliases for code points that have just one alias to
+            # single element arrays for uniform handling below.
+            if (! ref $invmap_ref->[$i]) {
+
+                # But we test only the real aliases, not the ones which are
+                # just really placeholders.
+                next if $invmap_ref->[$i] eq $default;
+
+                $invmap_ref->[$i] = [ $invmap_ref->[$i] ];
+            }
+
+
+            # Change each alias for the code point to the form that the file
+            # has
+            foreach my $j ($invlist_ref->[$i] .. $invlist_ref->[$i+1] - 1) {
+                foreach my $value (@{$invmap_ref->[$i]}) {
+                    $value =~ s/: /;/;
+                    push @name_aliases, sprintf("%04X;%s\n", $j, $value);
+                }
+            }
+        }
+    }
+
+    for (@name_aliases) {
         chomp;
         s/^\s*#.*//;
         next unless $_;
@@ -1151,7 +1325,10 @@ is("\N{U+1D0C5}", "\N{BYZANTINE MUSICAL SYMBOL FTHORA SKLIRON CHROMA VASIS}", 'V
                 # These four code points now have names, from NameAlias, but
                 # aren't listed as having names in UnicodeData.txt, so viacode
                 # returns their alias names, not undef
-                next if $i == 0x80 || $i == 0x81 || $i == 0x84 || $i == 0x99;
+                next if $i == utf8::unicode_to_native(0x80)
+                              || $i == utf8::unicode_to_native(0x81)
+                              || $i == utf8::unicode_to_native(0x84)
+                              || $i == utf8::unicode_to_native(0x99);
 
                 # If there is no name for this code point, all we can
                 # test is that.
@@ -1165,7 +1342,11 @@ is("\N{U+1D0C5}", "\N{BYZANTINE MUSICAL SYMBOL FTHORA SKLIRON CHROMA VASIS}", 'V
                 # These four code points have a different Unicode1 name than
                 # regular name, and viacode has already specifically tested
                 # for the regular name
-                if ($i != 0x0a && $i != 0x0c && $i != 0x0d && $i != 0x85) {
+                if ($i != utf8::unicode_to_native(0x0a)
+                    && $i != utf8::unicode_to_native(0x0c)
+                    && $i != utf8::unicode_to_native(0x0d)
+                    && $i != utf8::unicode_to_native(0x85))
+                {
                     $all_pass &= is(charnames::viacode($i), $names[$i], "Verify viacode(0x$hex) is \"$names[$i]\"");
                 }
 
@@ -1176,6 +1357,9 @@ is("\N{U+1D0C5}", "\N{BYZANTINE MUSICAL SYMBOL FTHORA SKLIRON CHROMA VASIS}", 'V
                         $all_pass &= ok(! defined charnames::vianame("CJK UNIFIED IDEOGRAPH-$hex"), "Verify vianame(\"CJK UNIFIED IDEOGRAPH-$hex\") is undefined");
                     } else {
                         $all_pass &= ok(! defined charnames::string_vianame("CJK UNIFIED IDEOGRAPH-$hex"), "Verify string_vianame(\"CJK UNIFIED IDEOGRAPH-$hex\") is undefined");
+                        eval "qr/\\p{name=CJK UNIFIED IDEOGRAPH-$hex}/";
+                        $all_pass &= like($@, qr/Can't find Unicode property definition "name=CJK UNIFIED IDEOGRAPH-$hex\"/,
+                                                "Verify string_vianame(\"CJK UNIFIED IDEOGRAPH-$hex\") is undefined");
                     }
                 }
             }
@@ -1185,21 +1369,33 @@ is("\N{U+1D0C5}", "\N{BYZANTINE MUSICAL SYMBOL FTHORA SKLIRON CHROMA VASIS}", 'V
         $block = $end_block + 1;
     }
 
-    open $fh, "<", "../../lib/unicore/NamedSequences.txt" or
-        die "Can't open ../../lib/unicore/NamedSequences.txt: $!";
-    while (<$fh>) {
-        chomp;
-        s/^\s*#.*//;
-        next unless $_;
-        my ($name, $codes) = split ";";
-        my $utf8 = pack("U*", map { hex } split " ", $codes);
-        is(charnames::string_vianame($name), $utf8, "Verify string_vianame(\"$name\") is the proper utf8");
-        my $loose_name = get_loose_name($name);
-        use charnames ":loose";
-        is(charnames::string_vianame($loose_name), $utf8, "Verify string_vianame(\"$loose_name\") is the proper utf8");
-        #diag("$name, $utf8");
+    if (open my $fh, "<", "../../lib/unicore/NamedSequences.txt") {
+        while (<$fh>) {
+            chomp;
+            s/^\s*#.*//;
+            next unless $_;
+            my ($name, $codes) = split ";";
+            $codes =~ s{ \b 00 ( [0-9A-F]{2} ) \b }
+                       { sprintf("%04X", utf8::unicode_to_native(hex $1)) }gxe
+                                                            if ord "A" != 65;
+            my $utf8 = pack("W*", map { hex } split " ", $codes);
+            is(charnames::string_vianame($name), $utf8, "Verify string_vianame(\"$name\") is the proper utf8");
+            my $loose_name = get_loose_name($name);
+            use charnames ":loose";
+            is(charnames::string_vianame($loose_name), $utf8, "Verify string_vianame(\"$loose_name\") is the proper utf8");
+
+            like($utf8, qr/^\p{name=$name}$/, "Verify /\\p{name=$name}\$/ is the proper utf8");
+            like($utf8, qr/^\p{name=$loose_name}$/, "Verify /\\p{name=$loose_name}\$/ is the proper utf8");
+            like($utf8, qr!^\p{name=/\A$name\z/}!, "Verify /\\p{name=/$\A$name\z/} is the proper utf8");
+            #diag("$name, $utf8");
+        }
+        close $fh;
     }
-    close $fh;
+    else {
+        use Unicode::UCD;
+        die "Can't open ../../lib/unicore/NamedSequences.txt: $!"
+        if pack("C*", split /\./, Unicode::UCD::UnicodeVersion()) ge v4.1.0;
+    }
 
 
     unless ($all_pass) {

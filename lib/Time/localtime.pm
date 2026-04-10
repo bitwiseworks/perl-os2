@@ -1,25 +1,24 @@
-package Time::localtime;
-use strict;
-use 5.006_001;
+package Time::localtime 1.04;
+use v5.38;
 
-use Time::tm;
+use parent 'Time::tm';
 
-our(@ISA, @EXPORT, @EXPORT_OK, %EXPORT_TAGS, $VERSION);
-BEGIN {
-    use Exporter   ();
-    @ISA         = qw(Exporter Time::tm);
-    @EXPORT      = qw(localtime ctime);
-    @EXPORT_OK   = qw(  
+our (  
+      $tm_sec, $tm_min, $tm_hour, $tm_mday,
+      $tm_mon, $tm_year, $tm_wday, $tm_yday,
+      $tm_isdst
+);
+
+use Exporter   'import';
+our @EXPORT      = qw(localtime ctime);
+our @EXPORT_OK   = qw(
 			$tm_sec $tm_min $tm_hour $tm_mday 
 			$tm_mon $tm_year $tm_wday $tm_yday 
 			$tm_isdst
 		    );
-    %EXPORT_TAGS = ( FIELDS => [ @EXPORT_OK, @EXPORT ] );
-    $VERSION     = 1.02;
-}
-use vars      @EXPORT_OK;
+our %EXPORT_TAGS = ( FIELDS => [ @EXPORT_OK, @EXPORT ] );
 
-sub populate (@) {
+sub populate {
     return unless @_;
     my $tmob = Time::tm->new();
     @$tmob = (
@@ -30,10 +29,8 @@ sub populate (@) {
     return $tmob;
 } 
 
-sub localtime (;$) { populate CORE::localtime(@_ ? shift : time)}
-sub ctime (;$)     { scalar   CORE::localtime(@_ ? shift : time) } 
-
-1;
+sub localtime :prototype(;$) { populate CORE::localtime(@_ ? shift : time) }
+sub ctime     :prototype(;$) { scalar   CORE::localtime(@_ ? shift : time) }
 
 __END__
 

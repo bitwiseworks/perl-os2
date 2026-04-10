@@ -2,7 +2,7 @@
 
 # This is written in a peculiar style, since we're trying to avoid
 # most of the constructs we'll be testing for.  (This comment is
-# probably obsolete on the avoidance side, though still currrent
+# probably obsolete on the avoidance side, though still current
 # on the peculiarity side.)
 
 # t/TEST and t/harness need to share code. The logical way to do this would be
@@ -14,6 +14,16 @@
 # In which case, we need to stop t/TEST actually running tests, as all
 # t/harness needs are its subroutines.
 
+# Measure the elapsed wallclock time.
+my $t0 = time();
+
+# If we're doing deparse tests, ignore failures for these
+my $deparse_failures;
+
+# And skip even running these
+my $deparse_skips;
+
+my $deparse_skip_file = '../Porting/deparse-skips.txt';
 
 # directories with special sets of test switches
 my %dir_to_switch =
@@ -23,45 +33,34 @@ my %dir_to_switch =
      '../ext/File-Glob/t' => '-I.. -MTestInit', # FIXME - tests assume t/
      );
 
-# "not absolute" is the the default, as it saves some fakery within TestInit
-# which can peturb tests, and takes CPU. Working with the upstream author of
+# "not absolute" is the default, as it saves some fakery within TestInit
+# which can perturb tests, and takes CPU. Working with the upstream author of
 # any of these, to figure out how to remove them from this list, considered
 # "a good thing".
 my %abs = (
-	   '../cpan/Archive-Extract' => 1,
 	   '../cpan/Archive-Tar' => 1,
 	   '../cpan/AutoLoader' => 1,
 	   '../cpan/CPAN' => 1,
-	   '../cpan/Class-ISA' => 1,
-	   '../cpan/Devel-PPPort' => 1,
 	   '../cpan/Encode' => 1,
 	   '../cpan/ExtUtils-Constant' => 1,
+	   '../cpan/ExtUtils-Install' => 1,
 	   '../cpan/ExtUtils-MakeMaker' => 1,
+	   '../cpan/ExtUtils-Manifest' => 1,
 	   '../cpan/File-Fetch' => 1,
 	   '../cpan/IPC-Cmd' => 1,
 	   '../cpan/IPC-SysV' => 1,
-	   '../cpan/Locale-Codes' => 1,
-	   '../cpan/Log-Message' => 1,
-	   '../cpan/Module-Build' => 1,
 	   '../cpan/Module-Load' => 1,
 	   '../cpan/Module-Load-Conditional' => 1,
-	   '../cpan/Object-Accessor' => 1,
-	   '../cpan/Package-Constants' => 1,
-	   '../cpan/Parse-CPAN-Meta' => 1,
 	   '../cpan/Pod-Simple' => 1,
-	   '../cpan/Term-UI' => 1,
 	   '../cpan/Test-Simple' => 1,
 	   '../cpan/podlators' => 1,
 	   '../dist/Cwd' => 1,
-	   '../dist/ExtUtils-Command' => 1,
-	   '../dist/ExtUtils-Install' => 1,
-	   '../dist/ExtUtils-Manifest' => 1,
+	   '../dist/Devel-PPPort' => 1,
 	   '../dist/ExtUtils-ParseXS' => 1,
 	   '../dist/Tie-File' => 1,
 	  );
 
-my %temp_no_core =
-    ('../cpan/B-Debug' => 1,
+my %temp_no_core = (
      '../cpan/Compress-Raw-Bzip2' => 1,
      '../cpan/Compress-Raw-Zlib' => 1,
      '../cpan/Devel-PPPort' => 1,
@@ -69,20 +68,19 @@ my %temp_no_core =
      '../cpan/IO-Compress' => 1,
      '../cpan/MIME-Base64' => 1,
      '../cpan/parent' => 1,
-     '../cpan/Parse-CPAN-Meta' => 1,
      '../cpan/Pod-Simple' => 1,
      '../cpan/podlators' => 1,
      '../cpan/Test-Simple' => 1,
      '../cpan/Tie-RefHash' => 1,
      '../cpan/Unicode-Collate' => 1,
-     '../cpan/Unicode-Normalize' => 1,
+     '../dist/Unicode-Normalize' => 1,
     );
 
 # delete env vars that may influence the results
 # but allow override via *_TEST env var if wanted
 # (e.g. PERL5OPT_TEST=-d:NYTProf)
 my @bad_env_vars = qw(
-    PERL5LIB PERLLIB PERL5OPT
+    PERL5LIB PERLLIB PERL5OPT PERL_UNICODE
     PERL_YAML_BACKEND PERL_JSON_BACKEND
 );
 
@@ -97,12 +95,22 @@ for my $envname (@bad_env_vars) {
     }
 }
 
+# Location to put the Valgrind log.
+our $Valgrind_Log;
+
+my %skip = (
+	    '.' => 1,
+	    '..' => 1,
+	    'CVS' => 1,
+	    'RCS' => 1,
+	    'SCCS' => 1,
+	    '.svn' => 1,
+	   );
+
+
 if ($::do_nothing) {
     return 1;
 }
-
-# Location to put the Valgrind log.
-our $Valgrind_Log;
 
 $| = 1;
 
@@ -110,26 +118,52 @@ $| = 1;
 #BEGIN { require '../lib/strict.pm'; "strict"->import() };
 #BEGIN { require '../lib/warnings.pm'; "warnings"->import() };
 
+my $OS = $ENV{FAKE_OS} || $^O;
+
+my $is_vms   = $OS eq "VMS";
+my $is_win32 = $OS eq "MSWin32";
+my $is_os2   = $OS eq "os2";
+
 # remove empty elements due to insertion of empty symbols via "''p1'" syntax
-@ARGV = grep($_,@ARGV) if $^O eq 'VMS';
+@ARGV = grep($_,@ARGV) if $is_vms;
+
 our $show_elapsed_time = $ENV{HARNESS_TIMER} || 0;
+
+my $dump_tests = 0;
 
 # Cheesy version of Getopt::Std.  We can't replace it with that, because we
 # can't rely on require working.
 {
+    my %opt_vars = (
+	benchmark => \$::benchmark,
+	core      => \$::core,
+	v         => \$::verbose,
+	torture	  => \$::torture,
+	utf8      => \$::with_utf8,
+	utf16     => \$::with_utf16,
+	taintwarn => \$::taintwarn,
+	dumptests => \$dump_tests,
+    );
+
     my @argv = ();
     foreach my $idx (0..$#ARGV) {
-	push( @argv, $ARGV[$idx] ), next unless $ARGV[$idx] =~ /^-(\S+)$/;
-	$::benchmark = 1 if $1 eq 'benchmark';
-	$::core    = 1 if $1 eq 'core';
-	$::verbose = 1 if $1 eq 'v';
-	$::torture = 1 if $1 eq 'torture';
-	$::with_utf8 = 1 if $1 eq 'utf8';
-	$::with_utf16 = 1 if $1 eq 'utf16';
-	$::taintwarn = 1 if $1 eq 'taintwarn';
-	if ($1 =~ /^deparse(,.+)?$/) {
+	my $opt;
+	if ($ARGV[$idx] =~ /^-?-(\S+)$/) {
+	    $opt = $1;
+	} else {
+	    push @argv, $ARGV[$idx];
+	    next;
+	}
+	if (my $ref = $opt_vars{$opt}) {
+	    $$ref = 1;
+	}
+	elsif ($opt =~ /^deparse(,.+)?$/) {
 	    $::deparse = 1;
 	    $::deparse_opts = $1;
+            _process_deparse_config();
+	}
+	else {
+	    die "Unknown option '$opt'\n";
 	}
     }
     @ARGV = @argv;
@@ -140,21 +174,17 @@ if (-f 'TEST' && -f 'harness' && -d '../lib') {
     @INC = '../lib';
 }
 
-die "You need to run \"make test\" first to set things up.\n"
+die "You need to run \"make test_prep\" first to set things up.\n"
   unless -e 'perl' or -e 'perl.exe' or -e 'perl.pm';
 
-if ($ENV{PERL_3LOG}) { # Tru64 third(1) tool, see perlhack
-    unless (-x 'perl.third') {
-	unless (-x '../perl.third') {
-	    die "You need to run \"make perl.third first.\n";
-	}
-	else {
-	    print "Symlinking ../perl.third as perl.third...\n";
-	    die "Failed to symlink: $!\n"
-		unless symlink("../perl.third", "perl.third");
-	    die "Symlinked but no executable perl.third: $!\n"
-		unless -x 'perl.third';
-	}
+if ($is_win32) {
+    # String eval to avoid loading File::Glob on non-miniperl.
+    # (Windows only uses this script for miniperl.)
+    my @argv;
+    if (eval '@argv = map glob, @ARGV; 1') {
+	@ARGV = @argv;
+    } else {
+	die "Failed to glob \@ARGV: $@";
     }
 }
 
@@ -168,26 +198,17 @@ $ENV{EMXSHELL} = 'sh';        # For OS/2
 if ($show_elapsed_time) { require Time::HiRes }
 my %timings = (); # testname => [@et] pairs if $show_elapsed_time.
 
-my %skip = (
-	    '.' => 1,
-	    '..' => 1,
-	    'CVS' => 1,
-	    'RCS' => 1,
-	    'SCCS' => 1,
-	    '.svn' => 1,
-	   );
-
 # Roll your own File::Find!
-sub _find_tests { our @found=(); push @ARGV, _find_files('\.t$', $_[0]) }
+our @found;
+sub _find_tests { @found=(); push @ARGV, _find_files('\.t$', $_[0]) }
 sub _find_files {
     my($patt, @dirs) = @_;
     for my $dir (@dirs) {
 	opendir DIR, $dir or die "Trouble opening $dir: $!";
 	foreach my $f (sort { $a cmp $b } readdir DIR) {
 	    next if $skip{$f};
-
+	    $dir =~ s/(?<!\^)\.dir(;1)?$//i if $is_vms; # trim .DIR extension
 	    my $fullpath = "$dir/$f";
-	    
 	    if (-d $fullpath) {
 		_find_files($patt, $fullpath);
 	    } elsif ($f =~ /$patt/) {
@@ -232,7 +253,7 @@ sub _scan_test {
 
     close $script;
 
-    my $perl = './perl';
+    my $perl = $is_win32 ? '.\perl' : './perl';
     my $lib  = '../lib';
     my $run_dir;
     my $return_dir;
@@ -298,21 +319,25 @@ sub _cmd {
     }
     elsif ($type eq 'perl') {
         my $perl = $options->{perl};
-        my $redir = $^O eq 'VMS' ? '2>&1' : '';
+        my $redir = $is_vms ? '2>&1' : '';
 
         if ($ENV{PERL_VALGRIND}) {
             my $perl_supp = $options->{return_dir} ? "$options->{return_dir}/perl.supp" : "perl.supp";
             my $valgrind_exe = $ENV{VALGRIND} // 'valgrind';
+            if ($options->{run_dir}) {
+                require Cwd;
+                $Valgrind_Log = Cwd::abs_path("$options->{run_dir}/$Valgrind_Log");
+            }
             my $vg_opts = $ENV{VG_OPTS}
-              // '--log-fd=3 '
+	       //   "--log-file=$Valgrind_Log "
 		  . "--suppressions=$perl_supp --leak-check=yes "
 		  . "--leak-resolution=high --show-reachable=yes "
-                  . "--num-callers=50 --track-origins=yes";
+		  . "--num-callers=50 --track-origins=yes";
+	    # Force logging if not asked for (so cachegrind reporting works below)
+	    if ($vg_opts !~ /--log-file/) {
+		$vg_opts = "--log-file=$Valgrind_Log $vg_opts";
+	    }
             $perl = "$valgrind_exe $vg_opts $perl";
-            $redir = "3>$Valgrind_Log";
-            if ($options->{run_dir}) {
-                $Valgrind_Log = "$options->{run_dir}/$Valgrind_Log";
-            }
         }
 
         my $args = "$options->{testswitch} $options->{switch} $options->{utf8}";
@@ -327,6 +352,16 @@ sub _before_fork {
     if ($options->{run_dir}) {
 	my $run_dir = $options->{run_dir};
 	chdir $run_dir or die "Can't chdir to '$run_dir': $!";
+    }
+
+    # Remove previous valgrind output otherwise it will interfere
+    my $test = $options->{test};
+
+    (local $Valgrind_Log = "$test.valgrind-current") =~ s/^.*\///;
+
+    if ($ENV{PERL_VALGRIND} && -e $Valgrind_Log) {
+        unlink $Valgrind_Log
+            or warn "$0: Failed to unlink '$Valgrind_Log': $!\n";
     }
 
     return;
@@ -375,7 +410,7 @@ sub _quote_args {
     foreach (split(/\s+/,$args)) {
        # In VMS protect with doublequotes because otherwise
        # DCL will lowercase -- unless already doublequoted.
-       $_ = q(").$_.q(") if ($^O eq 'VMS') && !/^\"/ && length($_) > 0;
+       $_ = q(").$_.q(") if $is_vms && !/^\"/ && length($_) > 0;
        $argstring = $argstring . ' ' . $_;
     }
     return $argstring;
@@ -387,22 +422,63 @@ sub _populate_hash {
 }
 
 sub _tests_from_manifest {
-    my ($extensions, $known_extensions) = @_;
+    my ($extensions, $known_extensions, $all) = @_;
+    s/\bCwd\b/PathTools/, s!\bList/Util\b!Scalar/List/Utils!
+	for $extensions, $known_extensions;
     my %skip;
     my %extensions = _populate_hash($extensions);
     my %known_extensions = _populate_hash($known_extensions);
+    my %printed_skip_warning;
 
     foreach (keys %known_extensions) {
 	$skip{$_} = 1 unless $extensions{$_};
     }
 
     my @results;
+    my %non_ext;
+    push @results, \%non_ext if $all;
     my $mani = '../MANIFEST';
     if (open(MANI, $mani)) {
 	while (<MANI>) {
-	    if (m!^((?:cpan|dist|ext)/(\S+)/+(?:[^/\s]+\.t|test\.pl)|lib/\S+?(?:\.t|test\.pl))\s!) {
+	    chomp;
+	    my ($file)= split /\t/, $_;
+	    if ($file =~ m!^((?:cpan|dist|ext)/(\S+)/+(?:[^/\s]+\.t|test\.pl)|lib/\S+?(?:\.t|test\.pl))\z!) {
 		my $t = $1;
 		my $extension = $2;
+
+		if (    ord "A" != 65
+		     && defined $extension
+		     && $extension =~ m! \b (?:
+						Archive-Tar/
+					      | Config-Perl-V/
+				              | CPAN-Meta/
+					      | CPAN-Meta-YAML/
+					      | Digest-SHA/
+					      | ExtUtils-MakeMaker/
+					      | HTTP-Tiny/
+					      | IO-Compress/
+					      | JSON-PP/
+					      | libnet/
+					      | MIME-Base64/
+					      | podlators/
+					      | Pod-Simple/
+					      | Pod-Checker/
+					      | Digest-MD5/
+					      | Test-Harness/
+					      | IPC-Cmd/
+					      | Encode/
+					      | Socket/
+					      | ExtUtils-Manifest/
+					      | Module-Metadata/
+					      | PerlIO-via-QuotedPrint/
+					    )
+				       !x)
+		{
+		    print STDERR "Skipping testing of $extension on EBCDIC\n"
+				     unless $printed_skip_warning{$extension}++;
+		    next;
+		}
+
 		if (!$::core || $t =~ m!^lib/[a-z]!) {
 		    if (defined $extension) {
 			$extension =~ s!/t(:?/\S+)*$!!;
@@ -417,6 +493,17 @@ sub _tests_from_manifest {
 		    $::path_to_name{$path} = $t;
 		}
 	    }
+	    elsif ($file=~m!/(?:test\.pl|[^/\s]+\.t)\z! and $file ne "t/test.pl") {
+		my $munged = $file;
+		next if $munged=~m!^(?:t/)?os2/!	and !$is_os2;
+		next if $munged=~m!^(?:t/)?win32/!	and !$is_win32;
+		next if $munged=~m!^(?:t/)?japh/!	and !($::torture or $ENV{PERL_TORTURE_TEST});
+		next if $munged=~m!^(?:t/)?benchmark/!	and !($::benchmark or $ENV{PERL_BENCHMARK});
+		next if $munged=~m!^(?:t/)?bigmem/!	and !$ENV{PERL_TEST_MEMORY};
+		$munged =~ s!t/!! or $munged = "../$munged";
+
+		$non_ext{$munged}++;
+	    }
 	}
 	close MANI;
     } else {
@@ -425,21 +512,65 @@ sub _tests_from_manifest {
     return @results;
 }
 
+sub dump_tests {
+    my ($ary) = @_;
+    for my $test (sort @$ary) {
+        # convert it to a path from the root of the repo
+        $test=~s!^\.\./!! or $test=~s!^!t/!;
+        print "$test\n";
+    }
+    exit(0);
+}
+
+sub filter_taint_tests {
+    my $tests = shift;
+    require Config;
+    return unless $Config::Config{taint_disabled} eq "define";
+
+    # These are test files which are known to fail with -DNO_TAINT_SUPPORT
+    # but which do not have "taint" in their name, nor have shebang lines
+    # with -t or -T in them. So we exclude them specifically instead.
+    my %known_tainter = map { $_ => 0 } (
+        '../cpan/Test-Harness/t/regression.t',
+        '../cpan/Test-Harness/t/source_handler.t',
+        '../cpan/Test-Harness/t/compat/inc-propagation.t',
+    );
+    @$tests = grep {
+        my $file = $_;
+        open my $ifh, "<", $file
+            or die "Failed to read: '$file': $!";
+        my $line = <$ifh>;
+        my $keep = $file=~/taint/ ? 0 : ($known_tainter{$file} // 1);
+        if ($line=~/^#!.*perl\s+-(\w+)/) {
+            my $switch = $1;
+            if ($switch =~ s/[Tt]//) {
+                $keep = 0;
+            }
+        }
+        $keep
+    } @$tests;
+}
+
+
 unless (@ARGV) {
     # base first, as TEST bails out if that can't run
     # then comp, to validate that require works
     # then run, to validate that -M works
     # then we know we can -MTestInit for everything else, making life simpler
-    foreach my $dir (qw(base comp run cmd io re op uni mro)) {
+
+    # NOTE that _find_tests() is recursive, unlike what test_harness uses.
+    foreach my $dir (qw(base comp run cmd io re opbasic op uni mro class perf test_pl)) {
 	_find_tests($dir);
     }
     unless ($::core) {
 	_find_tests('porting');
-	_find_tests("lib"); 
+        _find_tests("lib");
     }
+    _find_tests('win32') if $is_win32;
+    _find_tests('os2')	 if $is_os2;
     # Config.pm may be broken for make minitest. And this is only a refinement
     # for skipping tests on non-default builds, so it is allowed to fail.
-    # What we want to to is make a list of extensions which we did not build.
+    # What we want to do is make a list of extensions which we did not build.
     my $configsh = '../config.sh';
     my ($extensions, $known_extensions);
     if (-f $configsh) {
@@ -465,11 +596,49 @@ unless (@ARGV) {
     # something is that badly wrong.
     push @ARGV, _tests_from_manifest($extensions, $known_extensions);
     unless ($::core) {
-	_find_tests('x2p');
-	_find_tests('japh') if $::torture;
-	_find_tests('t/benchmark') if $::benchmark or $ENV{PERL_BENCHMARK};
+	_find_tests('japh') if $::torture or $ENV{PERL_TORTURE_TEST};
+	_find_tests('benchmark') if $::benchmark or $ENV{PERL_BENCHMARK};
+	_find_tests('bigmem') if $ENV{PERL_TEST_MEMORY};
     }
 }
+@ARGV= do {
+    my @order= (
+	"test_pl",
+	"base",
+	"comp",
+	"run",
+	"cmd",
+	"io",
+	"re",
+	"opbasic",
+	"op",
+	"op/hook",
+	"uni",
+	"mro",
+	"class",
+	"lib",
+	"ext",
+	"dist",
+	"cpan",
+	"perf",
+	"porting",
+    );
+    my %order= map { $order[$_] => 1+$_ } 0..$#order;
+    my $idx= 0;
+    map {
+	$_->[0]
+    } sort {
+	    $a->[3] <=> $b->[3] ||
+	    $a->[1] <=> $b->[1]
+    } map {
+	my $root= /(\w+)/ ? $1 : "";
+	[ $_, $idx++, $root, $order{$root}||=0 ]
+    } @ARGV;
+};
+
+dump_tests(\@ARGV) if $dump_tests;
+
+filter_taint_tests(\@ARGV);
 
 if ($::deparse) {
     _testprogs('deparse', '',   @ARGV);
@@ -535,6 +704,7 @@ EOT
     my $tested_files  = 0;
     my $totmax = 0;
     my %failed_tests;
+    my @unexpected_pass; # files where deparse-skips.txt says fail but passed
     my $toolnm;		# valgrind, cachegrind, perf
 
     while (my $test = shift @tests) {
@@ -547,31 +717,25 @@ EOT
 	    # in BEGIN/END blocks (giving better visibility of self vs
 	    # children of each testprog), but that would require some
 	    # IPC to send results back here, or a completely different
-	    # collection scheme (Storable isnt tuned for incremental use)
+	    # collection scheme (Storable isn't tuned for incremental use)
 	    @starttimes = times;
 	}
 	if ($test =~ /^$/) {
 	    next;
 	}
-	if ($type eq 'deparse') {
-	    if ($test eq "comp/redef.t") {
-		# Redefinition happens at compile time
-		next;
-	    }
-	    elsif ($test =~ m{lib/Switch/t/}) {
-		# B::Deparse doesn't support source filtering
-		next;
-	    }
+	if ($type eq 'deparse' && $test =~ $deparse_skips) {
+	    next;
 	}
 	my $te = $::path_to_name{$test} . '.'
 		    x ($dotdotdot - length($::path_to_name{$test})) .' ';
 
-	if ($^O ne 'VMS') {  # defer printing on VMS due to piping bug
+	if (!$is_vms) {  # defer printing on VMS due to piping bug
 	    print $te;
 	    $te = '';
 	}
 
-        (local $Valgrind_Log = "$test.valgrind-current") =~ s/^.*\///;
+	(local $Valgrind_Log = "$test.valgrind-current") =~ s/^.*\///;
+
 	my $results = _run_test($test, $type);
 
 	my $failure;
@@ -583,11 +747,11 @@ EOT
 	my %todo;
 	while (<$results>) {
 	    next if /^\s*$/; # skip blank lines
-	    if (/^1..$/ && ($^O eq 'VMS')) {
+	    if (/^1..$/ && $is_vms) {
 		# VMS pipe bug inserts blank lines.
-		my $l2 = <RESULTS>;
+		my $l2 = <$results>;
 		if ($l2 =~ /^\s*$/) {
-		    $l2 = <RESULTS>;
+		    $l2 = <$results>;
 		}
 		$_ = '1..' . $l2;
 	    }
@@ -665,78 +829,19 @@ EOT
 		}
 	    }
 	}
+	my  @junk = <$results>;  # dump remaining output to prevent SIGPIPE
+				 # (so far happens only on os390)
 	close $results;
+	undef @junk;
 
 	if (not defined $failure) {
 	    $failure = 'FAILED--no leader found' unless $seen_leader;
 	}
 
-	if ($ENV{PERL_VALGRIND}) {
-	    $toolnm = $ENV{VALGRIND};
-	    $toolnm =~ s|.*/||;  # keep basename
-	    my @valgrind;	# gets content of file
-	    if (-e $Valgrind_Log) {
-		if (open(V, $Valgrind_Log)) {
-		    @valgrind = <V>;
-		    close V;
-		} else {
-		    warn "$0: Failed to open '$Valgrind_Log': $!\n";
-		}
-	    }
-	    if ($ENV{VG_OPTS} =~ /(cachegrind)/ or $toolnm =~ /(perf)/) {
-		$toolnm = $1;
-		if ($toolnm eq 'perf') {
-		    # append perfs subcommand, not just stat
-		    my ($sub) = split /\s/, $ENV{VG_OPTS};
-		    $toolnm .= "-$sub";
-		}
-		if (rename $Valgrind_Log, "$test.$toolnm") {
-		    $grind_ct++;
-		} else {
-		    warn "$0: Failed to create '$test.$toolnm': $!\n";
-		}
-	    }
-	    elsif (@valgrind) {
-		my $leaks = 0;
-		my $errors = 0;
-		for my $i (0..$#valgrind) {
-		    local $_ = $valgrind[$i];
-		    if (/^==\d+== ERROR SUMMARY: (\d+) errors? /) {
-			$errors = $errors + $1;   # there may be multiple error summaries
-		    } elsif (/^==\d+== LEAK SUMMARY:/) {
-			for my $off (1 .. 4) {
-			    if ($valgrind[$i+$off] =~
-				/(?:lost|reachable):\s+\d+ bytes in (\d+) blocks/) {
-				$leaks = $leaks + $1;
-			    }
-			}
-		    }
-		}
-		if ($errors or $leaks) {
-		    if (rename $Valgrind_Log, "$test.valgrind") {
-			$grind_ct = $grind_ct + 1;
-		    } else {
-			warn "$0: Failed to create '$test.valgrind': $!\n";
-		    }
-		}
-	    } else {
-		warn "No valgrind output?\n";
-	    }
-	    if (-e $Valgrind_Log) {
-		unlink $Valgrind_Log
-		    or warn "$0: Failed to unlink '$Valgrind_Log': $!\n";
-	    }
-	}
-	if ($type eq 'deparse') {
+	_check_valgrind(\$toolnm, \$grind_ct, \$test);
+
+	if ($type eq 'deparse' && !$ENV{KEEP_DEPARSE_FILES}) {
 	    unlink "./$test.dp";
-	}
-	if ($ENV{PERL_3LOG}) {
-	    my $tpp = $test;
-	    $tpp =~ s:^\.\./::;
-	    $tpp =~ s:/:_:g;
-	    $tpp =~ s:\.t$:.3log:;
-	    rename("perl.3log", $tpp) ||
-		die "rename: perl3.log to $tpp: $!\n";
 	}
 	if (not defined $failure and $next != $max) {
 	    $failure="FAILED--expected $max tests, saw $next";
@@ -748,11 +853,27 @@ EOT
 	    $failure = "FAILED--non-zero wait status: $?";
 	}
 
+	# Deparse? Should it have passed or failed?
+	if ($type eq 'deparse' && $test =~ $deparse_failures) {
+	    if (!$failure) {
+		# Wait, it didn't fail? Great news!
+		push @unexpected_pass, $test;
+	    } else {
+		# Bah, still failing. Mask it.
+		print "${te}skipped\n";
+		$tested_files = $tested_files - 1;
+		next;
+	    }
+	}
+
 	if (defined $failure) {
 	    print "${te}$failure\n";
 	    $::bad_files = $::bad_files + 1;
-	    if ($test =~ /^base/) {
-		die "Failed a basic test ($test) -- cannot continue.\n";
+	    if ($test =~ /^base/ && ! defined &DynaLoader::boot_DynaLoader) {
+		# Die if running under minitest (no DynaLoader).  Otherwise
+		# keep going, as  we know that Perl basically works, or we
+		# would not have been able to actually compile it all the way.
+		die "Failed a basic test ($test) under minitest -- cannot continue.\n";
 	    }
 	    $failed_tests{$test} = 1;
 	}
@@ -796,6 +917,17 @@ EOT
 	for my $test ( sort keys %failed_tests ) {
 	    print "\t$test\n";
 	}
+
+	if (@unexpected_pass) {
+	    print <<EOF;
+
+The following scripts were expected to fail under -deparse (at least
+according to $deparse_skip_file), but unexpectedly succeeded:
+EOF
+	    print "\t$_\n" for sort @unexpected_pass;
+	    print "\n";
+	}
+
 	warn <<'SHRDLU_1';
 ### Since not all tests were successful, you may want to run some of
 ### them individually and examine any diagnostic messages they produce.
@@ -806,7 +938,7 @@ SHRDLU_1
 ###   ./perl harness
 ### in the 't' directory since most (>=80%) of the tests succeeded.
 SHRDLU_2
-	if (eval {require Config; import Config; 1}) {
+	if (eval {require Config; Config->import; 1}) {
 	    if ($::Config{usedl} && (my $p = $::Config{ldlibpthname})) {
 		warn <<SHRDLU_3;
 ### You may have to set your dynamic library search path,
@@ -832,6 +964,7 @@ SHRDLU_5
 	    }
 	}
     }
+    printf "Elapsed: %d sec\n", time() - $t0;
     my ($user,$sys,$cuser,$csys) = times;
     my $tot = sprintf("u=%.2f  s=%.2f  cu=%.2f  cs=%.2f  scripts=%d  tests=%d",
 		      $user,$sys,$cuser,$csys,$tested_files,$totmax);
@@ -853,16 +986,8 @@ SHRDLU_5
 	    print "wrote storable file: $fn\n";
 	}
     }
-    if ($ENV{PERL_VALGRIND}) {
-	my $s = $grind_ct == 1 ? '' : 's';
-	print "$grind_ct valgrind report$s created.\n", ;
-	if ($toolnm eq 'cachegrind') {
-	    # cachegrind leaves a lot of cachegrind.out.$pid litter
-	    # around the tree, find and delete them
-	    unlink _find_files('cachegrind.out.\d+$',
-			     qw ( ../t ../cpan ../ext ../dist/ ));
-	}
-    }
+
+    _cleanup_valgrind(\$toolnm, \$grind_ct);
 }
 exit ($::bad_files != 0);
 
@@ -883,7 +1008,7 @@ sub gather_conf_platform_info {
 	@platform = grep /name|cpu/, <$fh>;
 	chomp $_ for @platform;
     }
-    unshift @platform, $^O;
+    unshift @platform, $OS;
 
     return (
 	conf => \%conf,
@@ -895,6 +1020,137 @@ sub gather_conf_platform_info {
 	host => (grep chomp, `hostname -f`),
 	version => '0.03', # bump for conf, platform, or data collection changes
 	);
+}
+
+sub _check_valgrind {
+    return unless $ENV{PERL_VALGRIND};
+
+    my ($toolnm, $grind_ct, $test) = @_;
+
+    $$toolnm = $ENV{VALGRIND};
+    $$toolnm =~ s|.*/||;  # keep basename
+    my @valgrind;	# gets content of file
+    if (-e $Valgrind_Log) {
+	if (open(V, $Valgrind_Log)) {
+	    @valgrind = <V>;
+	    close V;
+	} else {
+	    warn "$0: Failed to open '$Valgrind_Log': $!\n";
+	}
+    }
+    if ($ENV{VG_OPTS} =~ /(cachegrind)/ or $$toolnm =~ /(perf)/) {
+	$$toolnm = $1;
+	if ($$toolnm eq 'perf') {
+	    # append perfs subcommand, not just stat
+	    my ($sub) = split /\s/, $ENV{VG_OPTS};
+	    $$toolnm .= "-$sub";
+	}
+	if (rename $Valgrind_Log, "$$test.$$toolnm") {
+	    $$grind_ct++;
+	} else {
+	    warn "$0: Failed to create '$$test.$$toolnm': $!\n";
+	}
+    }
+    elsif (@valgrind) {
+	my $leaks = 0;
+	my $errors = 0;
+	for my $i (0..$#valgrind) {
+	    local $_ = $valgrind[$i];
+	    if (/^==\d+== ERROR SUMMARY: (\d+) errors? /) {
+		$errors = $errors + $1;   # there may be multiple error summaries
+	    } elsif (/^==\d+== LEAK SUMMARY:/) {
+		for my $off (1 .. 4) {
+		    if ($valgrind[$i+$off] =~
+			/(?:lost|reachable):\s+\d+ bytes in (\d+) blocks/) {
+			    $leaks = $leaks + $1;
+		    }
+		}
+	    }
+	}
+	if ($errors or $leaks) {
+	    if (rename $Valgrind_Log, "$$test.valgrind") {
+		$$grind_ct = $$grind_ct + 1;
+	    } else {
+		warn "$0: Failed to create '$$test.valgrind': $!\n";
+	    }
+	}
+    } else {
+        # Quiet wasn't asked for? Something may be amiss
+	if ($ENV{VG_OPTS} && $ENV{VG_OPTS} !~ /(^|\s)(-q|--quiet)(\s|$)/) {
+	    warn "No valgrind output?\n";
+	}
+    }
+    if (-e $Valgrind_Log) {
+	unlink $Valgrind_Log
+	    or warn "$0: Failed to unlink '$Valgrind_Log': $!\n";
+    }
+}
+
+sub _cleanup_valgrind {
+    return unless $ENV{PERL_VALGRIND};
+
+    my ($toolnm, $grind_ct) = @_;
+    my $s = $$grind_ct == 1 ? '' : 's';
+    print "$$grind_ct valgrind report$s created.\n", ;
+    if ($$toolnm eq 'cachegrind') {
+	# cachegrind leaves a lot of cachegrind.out.$pid litter
+	# around the tree, find and delete them
+	unlink _find_files('cachegrind.out.\d+$',
+		     qw ( ../t ../cpan ../ext ../dist/ ));
+    }
+    elsif ($$toolnm eq 'valgrind') {
+	# Remove empty, hence non-error, output files
+	unlink grep { -z } _find_files('valgrind-current',
+		     qw ( ../t ../cpan ../ext ../dist/ ));
+    }
+}
+
+# Generate regexps of known bad filenames / skips from Porting/deparse-skips.txt
+
+sub _process_deparse_config {
+    my @deparse_failures;
+    my @deparse_skips;
+
+    my $f = $deparse_skip_file;
+
+    my $skips;
+    if (!open($skips, '<', $f)) {
+        warn "Failed to find $f: $!\n";
+        return;
+    }
+
+    my $in;
+    while(<$skips>) {
+        if (/__DEPARSE_FAILURES__/) {
+            $in = \@deparse_failures; next;
+        } elsif (/__DEPARSE_SKIPS__/) {
+            $in = \@deparse_skips; next;
+        } elsif (!$in) {
+            next;
+	}
+
+        s/#.*$//; # Kill comments
+        s/\s+$//; # And trailing whitespace
+
+        next unless $_;
+
+        push @$in, $_;
+	warn "WARNING: $f:$.: excluded file doesn't exist: $_\n" unless -f $_;
+    }
+
+    for my $f (@deparse_failures, @deparse_skips) {
+        if ($f =~ m|/$|) { # Dir? Skip everything below it
+            $f = qr/\Q$f\E.*/;
+        } else {
+            $f = qr/\Q$f\E/;
+        }
+    }
+
+    $deparse_failures = join('|', @deparse_failures);
+    $deparse_failures = qr/^(?:$deparse_failures)$/;
+
+    $deparse_skips = join('|', @deparse_skips);
+    $deparse_skips = qr/^(?:$deparse_skips)$/;
 }
 
 # ex: set ts=8 sts=4 sw=4 noet:

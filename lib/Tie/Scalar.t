@@ -9,15 +9,14 @@ BEGIN {
 package TieTest;
 
 use Tie::Scalar;
-use vars qw( @ISA );
-@ISA = qw( Tie::Scalar );
+our @ISA = qw( Tie::Scalar );
 
 sub new { 'Fooled you.' }
 
 package main;
 
-use vars qw( $flag );
-use Test::More tests => 16;
+our $flag;
+use Test::More;
 
 use_ok( 'Tie::Scalar' );
 
@@ -119,3 +118,5 @@ my $r2 = eval {tie my $foo => "InheritHasMethod2"; 1};
 
 ok $r1 && $called1, "inheriting new() does not croak";
 ok $r2 && $called2, "inheriting TIESCALAR() does not croak";
+
+done_testing();

@@ -1,31 +1,29 @@
-package File::stat;
-use 5.006;
+package File::stat 1.14;
+use v5.38;
 
-use strict;
-use warnings;
 use warnings::register;
 use Carp;
+use constant _IS_CYGWIN => $^O eq "cygwin";
 
 BEGIN { *warnif = \&warnings::warnif }
 
-our(@EXPORT, @EXPORT_OK, %EXPORT_TAGS);
+our ( $st_dev, $st_ino, $st_mode,
+    $st_nlink, $st_uid, $st_gid,
+    $st_rdev, $st_size,
+    $st_atime, $st_mtime, $st_ctime,
+    $st_blksize, $st_blocks
+);
 
-our $VERSION = '1.05';
-
-my @fields;
-BEGIN { 
-    use Exporter   ();
-    @EXPORT      = qw(stat lstat);
-    @fields      = qw( $st_dev	   $st_ino    $st_mode 
+use Exporter 'import';
+our @EXPORT      = qw(stat lstat);
+our @fields      = qw( $st_dev	   $st_ino    $st_mode
 		       $st_nlink   $st_uid    $st_gid 
 		       $st_rdev    $st_size 
 		       $st_atime   $st_mtime  $st_ctime 
 		       $st_blksize $st_blocks
 		    );
-    @EXPORT_OK   = ( @fields, "stat_cando" );
-    %EXPORT_TAGS = ( FIELDS => [ @fields, @EXPORT ] );
-}
-use vars @fields;
+our @EXPORT_OK   = ( @fields, "stat_cando" );
+our %EXPORT_TAGS = ( FIELDS => [ @fields, @EXPORT ] );
 
 use Fcntl qw(S_IRUSR S_IWUSR S_IXUSR);
 
@@ -37,10 +35,14 @@ BEGIN {
         my $val = eval { &{"Fcntl::S_I\U$_"} };
         *{"_$_"} = defined $val ? sub { $_[0] & $val ? 1 : "" } : sub { "" };
     }
-    for (qw(SOCK CHR BLK REG DIR FIFO LNK)) {
+    for (qw(SOCK CHR BLK REG DIR LNK)) {
         *{"S_IS$_"} = defined eval { &{"Fcntl::S_IF$_"} }
             ? \&{"Fcntl::S_IS$_"} : sub { "" };
     }
+    # FIFO flag and macro don't quite follow the S_IF/S_IS pattern above
+    # RT #111638
+    *{"S_ISFIFO"} = defined &Fcntl::S_IFIFO
+      ? \&Fcntl::S_ISFIFO : sub { "" };
 }
 
 # from doio.c
@@ -72,7 +74,7 @@ sub _ingroup {
 # component (at which point we might as well just call Perl_cando and
 # have done with it).
     
-if (grep $^O eq $_, qw/os2 MSWin32 dos/) {
+if (grep $^O eq $_, qw/os2 MSWin32/) {
 
     # from doio.c
     *cando = sub { ($_[0][2] & $_[1]) ? 1 : "" };
@@ -83,15 +85,22 @@ else {
     *cando = sub {
         my ($s, $mode, $eff) = @_;
         my $uid = $eff ? $> : $<;
-
-        # If we're root on unix and we are not testing for executable
-        # status, then all file tests are true.
-        $^O ne "VMS" and $uid == 0 and !($mode & 0111) and return 1;
-
         my ($stmode, $stuid, $stgid) = @$s[2,4,5];
 
         # This code basically assumes that the rwx bits of the mode are
         # the 0777 bits, but so does Perl_cando.
+
+        if (_IS_CYGWIN ? _ingroup(544, $eff) : ($uid == 0 && $^O ne "VMS")) {
+            # If we're root on unix
+            # not testing for executable status => all file tests are true
+            return 1 if !($mode & 0111);
+            # testing for executable status =>
+            # for a file, any x bit will do
+            # for a directory, always true
+            return 1 if $stmode & 0111 || S_ISDIR($stmode);
+            return "";
+        }
+
         if ($stuid == $uid) {
             $stmode & $mode         and return 1;
         }
@@ -148,7 +157,7 @@ use overload
     -X => sub {
         my ($s, $op) = @_;
 
-        if (index "rwxRWX", $op) {
+        if (index("rwxRWX", $op) >= 0) {
             (caller 0)[8] & HINT_FILETEST_ACCESS
                 and warnif("File::stat ignores use filetest 'access'");
 
@@ -167,9 +176,6 @@ use overload
         }
     };
 
-# Class::Struct forbids use of @ISA
-sub import { goto &Exporter::import }
-
 use Class::Struct qw(struct);
 struct 'File::stat' => [
      map { $_ => '$' } qw{
@@ -178,7 +184,7 @@ struct 'File::stat' => [
      }
 ];
 
-sub populate (@) {
+sub populate {
     return unless @_;
     my $stob = new();
     @$stob = (
@@ -188,9 +194,9 @@ sub populate (@) {
     return $stob;
 } 
 
-sub lstat ($)  { populate(CORE::lstat(shift)) }
+sub lstat :prototype($) { populate(CORE::lstat(shift)) }
 
-sub stat ($) {
+sub stat :prototype($) {
     my $arg = shift;
     my $st = populate(CORE::stat $arg);
     return $st if defined $st;
@@ -205,7 +211,6 @@ sub stat ($) {
     return populate(CORE::stat $fh);
 }
 
-1;
 __END__
 
 =head1 NAME
@@ -215,8 +220,8 @@ File::stat - by-name interface to Perl's built-in stat() functions
 =head1 SYNOPSIS
 
  use File::stat;
- $st = stat($file) or die "No $file: $!";
- if ( ($st->mode & 0111) && $st->nlink > 1) ) {
+ my $st = stat($file) or die "No $file: $!";
+ if ( ($st->mode & 0111) && ($st->nlink > 1) ) {
      print "$file is executable with lotsa links\n";
  } 
 

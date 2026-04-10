@@ -3,49 +3,94 @@
 # This test puts MakeMaker through the paces of a basic perl module
 # build, test and installation of the Big::Fat::Dummy module.
 
+# Module::Install relies on being able to patch the generated Makefile
+# to add flags to $(PERL)
+# This test includes adding ' -Iinc' to $(PERL), and checking 'make install'
+# after that works. Done here as back-compat is considered basic.
+
 BEGIN {
     unshift @INC, 't/lib';
 }
 
 use strict;
+use warnings;
 use Config;
 use ExtUtils::MakeMaker;
+use utf8;
 
-use Test::More tests => 171;
 use MakeMaker::Test::Utils;
 use MakeMaker::Test::Setup::BFD;
+use Config;
+use ExtUtils::MM;
+use Test::More
+    !MM->can_run(make()) && $ENV{PERL_CORE} && $Config{'usecrosscompile'}
+    ? (skip_all => "cross-compiling and make not available")
+    : (tests => 198);
 use File::Find;
 use File::Spec;
 use File::Path;
+use File::Temp qw[tempdir];
 
 my $perl = which_perl();
 my $Is_VMS = $^O eq 'VMS';
+my $OLD_CP; # crude but...
+my $w32worked; # or whether we had to fallback to chcp
+if ($^O eq "MSWin32") {
+    eval {
+        require Win32;
+        local $SIG{__WARN__} = sub {} if ( "$]" < 5.014 ); # suppress deprecation warning for inherited AUTOLOAD of Win32::GetConsoleCP()
+        $w32worked = $OLD_CP = Win32::GetConsoleCP();
+    };
+    $OLD_CP = $1 if !$w32worked and qx(chcp) =~ /(\d+)$/ and $? == 0;
+    if (defined $OLD_CP) {
+        if ($w32worked) {
+            Win32::SetConsoleCP(1252)
+        } else {
+            qx(chcp 1252);
+        }
+    }
+}
+END {
+    if ($^O eq "MSWin32" and defined $OLD_CP) {
+        if ($w32worked) {
+            Win32::SetConsoleCP($OLD_CP)
+        } else {
+            qx(chcp $OLD_CP);
+        }
+    }
+}
 
 chdir 't';
+perl_lib; # sets $ENV{PERL5LIB} relative to t/
 
-perl_lib;
+my $tmpdir = tempdir( DIR => '../t', CLEANUP => 1 );
+use Cwd; my $cwd = getcwd; END { chdir $cwd } # so File::Temp can cleanup
+chdir $tmpdir;
 
 my $Touch_Time = calibrate_mtime();
 
 $| = 1;
 
 ok( setup_recurs(), 'setup' );
-END {
-    ok chdir File::Spec->updir or die;
-    ok teardown_recurs, "teardown";
-}
 
 ok( chdir('Big-Dummy'), "chdir'd to Big-Dummy" ) ||
   diag("chdir failed: $!");
 
-my @mpl_out = run(qq{$perl Makefile.PL "PREFIX=../dummy-install"});
-END { rmtree '../dummy-install'; }
+sub extrachar {
+  return 's'
+    if 1; # until Perl gains native support for Unicode filenames
+#    if $] <= 5.008 || $ENV{PERL_CORE}
+#      || $^O =~ /bsd|dragonfly|mswin32/i;
+  'š';
+}
+my $DUMMYINST = '../dummy-in'.extrachar().'tall';
+my @mpl_out = run(qq{$perl Makefile.PL "PREFIX=$DUMMYINST"});
 
 cmp_ok( $?, '==', 0, 'Makefile.PL exited with zero' ) ||
   diag(@mpl_out);
 
 my $makefile = makefile_name();
-ok( grep(/^Writing $makefile for Big::Dummy/, 
+ok( grep(/^Writing $makefile for Big::Dummy/,
          @mpl_out) == 1,
                                            'Makefile.PL output looks right');
 
@@ -57,21 +102,17 @@ ok( -e $makefile,       'Makefile exists' );
 
 # -M is flakey on VMS
 my $mtime = (stat($makefile))[9];
-cmp_ok( $Touch_Time, '<=', $mtime,  '  its been touched' );
-
-END { unlink makefile_name(), makefile_backup() }
+cmp_ok( $Touch_Time, '<=', $mtime,  '  been touched' );
 
 my $make = make_run();
 
 {
-    # Supress 'make manifest' noise
+    # Suppress 'make manifest' noise
     local $ENV{PERL_MM_MANIFEST_VERBOSE} = 0;
     my $manifest_out = run("$make manifest");
     ok( -e 'MANIFEST',      'make manifest created a MANIFEST' );
-    ok( -s 'MANIFEST',      '  its not empty' );
+    ok( -s 'MANIFEST',      '  not empty' );
 }
-
-END { unlink 'MANIFEST'; }
 
 my $ppd_out = run("$make ppd");
 is( $?, 0,                      '  exited normally' ) || diag $ppd_out;
@@ -79,12 +120,12 @@ ok( open(PPD, 'Big-Dummy.ppd'), '  .ppd file generated' );
 my $ppd_html;
 { local $/; $ppd_html = <PPD> }
 close PPD;
-like( $ppd_html, qr{^<SOFTPKG NAME="Big-Dummy" VERSION="0.01">}m, 
+like( $ppd_html, qr{^<SOFTPKG NAME="Big-Dummy" VERSION="0.01">}m,
                                                            '  <SOFTPKG>' );
 like( $ppd_html,
       qr{^\s*<ABSTRACT>Try "our" hot dog's, \$andwiche\$ and \$\(ub\)\$!</ABSTRACT>}m,
                                                            '  <ABSTRACT>');
-like( $ppd_html, 
+like( $ppd_html,
       qr{^\s*<AUTHOR>Michael G Schwern &lt;schwern\@pobox.com&gt;</AUTHOR>}m,
                                                            '  <AUTHOR>'  );
 like( $ppd_html, qr{^\s*<IMPLEMENTATION>}m,          '  <IMPLEMENTATION>');
@@ -92,8 +133,11 @@ like( $ppd_html, qr{^\s*<REQUIRE NAME="strict::" />}m,  '  <REQUIRE>' );
 unlike( $ppd_html, qr{^\s*<REQUIRE NAME="warnings::" />}m,  'no <REQUIRE> for build_require' );
 
 my $archname = $Config{archname};
-if( $] >= 5.008 ) {
-    # XXX This is a copy of the internal logic, so it's not a great test
+# XXX This is a copy of the internal logic, so it's not a great test
+if( "$]" >= 5.010) {
+    $archname .= "-$^V->{version}->[0].$^V->{version}->[1]";
+}
+elsif( "$]" >= 5.008 ) {
     $archname .= "-$Config{PERL_REVISION}.$Config{PERL_VERSION}";
 }
 like( $ppd_html, qr{^\s*<ARCHITECTURE NAME="$archname" />}m,
@@ -101,93 +145,88 @@ like( $ppd_html, qr{^\s*<ARCHITECTURE NAME="$archname" />}m,
 like( $ppd_html, qr{^\s*<CODEBASE HREF="" />}m,            '  <CODEBASE>');
 like( $ppd_html, qr{^\s*</IMPLEMENTATION>}m,           '  </IMPLEMENTATION>');
 like( $ppd_html, qr{^\s*</SOFTPKG>}m,                      '  </SOFTPKG>');
-END { unlink 'Big-Dummy.ppd' }
-
 
 my $test_out = run("$make test");
 like( $test_out, qr/All tests successful/, 'make test' );
-is( $?, 0,                                 '  exited normally' ) || 
+is( $?, 0,                                 '  exited normally' ) ||
     diag $test_out;
 
 # Test 'make test TEST_VERBOSE=1'
 my $make_test_verbose = make_macro($make, 'test', TEST_VERBOSE => 1);
 $test_out = run("$make_test_verbose");
 like( $test_out, qr/ok \d+ - TEST_VERBOSE/, 'TEST_VERBOSE' );
+like( $test_out, qr/ok \d+ - testing test.pl/, 'test.pl' ); # in test.pl
+like( $test_out, qr/ok \d+ - testing t\/\*.t/, 't/*.t' ); # in *.t
 like( $test_out, qr/All tests successful/,  '  successful' );
 is( $?, 0,                                  '  exited normally' ) ||
     diag $test_out;
 
+# Test 'make testdb TEST_FILE=t/compile.t'
+# TESTDB_SW override is because perl -d is too clever for me to outwit
+my $make_testdb_file = make_macro(
+    $make,
+    'testdb',
+    TEST_FILE => 't/compile.t',
+    TESTDB_SW => '-Ixyzzy',
+);
+$test_out = run($make_testdb_file);
+unlike( $test_out, qr/harness/, 'no harness' );
+unlike( $test_out, qr/sanity\.t/, 'no wrong test' );
+like( $test_out, qr/compile\.t/, 'get right test' );
+like( $test_out, qr/xyzzy/, 'signs of TESTDB_SW' );
+is( $?, 0,                                  '  exited normally' ) ||
+    diag $test_out;
 
-my $install_out = run("$make install");
-is( $?, 0, 'install' ) || diag $install_out;
-like( $install_out, qr/^Installing /m );
+# now simulate what Module::Install does, and edit $(PERL) to add flags
+my $mtext = slurp($makefile);
+$mtext =~ s/^(\s*PERL\s*=.*)$/$1 -Iinc/m;
+write_file($makefile, $mtext);
 
-ok( -r '../dummy-install',     '  install dir created' );
-my %files = ();
-find( sub { 
-    # do it case-insensitive for non-case preserving OSs
-    my $file = lc $_;
+sub check_dummy_inst {
+    my ($loc, $install_args, $label, $skipsubdir) = @_;
+    my %files;
+    SKIP: {
+        my $install_out = run("$make install NOECHO= $install_args");
+        is( $?, 0, "install $label" ) || diag $install_out;
+        like( $install_out, qr/^Installing /m, "/Installing/ $label" );
+        ok( -r $loc,     "$label install dir created" )
+            or skip "$loc doesn't exist", 5;
+        find( sub {
+            # do it case-insensitive for non-case preserving OSs
+            my $file = lc $_;
+            # VMS likes to put dots on the end of things that don't have them.
+            $file =~ s/\.$// if $Is_VMS;
+            $files{$file} = $File::Find::name;
+        }, $loc );
+        ok( $files{'dummy.pm'},     "  Dummy.pm installed $label" );
+        if ($skipsubdir) { ok 1 } else {
+            ok( $files{'liar.pm'},      "  Liar.pm installed $label"  );
+        }
+        ok( $files{'program'},      "  program installed $label"  );
+        ok( $files{'.packlist'},    "  packlist created $label"   );
+        ok( $files{'perllocal.pod'},"  perllocal.pod created $label" );
+    }
+    \%files;
+}
 
-    # VMS likes to put dots on the end of things that don't have them.
-    $file =~ s/\.$// if $Is_VMS;
-
-    $files{$file} = $File::Find::name; 
-}, '../dummy-install' );
-ok( $files{'dummy.pm'},     '  Dummy.pm installed' );
-ok( $files{'liar.pm'},      '  Liar.pm installed'  );
-ok( $files{'program'},      '  program installed'  );
-ok( $files{'.packlist'},    '  packlist created'   );
-ok( $files{'perllocal.pod'},'  perllocal.pod created' );
-
+check_dummy_inst($DUMMYINST, '', 'Module::Install style');
 
 SKIP: {
     skip 'VMS install targets do not preserve $(PREFIX)', 8 if $Is_VMS;
-
-    $install_out = run("$make install PREFIX=elsewhere");
-    is( $?, 0, 'install with PREFIX override' ) || diag $install_out;
-    like( $install_out, qr/^Installing /m );
-
-    ok( -r 'elsewhere',     '  install dir created' );
-    %files = ();
-    find( sub { $files{$_} = $File::Find::name; }, 'elsewhere' );
-    ok( $files{'Dummy.pm'},     '  Dummy.pm installed' );
-    ok( $files{'Liar.pm'},      '  Liar.pm installed'  );
-    ok( $files{'program'},      '  program installed'  );
-    ok( $files{'.packlist'},    '  packlist created'   );
-    ok( $files{'perllocal.pod'},'  perllocal.pod created' );
+    check_dummy_inst('elsewhere', "PREFIX=elsewhere", 'with PREFIX');
     rmtree('elsewhere');
 }
 
-
 SKIP: {
     skip 'VMS install targets do not preserve $(DESTDIR)', 10 if $Is_VMS;
-
-    $install_out = run("$make install PREFIX= DESTDIR=other");
-    is( $?, 0, 'install with DESTDIR' ) || 
-        diag $install_out;
-    like( $install_out, qr/^Installing /m );
-
-    ok( -d 'other',  '  destdir created' );
-    %files = ();
-    my $perllocal;
-    find( sub { 
-        $files{$_} = $File::Find::name;
-    }, 'other' );
-    ok( $files{'Dummy.pm'},     '  Dummy.pm installed' );
-    ok( $files{'Liar.pm'},      '  Liar.pm installed'  );
-    ok( $files{'program'},      '  program installed'  );
-    ok( $files{'.packlist'},    '  packlist created'   );
-    ok( $files{'perllocal.pod'},'  perllocal.pod created' );
-
-    ok( open(PERLLOCAL, $files{'perllocal.pod'} ) ) || 
-        diag("Can't open $files{'perllocal.pod'}: $!");
-    { local $/;
-      unlike(<PERLLOCAL>, qr/other/, 'DESTDIR should not appear in perllocal');
-    }
-    close PERLLOCAL;
+    my $files = check_dummy_inst('other', 'PREFIX= DESTDIR=other', 'with DESTDIR');
+    eval {
+        unlike slurp($files->{'perllocal.pod'}), qr/other/, 'DESTDIR should not appear in perllocal'; 1
+    } or fail "error in slurp: $@";
+    is $@, '';
 
 # TODO not available in the min version of Test::Harness we require
-#    ok( open(PACKLIST, $files{'.packlist'} ) ) || 
+#    ok( open(PACKLIST, $files{'.packlist'} ) ) ||
 #        diag("Can't open $files{'.packlist'}: $!");
 #    { local $/;
 #      local $TODO = 'DESTDIR still in .packlist';
@@ -198,43 +237,35 @@ SKIP: {
     rmtree('other');
 }
 
-
 SKIP: {
     skip 'VMS install targets do not preserve $(PREFIX)', 9 if $Is_VMS;
-
-    $install_out = run("$make install PREFIX=elsewhere DESTDIR=other/");
-    is( $?, 0, 'install with PREFIX override and DESTDIR' ) || 
-        diag $install_out;
-    like( $install_out, qr/^Installing /m );
-
+    check_dummy_inst('other/elsewhere', 'PREFIX=elsewhere DESTDIR=other/', 'PREFIX override and DESTDIR');
     ok( !-d 'elsewhere',       '  install dir not created' );
-    ok( -d 'other/elsewhere',  '  destdir created' );
-    %files = ();
-    find( sub { $files{$_} = $File::Find::name; }, 'other/elsewhere' );
-    ok( $files{'Dummy.pm'},     '  Dummy.pm installed' );
-    ok( $files{'Liar.pm'},      '  Liar.pm installed'  );
-    ok( $files{'program'},      '  program installed'  );
-    ok( $files{'.packlist'},    '  packlist created'   );
-    ok( $files{'perllocal.pod'},'  perllocal.pod created' );
     rmtree('other');
 }
 
+my ($dist_test_out, $distdir, $meta_yml, $mymeta_yml, $meta_json, $mymeta_json);
+SKIP: {
+    skip 'disttest depends on metafile, which is not run in core', 1 if $ENV{PERL_CORE};
+    $dist_test_out = run("$make disttest");
+    is( $?, 0, 'disttest' ) || diag($dist_test_out);
 
-my $dist_test_out = run("$make disttest");
-is( $?, 0, 'disttest' ) || diag($dist_test_out);
+    # Test META.yml generation
+    use ExtUtils::Manifest qw(maniread);
 
-# Test META.yml generation
-use ExtUtils::Manifest qw(maniread);
+    $distdir  = 'Big-Dummy-0.01';
+    $distdir =~ s/\./_/g if $Is_VMS;
+    $meta_yml = "$distdir/META.yml";
+    $mymeta_yml = "$distdir/MYMETA.yml";
+    $meta_json = "$distdir/META.json";
+    $mymeta_json = "$distdir/MYMETA.json";
+}
 
-my $distdir  = 'Big-Dummy-0.01';
-$distdir =~ s/\./_/g if $Is_VMS;
-my $meta_yml = "$distdir/META.yml";
-my $mymeta_yml = "$distdir/MYMETA.yml";
-my $meta_json = "$distdir/META.json";
-my $mymeta_json = "$distdir/MYMETA.json";
+note "META file validity"; SKIP: {
+    skip 'disttest depends on metafile, which is not run in core', 104 if $ENV{PERL_CORE};
 
-note "META file validity"; {
-    require CPAN::Meta;
+    eval { require CPAN::Meta; };
+    skip 'Loading CPAN::Meta failed', 104 if $@;
 
     ok( !-f 'META.yml',  'META.yml not written to source dir' );
     ok( -f $meta_yml,    'META.yml written to dist dir' );
@@ -316,7 +347,7 @@ note "META file validity"; {
       "MANIFEST has META.yml"
     );
     is( $manifest->{'meta.json'}, 'Module JSON meta-data (added by MakeMaker)',
-      "MANFIEST has META.json"
+      "MANIFEST has META.json"
     );
 
     # Test NO_META META.yml suppression
@@ -387,15 +418,27 @@ note "META file validity"; {
 }
 
 
-
 # Make sure init_dirscan doesn't go into the distdir
-@mpl_out = run(qq{$perl Makefile.PL "PREFIX=../dummy-install"});
+# also with a "messup.PL" that will make a build fail
+write_file('messup.PL', <<'TEXT');
+print "Extracting messup (with variable substitutions)\n";
+die;
+TEXT
+@mpl_out = run(qq{$perl Makefile.PL "PREFIX=$DUMMYINST"});
 
 cmp_ok( $?, '==', 0, 'Makefile.PL exited with zero' ) || diag(@mpl_out);
 
 ok( grep(/^Writing $makefile for Big::Dummy/, @mpl_out) == 1,
-                                'init_dirscan skipped distdir') || 
+                                'init_dirscan skipped distdir') ||
   diag(@mpl_out);
+
+# "make test" straight after "perl Makefile.PL" is expected to work same as
+#   "make all test" so check that with "messup.PL" that will make the
+#   build step fail
+$test_out = run("$make test");
+unlike( $test_out, qr/All tests successful/, 'make test caused build' );
+isnt( $?, 0,                                 '  build should fail' ) ||
+    diag $test_out;
 
 # I know we'll get ignored errors from make here, that's ok.
 # Send STDERR off to oblivion.
@@ -404,16 +447,44 @@ open(STDERR, ">",File::Spec->devnull) or die $!;
 
 my $realclean_out = run("$make realclean");
 is( $?, 0, 'realclean' ) || diag($realclean_out);
+1 while unlink 'messup.PL'; # also zap deliberate build-breaker
 
 open(STDERR, ">&SAVERR") or die $!;
 close SAVERR;
 
+# test linkext=>{LINKTYPE=>''} still installs a pure-perl installation
+my $file = 'Makefile.PL';
+my $text = my $preserve_MPL = slurp $file;
+ok(($text =~ s#\);#    linkext=>{LINKTYPE=>''},\n$&#), 'successful M.PL edit');
+write_file($file, $text);
+# now do with "Liar" subdir still there
+rmtree $DUMMYINST; # so no false positive from before
+@mpl_out = run(qq{$perl Makefile.PL "PREFIX=$DUMMYINST"});
+check_dummy_inst($DUMMYINST, '', "with PREFIX=$DUMMYINST");
+# now clean, delete "Liar" subdir, do again
+$realclean_out = run("$make realclean");
+rmtree 'Liar';
+rmtree $DUMMYINST; # so no false positive from before
+@mpl_out = run(qq{$perl Makefile.PL "PREFIX=$DUMMYINST"});
+check_dummy_inst($DUMMYINST, '', "with PREFIX=$DUMMYINST minus subdir", 1);
+write_file($file, $preserve_MPL); # restore Makefile.PL
+$realclean_out = run("$make realclean");
+rmtree 'Liar';
+rmtree $DUMMYINST;
+
+# test PM_FILTER - RT#144085
+$text = $preserve_MPL;
+ok(($text =~ s:\);:    PM_FILTER => '\$(ABSPERLRUN) -ne "print unless /^#/"',\n$&:), 'successful M.PL edit');
+write_file($file, $text);
+@mpl_out = run(qq{$perl Makefile.PL});
+$test_out = run("$make test NOECHO=");
+like( $test_out, qr/All tests successful/, 'make test' );
+is( $?, 0,                                 '  exited normally' ) ||
+    diag $test_out;
+write_file($file, $preserve_MPL); # restore Makefile.PL
+$realclean_out = run("$make realclean");
 
 sub _normalize {
     my $hash = shift;
-
-    while(my($k,$v) = each %$hash) {
-        delete $hash->{$k};
-        $hash->{lc $k} = $v;
-    }
+    %$hash= map { lc($_) => $hash->{$_} } keys %$hash;
 }

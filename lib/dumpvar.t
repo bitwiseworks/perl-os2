@@ -23,8 +23,6 @@ my @prgs;
 
 use Test::More;
 
-plan tests => scalar @prgs;
-
 require "dumpvar.pl";
 
 sub unctrl    { print dumpvar::unctrl($_[0]), "\n" }
@@ -54,6 +52,11 @@ package Tyre;
 sub TIESCALAR{bless[]}
 # other methods intentionally omitted
 
+package Kerb;
+
+sub TIEHASH{bless{}}
+# other methods intentionally omitted
+
 package main;
 
 my $foo = Foo->new(1..5);
@@ -78,6 +81,8 @@ for (@prgs) {
 	}
     }
 }
+
+done_testing();
 
 package TieOut;
 
@@ -331,3 +336,7 @@ EXPECT
 local *_; tie $_, 'Tyre'; unctrl('abc');
 EXPECT
 abc
+########
+tie my %h, 'Kerb'; my $v = { a => 1, b => \%h, c => 2 }; dumpvalue($v);
+EXPECT
+/'a' => 1\n.+Can't locate object method.+'c' => 2/s

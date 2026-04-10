@@ -1,7 +1,7 @@
 #!./perl
 
+use Config;
 BEGIN {
-    require Config; import Config;
     if ($Config{'extensions'} !~ /\bSys\/Hostname\b/) {
       print "1..0 # Skip: Sys::Hostname was not built\n";
       exit 0;
@@ -10,14 +10,23 @@ BEGIN {
 
 use Sys::Hostname;
 
-eval {
-    $host = hostname;
-};
+use Test::More tests => 2;
 
-if ($@) {
-    print "1..0\n" if $@ =~ /Cannot get host name/;
-} else {
-    print "1..1\n";
-    print "# \$host = '$host'\n";
-    print "ok 1\n";
+SKIP:
+{
+    eval {
+        $host = hostname;
+    };
+    skip "No hostname available", 1
+      if $@ =~ /Cannot get host name/;
+    isnt($host, undef, "got a hostname");
+}
+
+{
+    local $@;
+    eval { hostname("dummy"); };
+    like($@,
+        qr/hostname\(\) does not accepts arguments \(it used to silently discard any provided\)/,
+        "hostname no longer accepts arguments"
+    );
 }

@@ -3,7 +3,10 @@
 # Make sure it works to open the file in read-only mode
 #
 
-my $file = "tf$$.txt";
+use strict;
+use warnings;
+
+my $file = "tf08-$$.txt";
 $: = Tie::File::_default_recsep();
 
 print "1..13\n";
@@ -16,6 +19,7 @@ print "ok $N\n"; $N++;
 my @items = qw(Gold Frankincense Myrrh Ivory Apes Peacocks);
 init_file(join $:, @items, '');
 
+my @a;
 my $o = tie @a, 'Tie::File', $file, mode => O_RDONLY, autochomp => 0;
 print $o ? "ok $N\n" : "not ok $N\n";
 $N++;
@@ -30,7 +34,7 @@ for my $i (0..$#items) {
 
 sub init_file {
   my $data = shift;
-  open F, "> $file" or die $!;
+  open F, '>', $file or die $!;
   binmode F;
   print F $data;
   close F;
@@ -56,7 +60,7 @@ if (setup_badly_terminated_file(4)) {
 
 sub setup_badly_terminated_file {
   my $NTESTS = shift;
-  open F, "> $file" or die "Couldn't open $file: $!";
+  open F, '>', $file or die "Couldn't open $file: $!";
   binmode F;
   print F $badrec;
   close F;

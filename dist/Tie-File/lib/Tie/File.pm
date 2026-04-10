@@ -1,13 +1,15 @@
-
 package Tie::File;
-require 5.005;
+
+use strict;
+use warnings;
+
 use Carp ':DEFAULT', 'confess';
 use POSIX 'SEEK_SET';
 use Fcntl 'O_CREAT', 'O_RDWR', 'LOCK_EX', 'LOCK_SH', 'O_WRONLY', 'O_RDONLY';
-sub O_ACCMODE () { O_RDONLY | O_RDWR | O_WRONLY }
+use constant O_ACCMODE => O_RDONLY | O_RDWR | O_WRONLY;
 
 
-$VERSION = "0.98";
+our $VERSION = "1.10";
 my $DEFAULT_MEMORY_SIZE = 1<<21;    # 2 megabytes
 my $DEFAULT_AUTODEFER_THRESHHOLD = 3; # 3 records
 my $DEFAULT_AUTODEFER_FILELEN_THRESHHOLD = 65536; # 16 disk blocksful
@@ -15,6 +17,10 @@ my $DEFAULT_AUTODEFER_FILELEN_THRESHHOLD = 65536; # 16 disk blocksful
 my %good_opt = map {$_ => 1, "-$_" => 1}
                  qw(memory dw_size mode recsep discipline 
                     autodefer autochomp autodefer_threshhold concurrent);
+
+our $DIAGNOSTIC = 0;
+our @OFF; # used as a temporary alias in some subroutines.
+our @H; # used as a temporary alias in _annotate_ad_history
 
 sub TIEARRAY {
   if (@_ % 2 != 0) {
@@ -98,21 +104,14 @@ sub TIEARRAY {
   } elsif (ref $file) {
     croak "usage: tie \@array, $pack, filename, [option => value]...";
   } else {
-    # $fh = \do { local *FH };  # XXX this is buggy
-    if ($] < 5.006) {
-	# perl 5.005 and earlier don't autovivify filehandles
-	require Symbol;
-	$fh = Symbol::gensym();
-    }
     sysopen $fh, $file, $opts{mode}, 0666 or return;
     binmode $fh;
     ++$opts{ourfh};
   }
   { my $ofh = select $fh; $| = 1; select $ofh } # autoflush on write
-  if (defined $opts{discipline} && $] >= 5.006) {
-    # This avoids a compile-time warning under 5.005
-    eval 'binmode($fh, $opts{discipline})';
-    croak $@ if $@ =~ /unknown discipline/i;
+  if (defined $opts{discipline}) {
+    eval { binmode($fh, $opts{discipline}) };
+    croak $@ if $@ =~ /Unknown discipline|IO layers .* unavailable/;
     die if $@;
   }
   $opts{fh} = $fh;
@@ -439,7 +438,8 @@ sub _splice {
     if ($pos < 0) {
       $pos += $oldsize;
       if ($pos < 0) {
-        croak "Modification of non-creatable array value attempted, subscript $oldpos";
+        croak "Modification of non-creatable array value attempted, " .
+              "subscript $oldpos";
       }
     }
 
@@ -656,7 +656,7 @@ sub _mtwrite {
       if (@_) {
         $unwritten = $self->_downcopy($data, $end, $_[1] - $end);
       } else {
-        # Make the file longer to accommodate the last segment that doesn'
+        # Make the file longer to accommodate the last segment that doesn't
         $unwritten = $self->_downcopy($data, $end);
       }
     }
@@ -676,7 +676,7 @@ sub _upcopy {
   } elsif ($dpos == $spos) {
     return;
   }
-  
+
   while (! defined ($len) || $len > 0) {
     my $readsize = ! defined($len) ? $blocksize
                : $len > $blocksize ? $blocksize
@@ -746,7 +746,6 @@ sub _oadjust {
   my $delta = 0;
   my $delta_recs = 0;
   my $prev_end = -1;
-  my %newkeys;
 
   for (@_) {
     my ($pos, $nrecs, @data) = @$_;
@@ -756,7 +755,6 @@ sub _oadjust {
     # to the first new one of this batch
     for my $i ($prev_end+2 .. $pos - 1) {
       $self->{offsets}[$i] += $delta;
-      $newkey{$i} = $i + $delta_recs;
     }
 
     $prev_end = $pos + @data - 1; # last record moved on this pass 
@@ -775,16 +773,6 @@ sub _oadjust {
       my $oldlen = $self->{offsets}[$i+1] - $self->{offsets}[$i];
       $delta -= $oldlen;
     }
-
-#    # also this data has changed, so update it in the cache
-#    for (0 .. $#data) {
-#      $self->{cache}->update($pos + $_, $data[$_]);
-#    }
-#    if ($delta_recs) {
-#      my @oldkeys = grep $_ >= $pos + @data, $self->{cache}->ckeys;
-#      my @newkeys = map $_ + $delta_recs, @oldkeys;
-#      $self->{cache}->rekey(\@oldkeys, \@newkeys);
-#    }
 
     # replace old offsets with new
     splice @{$self->{offsets}}, $pos, $nrecs+1, @newoff;
@@ -885,7 +873,7 @@ sub _fill_offsets {
 
   my $fh = $self->{fh};
   local *OFF = $self->{offsets};
-  
+
   $self->_seek(-1);           # tricky -- see comment at _seek
 
   # Tels says that inlining read_record() would make this loop
@@ -1014,7 +1002,7 @@ sub flock {
   my $fh = $self->{fh};
   $op = LOCK_EX unless defined $op;
   my $locked = flock $fh, $op;
-  
+
   if ($locked && ($op & (LOCK_EX | LOCK_SH))) {
     # If you're locking the file, then presumably it's because
     # there might have been a write access by another process.
@@ -1049,7 +1037,7 @@ sub offset {
     # If it's still undefined, there is no such record, so return 'undef'
     return unless defined $o;
    }
- 
+
   $self->{offsets}[$n];
 }
 
@@ -1342,7 +1330,8 @@ sub _check_integrity {
       }
       if (! defined $offset && $self->{eof}) {
         $good = 0;
-        _ci_warn("The offset table was marked complete, but it is missing element $.");
+        _ci_warn("The offset table was marked complete, but it is missing " .
+                 "element $.");
       }
     }
     if (@{$self->{offsets}} > $.+1) {
@@ -1398,14 +1387,16 @@ sub _check_integrity {
 
   # Total size of deferbuffer should not exceed the specified limit
   if ($deferred_s > $self->{dw_size}) {
-    _ci_warn("buffer size is $self->{deferred_s} which exceeds the limit of $self->{dw_size}");
+    _ci_warn("buffer size is $self->{deferred_s} which exceeds the limit " .
+             "of $self->{dw_size}");
     $good = 0;
   }
 
   # Total size of cached data should not exceed the specified limit
   if ($deferred_s + $cached > $self->{memory}) {
     my $total = $deferred_s + $cached;
-    _ci_warn("total stored data size is $total which exceeds the limit of $self->{memory}");
+    _ci_warn("total stored data size is $total which exceeds the limit " .
+             "of $self->{memory}");
     $good = 0;
   }
 
@@ -1451,14 +1442,15 @@ package Tie::File::Cache;
 $Tie::File::Cache::VERSION = $Tie::File::VERSION;
 use Carp ':DEFAULT', 'confess';
 
-sub HEAP () { 0 }
-sub HASH () { 1 }
-sub MAX  () { 2 }
-sub BYTES() { 3 }
-#sub STAT () { 4 } # Array with request statistics for each record
-#sub MISS () { 5 } # Total number of cache misses
-#sub REQ  () { 6 } # Total number of cache requests 
-use strict 'vars';
+use constant {
+    HEAP  => 0,
+    HASH  => 1,
+    MAX   => 2,
+    BYTES => 3,
+    #STAT  => 4, # Array with request statistics for each record
+    #MISS  => 5, # Total number of cache misses
+    #REQ   => 6, # Total number of cache requests
+};
 
 sub new {
   my ($pack, $max) = @_;
@@ -1740,9 +1732,11 @@ sub delink {
 package Tie::File::Heap;
 use Carp ':DEFAULT', 'confess';
 $Tie::File::Heap::VERSION = $Tie::File::Cache::VERSION;
-sub SEQ () { 0 };
-sub KEY () { 1 };
-sub DAT () { 2 };
+use constant {
+    SEQ => 0,
+    KEY => 1,
+    DAT => 2,
+};
 
 sub new {
   my ($pack, $cache) = @_;
@@ -1921,7 +1915,7 @@ sub set_val {
   return $oval;
 }
 
-# The hask key has changed for an item;
+# The hash key has changed for an item;
 # alter the heap's record of the hash key
 sub rekey {
   my ($self, $n, $new_key) = @_;
@@ -1999,7 +1993,7 @@ sub _nodes {
   ($self->[$i], $self->_nodes($i*2), $self->_nodes($i*2+1));
 }
 
-"Cogito, ergo sum.";  # don't forget to return a true value from the file
+1;
 
 __END__
 
@@ -2009,32 +2003,32 @@ Tie::File - Access the lines of a disk file via a Perl array
 
 =head1 SYNOPSIS
 
-	# This file documents Tie::File version 0.98
-	use Tie::File;
+ use Tie::File;
 
-	tie @array, 'Tie::File', filename or die ...;
+ tie @array, 'Tie::File', filename or die ...;
 
-	$array[13] = 'blah';     # line 13 of the file is now 'blah'
-	print $array[42];        # display line 42 of the file
+ $array[0] = 'blah';      # first line of the file is now 'blah'
+                            # (line numbering starts at 0)
+ print $array[42];        # display line 43 of the file
 
-	$n_recs = @array;        # how many records are in the file?
-	$#array -= 2;            # chop two records off the end
+ $n_recs = @array;        # how many records are in the file?
+ $#array -= 2;            # chop two records off the end
 
 
-	for (@array) {
-	  s/PERL/Perl/g;         # Replace PERL with Perl everywhere in the file
-	}
+ for (@array) {
+   s/PERL/Perl/g;        # Replace PERL with Perl everywhere in the file
+ }
 
-	# These are just like regular push, pop, unshift, shift, and splice
-	# Except that they modify the file in the way you would expect
+ # These are just like regular push, pop, unshift, shift, and splice
+ # Except that they modify the file in the way you would expect
 
-	push @array, new recs...;
-	my $r1 = pop @array;
-	unshift @array, new recs...;
-	my $r2 = shift @array;
-	@old_recs = splice @array, 3, 7, new recs...;
+ push @array, new recs...;
+ my $r1 = pop @array;
+ unshift @array, new recs...;
+ my $r2 = shift @array;
+ @old_recs = splice @array, 3, 7, new recs...;
 
-	untie @array;            # all finished
+ untie @array;            # all finished
 
 
 =head1 DESCRIPTION
@@ -2050,6 +2044,13 @@ gigantic files.
 Changes to the array are reflected in the file immediately.
 
 Lazy people and beginners may now stop reading the manual.
+
+=head2 C<unicode>
+
+You can read a unicode (UTF-8) file by providing a file handle opened with
+the desired encoding. It is not safe to write to one because
+the length in bytes and in characters is often different, Tie::File
+will miscalculate the length of writes, overwriting parts of other records.
 
 =head2 C<recsep>
 
@@ -2170,8 +2171,8 @@ The default memory limit is 2Mib.  You can adjust the maximum read
 cache size by supplying the C<memory> option.  The argument is the
 desired cache size, in bytes.
 
-	# I have a lot of memory, so use a large cache to speed up access
-	tie @array, 'Tie::File', $file, memory => 20_000_000;
+ # I have a lot of memory, so use a large cache to speed up access
+ tie @array, 'Tie::File', $file, memory => 20_000_000;
 
 Setting the memory limit to 0 will inhibit caching; records will be
 fetched from disk every time you examine them.
@@ -2319,6 +2320,11 @@ internally.  If you passed it a filehandle as above, you "own" the
 filehandle, and are responsible for closing it after you have untied
 the @array.
 
+Tie::File calls C<binmode> on filehandles that it opens internally, 
+but not on filehandles passed in by the user. For consistency,
+especially if using the tied files cross-platform, you may wish to
+call C<binmode> on the filehandle prior to tying the file. 
+
 =head1 Deferred Writing
 
 (This is an advanced feature.  Skip this section on first reading.)
@@ -2361,7 +2367,7 @@ will be rewritten in a single pass.
 (Actually, the preceding discussion is something of a fib.  You don't
 need to enable deferred writing to get good performance for this
 common case, because C<Tie::File> will do it for you automatically
-unless you specifically tell it not to.  See L<"autodeferring">,
+unless you specifically tell it not to.  See L</Autodeferring>,
 below.)
 
 Calling C<-E<gt>flush> returns the array to immediate-write mode.  If
@@ -2490,7 +2496,8 @@ C<rollback>, but it isn't, so don't.
 =item *
 
 There is a large memory overhead for each record offset and for each
-cache entry: about 310 bytes per cached data record, and about 21 bytes per offset table entry.
+cache entry: about 310 bytes per cached data record, and about 21 bytes
+per offset table entry.
 
 The per-record overhead will limit the maximum number of records you
 can access per file. Note that I<accessing> the length of the array
@@ -2512,7 +2519,7 @@ People sometimes point out that L<DB_File> will do something similar,
 and ask why C<Tie::File> module is necessary.
 
 There are a number of reasons that you might prefer C<Tie::File>.
-A list is available at C<http://perl.plover.com/TieFile/why-not-DB_File>.
+A list is available at C<L<http://perl.plover.com/TieFile/why-not-DB_File>>.
 
 =head1 AUTHOR
 
@@ -2549,8 +2556,7 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with this library program; it should be in the file C<COPYING>.
-If not, write to the Free Software Foundation, Inc., 51 Franklin Street,
-Fifth Floor, Boston, MA  02110-1301, USA
+If not, see <https://www.gnu.org/licenses/>.
 
 For licensing inquiries, contact the author at:
 

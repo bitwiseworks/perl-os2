@@ -12,6 +12,8 @@
  */
 
 #define PERLIO_NOT_STDIO 0
+#define PERL_EXT
+#define PERL_IN_DL_AIX_XS
 
 /*
  * On AIX 4.3 and above the emulation layer is not needed any more, and
@@ -210,7 +212,7 @@ void *dlopen(char *path, int mode)
 {
 	dTHX;
 	dMY_CXT;
-	register ModulePtr mp;
+	ModulePtr mp;
 
 	/*
 	 * Upon the first call register a terminate handler that will
@@ -224,7 +226,7 @@ void *dlopen(char *path, int mode)
 	 * Scan the list of modules if have the module already loaded.
 	 */
 	for (mp = dl_modList; mp; mp = mp->next)
-		if (strcmp(mp->name, path) == 0) {
+		if (strEQ(mp->name, path)) {
 			mp->refCnt++;
 			return mp;
 		}
@@ -316,9 +318,9 @@ static void caterr(char *s)
 {
 	dTHX;
 	dMY_CXT;
-	register char *p = s;
+	char *p = s;
 
-	while (*p >= '0' && *p <= '9')
+	while (isDIGIT(*p))
 		p++;
 	switch(atoi(s)) {
 	case L_ERROR_TOOMANY:
@@ -353,16 +355,16 @@ void *dlsym(void *handle, const char *symbol)
 {
 	dTHX;
 	dMY_CXT;
-	register ModulePtr mp = (ModulePtr)handle;
-	register ExportPtr ep;
-	register int i;
+	ModulePtr mp = (ModulePtr)handle;
+	ExportPtr ep;
+	int i;
 
 	/*
 	 * Could speed up search, but I assume that one assigns
 	 * the result to function pointers anyways.
 	 */
 	for (ep = mp->exports, i = mp->nExports; i; i--, ep++)
-		if (strcmp(ep->name, symbol) == 0)
+		if (strEQ(ep->name, symbol))
 			return ep->addr;
 	dl_errvalid++;
 	strcpy(dl_errbuf, "dlsym: undefined symbol ");
@@ -385,9 +387,9 @@ int dlclose(void *handle)
 {
 	dTHX;
 	dMY_CXT;
-	register ModulePtr mp = (ModulePtr)handle;
+	ModulePtr mp = (ModulePtr)handle;
 	int result;
-	register ModulePtr mp1;
+	ModulePtr mp1;
 
 	if (--mp->refCnt > 0)
 		return 0;
@@ -397,8 +399,8 @@ int dlclose(void *handle)
 		strerrorcpy(dl_errbuf, errno);
 	}
 	if (mp->exports) {
-		register ExportPtr ep;
-		register int i;
+		ExportPtr ep;
+		int i;
 		for (ep = mp->exports, i = mp->nExports; i; i--, ep++)
 			if (ep->name)
 				safefree(ep->name);
@@ -688,21 +690,24 @@ BOOT:
     (void)dl_private_init(aTHX);
 
 
-void *
+void
 dl_load_file(filename, flags=0)
 	char *	filename
 	int	flags
-	CODE:
+        PREINIT:
+        void *retv;
+	PPCODE:
 	DLDEBUG(1,PerlIO_printf(Perl_debug_log, "dl_load_file(%s,%x):\n", filename,flags));
 	if (flags & 0x01)
 	    Perl_warn(aTHX_ "Can't make loaded symbols global on this platform while loading %s",filename);
-	RETVAL = dlopen(filename, RTLD_GLOBAL|RTLD_LAZY) ;
-	DLDEBUG(2,PerlIO_printf(Perl_debug_log, " libref=%x\n", RETVAL));
-	ST(0) = sv_newmortal() ;
-	if (RETVAL == NULL)
+	retv = dlopen(filename, RTLD_GLOBAL|RTLD_LAZY) ;
+	DLDEBUG(2,PerlIO_printf(Perl_debug_log, " libref=%x\n", retv));
+	ST(0) = newSV_type_mortal(SVt_IV);
+	if (retv == NULL)
 	    SaveError(aTHX_ "%s",dlerror()) ;
 	else
-	    sv_setiv( ST(0), PTR2IV(RETVAL) );
+	    sv_setiv( ST(0), PTR2IV(retv) );
+        XSRETURN(1);
 
 int
 dl_unload_file(libref)
@@ -716,25 +721,29 @@ dl_unload_file(libref)
   OUTPUT:
     RETVAL
 
-void *
-dl_find_symbol(libhandle, symbolname)
+void
+dl_find_symbol(libhandle, symbolname, ign_err=0)
 	void *		libhandle
 	char *		symbolname
-	CODE:
+        int	        ign_err
+	PREINIT:
+        void *retv;
+        CODE:
 	DLDEBUG(2,PerlIO_printf(Perl_debug_log, "dl_find_symbol(handle=%x, symbol=%s)\n",
 		libhandle, symbolname));
-	RETVAL = dlsym(libhandle, symbolname);
-	DLDEBUG(2,PerlIO_printf(Perl_debug_log, "  symbolref = %x\n", RETVAL));
-	ST(0) = sv_newmortal() ;
-	if (RETVAL == NULL)
-	    SaveError(aTHX_ "%s",dlerror()) ;
-	else
-	    sv_setiv( ST(0), PTR2IV(RETVAL));
+	retv = dlsym(libhandle, symbolname);
+	DLDEBUG(2,PerlIO_printf(Perl_debug_log, "  symbolref = %x\n", retv));
+	ST(0) = newSV_type_mortal(SVt_IV);
+	if (retv == NULL) {
+            if (!ign_err)
+	        SaveError(aTHX_ "%s", dlerror());
+	} else
+	    sv_setiv( ST(0), PTR2IV(retv));
 
 
 void
 dl_undef_symbols()
-	PPCODE:
+	CODE:
 
 
 
@@ -754,11 +763,11 @@ dl_install_xsub(perl_name, symref, filename="$Package")
 					      XS_DYNAMIC_FILENAME)));
 
 
-char *
+SV *
 dl_error()
     CODE:
     dMY_CXT;
-    RETVAL = dl_last_error ;
+    RETVAL = newSVsv(MY_CXT.x_dl_last_error);
     OUTPUT:
     RETVAL
 
@@ -769,11 +778,13 @@ CLONE(...)
     CODE:
     MY_CXT_CLONE;
 
+    PERL_UNUSED_VAR(items);
+
     /* MY_CXT_CLONE just does a memcpy on the whole structure, so to avoid
      * using Perl variables that belong to another thread, we create our 
      * own for this thread.
      */
-    MY_CXT.x_dl_last_error = newSVpvn("", 0);
+    MY_CXT.x_dl_last_error = newSVpvs("");
 
 #endif
 

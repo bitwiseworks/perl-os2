@@ -1,120 +1,80 @@
 #!./perl
+use warnings;
+use strict;
 
 BEGIN {
     chdir 't' if -d 't';
     require './test.pl';
-    @INC = '../lib';
+    require './charset_tools.pl';
+    set_up_inc('../lib');
 }
 
-plan (tests => 38);
+plan (tests => 46 + 3 * $::IS_ASCII);
 
-print "not " unless length("")    == 0;
-print "ok 1\n";
-
-print "not " unless length("abc") == 3;
-print "ok 2\n";
-
+is(length(""), 0);
+is(length("abc"), 3);
 $_ = "foobar";
-print "not " unless length()      == 6;
-print "ok 3\n";
+is(length(), 6);
 
 # Okay, so that wasn't very challenging.  Let's go Unicode.
 
 {
     my $a = "\x{41}";
-
-    print "not " unless length($a) == 1;
-    print "ok 4\n";
-    $test++;
+    is(length($a), 1);
 
     use bytes;
-    print "not " unless $a eq "\x41" && length($a) == 1;
-    print "ok 5\n";
-    $test++;
+    ok($a eq "\x41");
+    is(length($a), 1);
+}
+
+if ($::IS_ASCII) {  # Generally UTF-8 invariant on EBCDIC, so skip there
+    my $a = pack("U", 0xFF);
+
+    is(length($a), 1);
+
+    use bytes;
+    ok($a eq byte_utf8a_to_utf8n("\xc3\xbf"));
+    is(length($a), 2);
 }
 
 {
-    my $a = pack("U", 0xFF);
+    my $a = pack("U", 0xB6);    # Works on both ASCII and EBCDIC
 
-    print "not " unless length($a) == 1;
-    print "ok 6\n";
-    $test++;
+    is(length($a), 1);
 
     use bytes;
-    if (ord('A') == 193)
-     {
-      printf "#%vx for 0xFF\n",$a;
-      print "not " unless $a eq "\x8b\x73" && length($a) == 2;
-     }
-    else
-     {
-      print "not " unless $a eq "\xc3\xbf" && length($a) == 2;
-     }
-    print "ok 7\n";
-    $test++;
+    ok($a eq byte_utf8a_to_utf8n("\xc2\xb6"));
+    is(length($a), 2);
 }
 
 {
     my $a = "\x{100}";
 
-    print "not " unless length($a) == 1;
-    print "ok 8\n";
-    $test++;
+    is(length($a), 1);
 
     use bytes;
-    if (ord('A') == 193)
-     {
-      printf "#%vx for 0x100\n",$a;
-      print "not " unless $a eq "\x8c\x41" && length($a) == 2;
-     }
-    else
-     {
-      print "not " unless $a eq "\xc4\x80" && length($a) == 2;
-     }
-    print "ok 9\n";
-    $test++;
+    ok($a eq byte_utf8a_to_utf8n("\xc4\x80"));
+    is(length($a), 2);
 }
 
 {
-    my $a = "\x{100}\x{80}";
+    my $a = "\x{100}\x{B6}";
 
-    print "not " unless length($a) == 2;
-    print "ok 10\n";
-    $test++;
+    is(length($a), 2);
 
     use bytes;
-    if (ord('A') == 193)
-     {
-      printf "#%vx for 0x100 0x80\n",$a;
-      print "not " unless $a eq "\x8c\x41\x8a\x67" && length($a) == 4;
-     }
-    else
-     {
-      print "not " unless $a eq "\xc4\x80\xc2\x80" && length($a) == 4;
-     }
-    print "ok 11\n";
-    $test++;
+    ok($a eq byte_utf8a_to_utf8n("\xc4\x80\xc2\xb6"));
+    is(length($a), 4);
 }
 
 {
-    my $a = "\x{80}\x{100}";
+    my $a = "\x{b6}\x{100}";
 
-    print "not " unless length($a) == 2;
-    print "ok 12\n";
-    $test++;
+    is(length($a), 2);
 
     use bytes;
-    if (ord('A') == 193)
-     {
-      printf "#%vx for 0x80 0x100\n",$a;
-      print "not " unless $a eq "\x8a\x67\x8c\x41" && length($a) == 4;
-     }
-    else
-     {
-      print "not " unless $a eq "\xc2\x80\xc4\x80" && length($a) == 4;
-     }
-    print "ok 13\n";
-    $test++;
+    ok($a eq byte_utf8a_to_utf8n("\xc2\xb6\xc4\x80"));
+    is(length($a), 4);
 }
 
 # Now for Unicode with magical vtbls
@@ -124,37 +84,31 @@ print "ok 3\n";
     my $a;
     tie $a, 'Tie::StdScalar';  # makes $a magical
     $a = "\x{263A}";
-    
-    print "not " unless length($a) == 1;
-    print "ok 14\n";
-    $test++;
+
+    is(length($a), 1);
 
     use bytes;
-    print "not " unless length($a) == 3;
-    print "ok 15\n";
-    $test++;
+    is(length($a), 3);
 }
 
 {
     # Play around with Unicode strings,
     # give a little workout to the UTF-8 length cache.
     my $a = chr(256) x 100;
-    print length $a == 100 ? "ok 16\n" : "not ok 16\n";
+    is(length $a, 100);
     chop $a;
-    print length $a ==  99 ? "ok 17\n" : "not ok 17\n";
+    is(length $a, 99);
     $a .= $a;
-    print length $a == 198 ? "ok 18\n" : "not ok 18\n";
+    is(length $a, 198);
     $a = chr(256) x 999;
-    print length $a == 999 ? "ok 19\n" : "not ok 19\n";
+    is(length $a, 999);
     substr($a, 0, 1) = '';
-    print length $a == 998 ? "ok 20\n" : "not ok 20\n";
+    is(length $a, 998);
 }
-
-curr_test(21);
 
 require Tie::Scalar;
 
-$u = "ASCII";
+my $u = "ASCII";
 
 tie $u, 'Tie::StdScalar', chr 256;
 
@@ -172,7 +126,7 @@ $SIG{__WARN__} = sub {
 
 is(length(undef), undef, "Length of literal undef");
 
-my $u;
+undef $u;
 
 is(length($u), undef, "Length of regular scalar");
 
@@ -191,10 +145,15 @@ is($u, undef);
 
 my $uo = bless [], 'U';
 
-is(length($uo), undef, "Length of overloaded reference");
+{
+    my $w;
+    local $SIG{__WARN__} = sub { $w = shift };
+    is(length($uo), 0, "Length of overloaded reference");
+    like $w, qr/uninitialized/, 'uninit warning for stringifying as undef';
+}
 
 my $ul = 3;
-is(($ul = length(undef)), undef, 
+is(($ul = length(undef)), undef,
                     "Returned length of undef with result in TARG");
 is($ul, undef, "Assigned length of undef with result in TARG");
 
@@ -204,11 +163,14 @@ is(($ul = length($u)), undef,
 is($ul, undef, "Assigned length of tied undef with result in TARG");
 
 $ul = 3;
-is(($ul = length($uo)), undef,
+{
+    my $w;
+    local $SIG{__WARN__} = sub { $w = shift };
+    is(($ul = length($uo)), 0,
                 "Returned length of overloaded undef with result in TARG");
-is($ul, undef, "Assigned length of overloaded undef with result in TARG");
-
-# ok(!defined $uo); Turns you can't test this. FIXME for pp_defined?
+    like $w, qr/uninitialized/, 'uninit warning for stringifying as undef';
+}
+is($ul, 0, "Assigned length of overloaded undef with result in TARG");
 
 {
     my $y = "\x{100}BC";
@@ -230,5 +192,11 @@ is($ul, undef, "Assigned length of overloaded undef with result in TARG");
     };
     eval ' sub { length my @forecasts } ';
 }
+
+# length could be fooled by UTF8ness of non-magical variables changing with
+# stringification.
+my $ref = [];
+bless $ref, "\x{100}";
+is length $ref, length "$ref", 'length on reference blessed to utf8 class';
 
 is($warnings, 0, "There were no other warnings");

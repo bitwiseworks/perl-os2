@@ -1,18 +1,11 @@
 #!perl
 #
-# regression tests for old bugs that don't fit other categories
-
-BEGIN {
-    require Config; import Config;
-    no warnings 'once';
-    if ($Config{'extensions'} !~ /\bData\/Dumper\b/) {
-	print "1..0 # Skip: Data::Dumper was not built\n";
-	exit 0;
-    }
-}
+# regression tests for old bugs that do not fit other categories
 
 use strict;
-use Test::More tests => 15;
+use warnings;
+
+use Test::More tests => 24;
 use Data::Dumper;
 
 {
@@ -90,6 +83,7 @@ SKIP: {
 
 # writing out of bounds with malformed utf8
 SKIP: {
+    skip("No XS available", 1) if !defined &Data::Dumper::Dumpxs;
     eval { require Encode };
     skip("Encode not available", 1) if $@;
     local $^W=1;
@@ -142,6 +136,41 @@ SKIP: {
   }
   local $Data::Dumper::Useperl = 1;
   &$tests;
+}
+
+{ # https://rt.perl.org/Ticket/Display.html?id=128524
+    my $want;
+    my $runtime = "runtime";
+    my $requires = "requires";
+    utf8::upgrade(my $uruntime = $runtime);
+    utf8::upgrade(my $urequires = $requires);
+    for my $run ($runtime, $uruntime) {
+        for my $req ($requires, $urequires) {
+            my $data = { $run => { $req => { foo => "bar" } } };
+            local $Data::Dumper::Useperl = 1;
+            # we want them all the same
+            defined $want or $want = Dumper($data);
+            is(Dumper( $data ), $want, "utf-8 indents");
+          SKIP:
+            {
+                defined &Data::Dumper::Dumpxs
+                  or skip "No XS available", 1;
+                local $Data::Dumper::Useperl = 0;
+                is(Dumper( $data ), $want, "utf8-indents");
+            }
+        }
+    }
+}
+
+# RT#130487 - stack management bug in XS deparse
+SKIP: {
+    skip "No XS available", 1 if !defined &Data::Dumper::Dumpxs;
+    sub rt130487_args { 0 + @_ }
+    my $code = sub {};
+    local $Data::Dumper::Useperl = 0;
+    local $Data::Dumper::Deparse = 1;
+    my $got = rt130487_args( Dumper($code) );
+    is($got, 1, "stack management in XS deparse works, rt 130487");
 }
 
 # EOF

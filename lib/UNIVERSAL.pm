@@ -1,28 +1,9 @@
 package UNIVERSAL;
 
-our $VERSION = '1.11';
+our $VERSION = '1.17';
 
-# UNIVERSAL should not contain any extra subs/methods beyond those
-# that it exists to define. The use of Exporter below is a historical
-# accident that can't be fixed without breaking code.  Note that we
-# *don't* set @ISA here, as we don't want all classes/objects inheriting from
-# Exporter.  It's bad enough that all classes have a import() method
-# whenever UNIVERSAL.pm is loaded.
-require Exporter;
-@EXPORT_OK = qw(isa can VERSION);
-
-# Make sure that even though the import method is called, it doesn't do
-# anything unless called on UNIVERSAL.
-sub import {
-    return unless $_[0] eq __PACKAGE__;
-    return unless @_ > 1;
-    require warnings;
-    warnings::warnif(
-      'deprecated',
-      'UNIVERSAL->import is deprecated and will be removed in a future perl',
-    );
-    goto &Exporter::import;
-}
+# UNIVERSAL.pm should not contain any methods/subs, they
+# are all defined in universal.c
 
 1;
 __END__
@@ -33,21 +14,21 @@ UNIVERSAL - base class for ALL classes (blessed references)
 
 =head1 SYNOPSIS
 
-    $is_io    = $fd->isa("IO::Handle");
-    $is_io    = Class->isa("IO::Handle");
+    my $obj_is_io    = $fd->isa("IO::Handle");
+    my $cls_is_io    = Class->isa("IO::Handle");
 
-    $does_log = $obj->DOES("Logger");
-    $does_log = Class->DOES("Logger");
+    my $obj_does_log = $obj->DOES("Logger");
+    my $cls_does_log = Class->DOES("Logger");
 
-    $sub      = $obj->can("print");
-    $sub      = Class->can("print");
+    my $obj_sub      = $obj->can("print");
+    my $cls_sub      = Class->can("print");
 
-    $sub      = eval { $ref->can("fandango") };
-    $ver      = $obj->VERSION;
+    my $eval_sub     = eval { $ref->can("fandango") };
+    my $ver          = $obj->VERSION;
 
     # but never do this!
-    $is_io    = UNIVERSAL::isa($fd, "IO::Handle");
-    $sub      = UNIVERSAL::can($obj, "print");
+    my $is_io        = UNIVERSAL::isa($fd, "IO::Handle");
+    my $sub          = UNIVERSAL::can($obj, "print");
 
 =head1 DESCRIPTION
 
@@ -96,10 +77,13 @@ inherits from (or is itself) the name of the package C<TYPE> or
 inherits from package C<TYPE>.
 
 If you're not sure what you have (the C<VAL> case), wrap the method call in an
-C<eval> block to catch the exception if C<VAL> is undefined.
+C<eval> block to catch the exception if C<VAL> is undefined or an unblessed
+reference. The L<C<isa> operator|perlop/"Class Instance Operator"> is an
+alternative that simply returns false in this case, so the C<eval> is not
+needed.
 
-If you want to be sure that you're calling C<isa> as a method, not a class,
-check the invocand with C<blessed> from L<Scalar::Util> first:
+If you want to be sure that you're calling C<isa> on an instance, not a class,
+check the invocant with C<blessed> from L<Scalar::Util> first:
 
   use Scalar::Util 'blessed';
 
@@ -190,21 +174,15 @@ available to your program (and you should not do so).
 
 =head1 EXPORTS
 
-None by default.
+None.
 
-You may request the import of three functions (C<isa>, C<can>, and C<VERSION>),
-B<but this feature is deprecated and will be removed>.  Please don't do this in
-new code.
-
-For example, previous versions of this documentation suggested using C<isa> as
+Previous versions of this documentation suggested using C<isa> as
 a function to determine the type of a reference:
 
-  use UNIVERSAL 'isa';
+  $yes = UNIVERSAL::isa($h, "HASH");
+  $yes = UNIVERSAL::isa("Foo", "Bar");
 
-  $yes = isa $h, "HASH";
-  $yes = isa "Foo", "Bar";
-
-The problem is that this code will I<never> call an overridden C<isa> method in
+The problem is that this code would I<never> call an overridden C<isa> method in
 any class.  Instead, use C<reftype> from L<Scalar::Util> for the first case:
 
   use Scalar::Util 'reftype';

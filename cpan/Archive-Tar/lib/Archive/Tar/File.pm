@@ -7,13 +7,11 @@ use File::Spec::Unix    ();
 use File::Spec          ();
 use File::Basename      ();
 
-### avoid circular use, so only require;
-require Archive::Tar;
 use Archive::Tar::Constant;
 
 use vars qw[@ISA $VERSION];
 #@ISA        = qw[Archive::Tar];
-$VERSION    = '1.82';
+$VERSION    = '3.04';
 
 ### set value to 1 to oct() it during the unpack ###
 
@@ -73,7 +71,7 @@ Archive::Tar::File - a subclass for in-memory extracted file from Archive::Tar
 
 =head1 DESCRIPTION
 
-Archive::Tar::Files provides a neat little object layer for in-memory
+Archive::Tar::File provides a neat little object layer for in-memory
 extracted files. It's mostly used internally in Archive::Tar to tidy
 up the code, but there's no reason users shouldn't use this API as
 well.
@@ -224,7 +222,7 @@ sub _new_from_chunk {
 
 
     if(substr($entry{'size'}, 0, 1) eq "\x80") {	# binary size extension for files >8gigs (> octal 77777777777777)	# cdrake
-      my @sz=unpack("aCSNN",$entry{'size'}); $entry{'size'}=$sz[4]+(2**32)*$sz[3]+$sz[2]*(2**64);	# Use the low 80 bits (should use the upper 15 as well, but as at year 2011, that seems unlikley to ever be needed - the numbers are just too big...) # cdrake
+      my @sz=unpack("aCSNN",$entry{'size'}); $entry{'size'}=$sz[4]+(2**32)*$sz[3]+$sz[2]*(2**64);	# Use the low 80 bits (should use the upper 15 as well, but as at year 2011, that seems unlikely to ever be needed - the numbers are just too big...) # cdrake
     } else {	# cdrake
       ($entry{'size'})=($entry{'size'}=~/^([^\0]*)/); $entry{'size'}=oct $entry{'size'};	# cdrake
     }	# cdrake
@@ -261,7 +259,7 @@ sub _new_from_file {
         unless ($type == DIR ) {
             my $fh = IO::File->new;
 
-            unless( $fh->open($path) ) {
+            unless( $fh->open($path, 'r') ) {
                 ### dangling symlinks are fine, stop reading but continue
                 ### creating the object
                 last READ if $type == SYMLINK;
@@ -396,22 +394,23 @@ sub _prefix_and_file {
     my $path = shift;
 
     my ($vol, $dirs, $file) = File::Spec->splitpath( $path, $self->is_dir );
-    my @dirs = File::Spec->splitdir( $dirs );
-
-    ### so sometimes the last element is '' -- probably when trailing
-    ### dir slashes are encountered... this is of course pointless,
-    ### so remove it
-    pop @dirs while @dirs and not length $dirs[-1];
+    my @dirs = File::Spec->splitdir( File::Spec->canonpath($dirs) );
 
     ### if it's a directory, then $file might be empty
     $file = pop @dirs if $self->is_dir and not length $file;
 
     ### splitting ../ gives you the relative path in native syntax
-    map { $_ = '..' if $_  eq '-' } @dirs if ON_VMS;
+    ### Remove the root (000000) directory
+    ### The volume from splitpath will also be in native syntax
+    if (ON_VMS) {
+        map { $_ = '..' if $_  eq '-'; $_ = '' if $_ eq '000000' } @dirs;
+        if (length($vol)) {
+            $vol = VMS::Filespec::unixify($vol);
+            unshift @dirs, $vol;
+        }
+    }
 
-    my $prefix = File::Spec::Unix->catdir(
-                        grep { length } $vol, @dirs
-                    );
+    my $prefix = File::Spec::Unix->catdir(@dirs);
     return( $prefix, $file );
 }
 
@@ -468,6 +467,8 @@ sub extract {
 
     local $Carp::CarpLevel += 1;
 
+    ### avoid circular use, so only require;
+    require Archive::Tar;
     return Archive::Tar->_extract_file( $self, @_ );
 }
 
@@ -481,11 +482,13 @@ concatenation of the C<prefix> and C<name> fields.
 sub full_path {
     my $self = shift;
 
-    ### if prefix field is emtpy
+    ### if prefix field is empty
     return $self->name unless defined $self->prefix and length $self->prefix;
 
     ### or otherwise, catfile'd
-    return File::Spec::Unix->catfile( $self->prefix, $self->name );
+    my $path = File::Spec::Unix->catfile( $self->prefix, $self->name );
+    $path .= "/" if $self->name =~ m{/$};   # Re-add trailing slash if necessary, as catfile() strips them off.
+    return $path;
 }
 
 
@@ -600,7 +603,7 @@ sub rename {
 	return 1;
 }
 
-=head2 $bool = $file->chmod $mode)
+=head2 $bool = $file->chmod( $mode )
 
 Change mode of $file to $mode. The mode can be a string or a number
 which is interpreted as octal whether or not a leading 0 is given.

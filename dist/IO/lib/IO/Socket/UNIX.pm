@@ -7,13 +7,11 @@
 package IO::Socket::UNIX;
 
 use strict;
-our(@ISA, $VERSION);
 use IO::Socket;
 use Carp;
 
-@ISA = qw(IO::Socket);
-$VERSION = "1.24";
-$VERSION = eval $VERSION;
+our @ISA = qw(IO::Socket);
+our $VERSION = "1.55";
 
 IO::Socket::UNIX->register_domain( AF_UNIX );
 
@@ -32,6 +30,10 @@ sub configure {
     $sock->socket(AF_UNIX, $type, 0) or
 	return undef;
 
+    if(exists $arg->{Blocking}) {
+        $sock->blocking($arg->{Blocking}) or
+	    return undef;
+    }
     if(exists $arg->{Local}) {
 	my $addr = sockaddr_un($arg->{Local});
 	$sock->bind($addr) or
@@ -74,6 +76,28 @@ IO::Socket::UNIX - Object interface for AF_UNIX domain sockets
 
     use IO::Socket::UNIX;
 
+    my $SOCK_PATH = "$ENV{HOME}/unix-domain-socket-test.sock";
+
+    # Server:
+    my $server = IO::Socket::UNIX->new(
+        Type => SOCK_STREAM(),
+        Local => $SOCK_PATH,
+        Listen => 1,
+    );
+
+    my $count = 1;
+    while (my $conn = $server->accept()) {
+        $conn->print("Hello " . ($count++) . "\n");
+    }
+
+    # Client:
+    my $client = IO::Socket::UNIX->new(
+        Type => SOCK_STREAM(),
+        Peer => $SOCK_PATH,
+    );
+
+    # Now read and write from $client
+
 =head1 DESCRIPTION
 
 C<IO::Socket::UNIX> provides an object interface to creating and using sockets
@@ -87,7 +111,7 @@ inherits all the methods defined by L<IO::Socket>.
 =item new ( [ARGS] )
 
 Creates an C<IO::Socket::UNIX> object, which is a reference to a
-newly created symbol (see the C<Symbol> package). C<new>
+newly created symbol (see the L<Symbol> package). C<new>
 optionally takes arguments, these arguments are in key-value pairs.
 
 In addition to the key-value pairs accepted by L<IO::Socket>,
@@ -96,18 +120,24 @@ C<IO::Socket::UNIX> provides.
     Type    	Type of socket (eg SOCK_STREAM or SOCK_DGRAM)
     Local   	Path to local fifo
     Peer    	Path to peer fifo
-    Listen  	Create a listen socket
+    Listen  	Queue size for listen
 
 If the constructor is only passed a single argument, it is assumed to
 be a C<Peer> specification.
 
+If the C<Listen> argument is given, but false, the queue size will be set to 5.
 
- NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE
+If the constructor fails it will return C<undef> and set the
+C<$IO::Socket::errstr> package variable to contain an error message.
 
-As of VERSION 1.18 all IO::Socket objects have autoflush turned on
-by default. This was not the case with earlier releases.
+    $sock = IO::Socket::UNIX->new(...)
+        or die "Cannot create socket - $IO::Socket::errstr\n";
 
- NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE
+For legacy reasons the error message is also set into the global C<$@>
+variable, and you may still find older code which looks here instead.
+
+    $sock = IO::Socket::UNIX->new(...)
+        or die "Cannot create socket - $@\n";
 
 =back
 
@@ -132,7 +162,7 @@ L<Socket>, L<IO::Socket>
 =head1 AUTHOR
 
 Graham Barr. Currently maintained by the Perl Porters.  Please report all
-bugs to <perlbug@perl.org>.
+bugs at L<https://github.com/Perl/perl5/issues>.
 
 =head1 COPYRIGHT
 

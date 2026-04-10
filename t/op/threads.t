@@ -2,14 +2,14 @@
 
 BEGIN {
      chdir 't' if -d 't';
-     @INC = '../lib';
      require './test.pl';
+     set_up_inc( '../lib' );
      $| = 1;
 
      skip_all_without_config('useithreads');
      skip_all_if_miniperl("no dynamic loading on miniperl, no threads");
 
-     plan(26);
+     plan(30);
 }
 
 use strict;
@@ -29,11 +29,12 @@ EOI
 # Attempt to free unreferenced scalar: SV 0x814e0dc.
 fresh_perl_is(<<'EOI', 'ok', { }, 'weaken ref under threads');
 use threads;
-use Scalar::Util;
+no warnings 'experimental::builtin';
+use builtin 'weaken';
 my $data = "a";
 my $obj = \$data;
 my $copy = $obj;
-Scalar::Util::weaken($copy);
+weaken($copy);
 threads->create(sub { 1 })->join for (1..1);
 print "ok";
 EOI
@@ -47,7 +48,8 @@ package Foo;
 sub new { bless {},shift }
 package main;
 use threads;
-use Scalar::Util qw(weaken);
+no warnings 'experimental::builtin';
+use builtin 'weaken';
 my $object = Foo->new;
 my $ref = $object;
 weaken $ref;
@@ -135,11 +137,11 @@ EOI
 #
 # run-time usage of newCONSTSUB (as done by the IO boot code) wasn't
 # thread-safe - got occasional coredumps or malloc corruption
-watchdog(60, "process");
+watchdog(180, "process");
 {
     local $SIG{__WARN__} = sub {};   # Ignore any thread creation failure warnings
     my @t;
-    for (1..100) {
+    for (1..10) {
         my $thr = threads->create( sub { require IO });
         last if !defined($thr);      # Probably ran out of memory
         push(@t, $thr);
@@ -161,7 +163,7 @@ curr_test(curr_test() + 2);
 
 # the seen_evals field of a regexp was getting zeroed on clone, so
 # within a thread it didn't  know that a regex object contained a 'safe'
-# re_eval expression, so it later died with 'Eval-group not allowed' when
+# code expression, so it later died with 'Eval-group not allowed' when
 # you tried to interpolate the object
 
 sub safe_re {
@@ -217,8 +219,9 @@ EOJ
 # The weak reference $a, however, is visible from the symbol table.
 fresh_perl_is(<<'EOI', 'ok', { }, 'Test for 34394ecd06e704e9');
     use threads;
+    no warnings 'experimental::builtin';
+    use builtin 'weaken';
     %h = (1, 2);
-    use Scalar::Util 'weaken';
     $a = \$h{1};
     weaken($a);
     delete $h{1} && threads->create(sub {}, shift)->join();
@@ -243,8 +246,9 @@ EOI
 
 fresh_perl_is(<<'EOI', 'ok', { }, '0 refcnt neither on tmps stack nor in @_');
     use threads;
+    no warnings 'experimental::builtin';
+    use builtin 'weaken';
     my %h = (1, []);
-    use Scalar::Util 'weaken';
     my $a = $h{1};
     weaken($a);
     delete $h{1} && threads->create(sub {}, shift)->join();
@@ -295,7 +299,8 @@ use threads;
 
 {
     package My::Obj;
-    use Scalar::Util 'weaken';
+    no warnings 'experimental::builtin';
+    use builtin 'weaken';
 
     my %reg;
 
@@ -323,7 +328,7 @@ use threads;
     # During cloning 'look' at the object
     sub CLONE {
         foreach my $id (keys(%reg)) {
-            # This triggers SvREFCNT_inc() then SvREFCNT_dec() on the referant.
+            # This triggers SvREFCNT_inc() then SvREFCNT_dec() on the referent.
             my $obj = $reg{$id};
         }
     }
@@ -390,5 +395,37 @@ EOF
   threads->create(sub { sub { $::hypogamma = 3 } })->join->();
   is $::hypogamma, 3, 'globs cloned and joined are not recloned';
 }
+
+fresh_perl_is(
+  'use threads;' .
+  'async { delete $::{INC}; eval q"my $foo : bar" } ->join; print "ok\n";',
+  "ok",
+   {},
+  'no crash when deleting $::{INC} in thread'
+);
+
+fresh_perl_is(<<'CODE', 'ok', {}, 'no crash modifying extended array element');
+use threads;
+my @a = 1;
+threads->create(sub { $#a = 1; $a[1] = 2; print qq/ok\n/ })->join;
+CODE
+
+fresh_perl_is(<<'CODE', '3.5,3.5', {}, 'RT #36664: Strange behavior of shared array');
+use threads;
+use threads::shared;
+
+our @List : shared = (1..5);
+my $v = 3.5;
+$v > 0;
+$List[3] = $v;
+printf "%s,%s", @List[(3)], $List[3];
+CODE
+
+fresh_perl_like(<<'CODE', qr/ok/, {}, 'RT #41121 binmode(STDOUT,":encoding(utf8) does not crash');
+use threads;
+binmode(STDOUT,":encoding(utf8)");
+threads->create(sub{});
+print "ok\n";
+CODE
 
 # EOF

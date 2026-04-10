@@ -24,8 +24,11 @@
  * ADDRCONSTEXT,NEEDCONSTEXT: initialization of data with non-constant values
  *                            (e.g. pointer fields of descriptors)
  */
-#if defined(__DECC) || defined(__DECCXX)
+#ifdef __DECC
 #  pragma message disable (ADDRCONSTEXT,NEEDCONSTEXT)
+#endif
+#ifdef __DECCXX
+#  pragma message informational (INTSIGNCHANGE,CASTQUALTYP,ASSCOMMEA,NOCTOBUTCONREFM,MISSINGRETURN)
 #endif
 
 /* DEC's C compilers and gcc use incompatible definitions of _to(upp|low)er() */
@@ -39,29 +42,17 @@
 #define _tolower(c) (((c) < 'A' || (c) > 'Z') ? (c) : (c) | 040)
 
 /* Assorted things to look like Unix */
-#ifdef __GNUC__
-#ifndef _IOLBF /* gcc's stdio.h doesn't define this */
-#define _IOLBF 1
-#endif
-#endif
 #include <processes.h> /* for vfork() */
 #include <unixio.h>
 #include <unixlib.h>
 #include <file.h>  /* it's not <sys/file.h>, so don't use I_SYS_FILE */
-#if (defined(__DECC) && defined(__DECC_VER) && __DECC_VER > 20000000) || defined(__DECCXX)
-#  include <unistd.h> /* DECC has this; gcc doesn't */
-#endif
-
-#ifdef NO_PERL_TYPEDEFS /* a2p; we don't want Perl's special routines */
-#  define DONT_MASK_RTL_CALLS
-#endif
+#include <unistd.h>
 
 #include <namdef.h>
 
 /* Set the maximum filespec size here as it is larger for EFS file
  * specifications.
  */
-#ifndef __VAX
 #ifndef VMS_MAXRSS
 #ifdef NAML$C_MAXRSS
 #define VMS_MAXRSS (NAML$C_MAXRSS+1)
@@ -70,7 +61,6 @@
 #endif /* VMS_LONGNAME_SUPPORT */
 #endif /* NAML$C_MAXRSS */
 #endif /* VMS_MAXRSS */
-#endif
 
 #ifndef VMS_MAXRSS
 #define VMS_MAXRSS (NAM$C_MAXRSS + 1)
@@ -85,8 +75,6 @@
 #define HAS_GETENV_SV
 #define HAS_GETENV_LEN
 
-
-#ifndef PERL_FOR_X2P
 
 #ifndef DONT_MASK_RTL_CALLS
 #  ifdef getenv
@@ -104,15 +92,9 @@
  * we'll use ours, since it gives us the full VMS exit status. */
 #define waitpid my_waitpid
 
-/* Don't redeclare standard RTL routines in Perl's header files;
- * VMS history or extensions makes some of the formal protoypes
- * differ from the common Unix forms.
- */
-#define DONT_DECLARE_STD 1
-
 /* Our own contribution to PerlShr's global symbols . . . */
 
-#if !defined(PERL_IMPLICIT_CONTEXT)
+#if !defined(MULTIPLICITY)
 #define opendir			Perl_opendir
 #define rename			Perl_rename
 #define seekdir			Perl_seekdir
@@ -154,19 +136,12 @@
 #define my_gconvert(a,b,c,d)		Perl_my_gconvert(a,b,c,d)
 #define my_getenv(a,b)			Perl_my_getenv(aTHX_ a,b)
 #define my_getenv_len(a,b,c)		Perl_my_getenv_len(aTHX_ a,b,c)
-#define my_getlogin			Perl_my_getlogin
 #define my_getpwent()			Perl_my_getpwent(aTHX)
 #define my_getpwnam(a)			Perl_my_getpwnam(aTHX_ a)
 #define my_getpwuid(a)			Perl_my_getpwuid(aTHX_ a)
 #define my_gmtime(a)			Perl_my_gmtime(aTHX_ a)
 #define my_localtime(a)			Perl_my_localtime(aTHX_ a)
 #define my_mkdir(a,b)			Perl_my_mkdir(aTHX_ a,b)
-#define my_sigemptyset(a)		Perl_my_sigemptyset(a)
-#define my_sigfillset(a)		Perl_my_sigfillset(a)
-#define my_sigaddset(a,b)		Perl_my_sigaddset(a,b)
-#define my_sigdelset(a,b,c)		Perl_my_sigdelset(a,b,c)
-#define my_sigismember(a,b)		Perl_my_sigismember(a,b)
-#define my_sigprocmask(a,b,c)		Perl_my_sigprocmask(a,b,c)
 #ifdef HAS_SYMLINK
 #  define my_symlink(a,b)		Perl_my_symlink(aTHX_ a,b)
 #endif
@@ -211,6 +186,7 @@
 #define vms_realpath(a,b,c)		Perl_vms_realpath(aTHX_ a,b,c)
 #define vmssetenv(a,b,c)		Perl_vmssetenv(aTHX_ a,b,c)
 #define vmstrnenv(a,b,c,d,e)		Perl_vmstrnenv(a,b,c,d,e)
+#define vmssetuserlnm(a,b)		Perl_vmssetuserlnm(a,b)
 
 /* Delete if at all possible, changing protections if necessary. */
 #define unlink(a) kill_file(a)
@@ -234,7 +210,6 @@
  */
 #ifndef DONT_MASK_RTL_CALLS
 #  define tmpfile Perl_my_tmpfile
-#endif
 #endif
 
 
@@ -262,29 +237,21 @@
  */
 #define ALTERNATE_SHEBANG "$"
 
-/* Macros to set errno using the VAX thread-safe calls, if present */
-#if (defined(__DECC) || defined(__DECCXX)) && !defined(__ALPHA)
-#  define set_errno(v)      (cma$tis_errno_set_value(v))
-   void cma$tis_errno_set_value(int __value);  /* missing in some errno.h */
-#  define set_vaxc_errno(v) (vaxc$errno = (v))
-#else
-#  define set_errno(v)      (errno = (v))
-#  define set_vaxc_errno(v) (vaxc$errno = (v))
-#endif
+/* Macros to set errno.  */
+#define set_errno(v)      (errno = (v))
+#define set_vaxc_errno(v) (vaxc$errno = (v))
 
 /* Support for 'vmsish' behaviors enabled with C<use vmsish> pragma */
 
 #define COMPLEX_STATUS	1	/* We track both "POSIX" and VMS values */
 
-#define HINT_V_VMSISH		24
 #define HINT_M_VMSISH_STATUS	0x40000000 /* system, $? return VMS status */
 #define HINT_M_VMSISH_TIME	0x80000000 /* times are local, not UTC */
-#define NATIVE_HINTS		(PL_hints >> HINT_V_VMSISH)  /* used in op.c */
 
-#ifdef PERL_IMPLICIT_CONTEXT
-#  define TEST_VMSISH(h)	(my_perl && PL_curcop && (PL_curcop->op_private & ((h) >> HINT_V_VMSISH)))
+#ifdef MULTIPLICITY
+#  define TEST_VMSISH(h)	(my_perl && PL_curcop && (PL_curcop->cop_hints & (h)))
 #else
-#  define TEST_VMSISH(h)	(PL_curcop && (PL_curcop->op_private & ((h) >> HINT_V_VMSISH)))
+#  define TEST_VMSISH(h)	(PL_curcop && (PL_curcop->cop_hints & (h)))
 #endif
 #define VMSISH_STATUS	TEST_VMSISH(HINT_M_VMSISH_STATUS)
 #define VMSISH_TIME	TEST_VMSISH(HINT_M_VMSISH_TIME)
@@ -306,7 +273,7 @@ struct interp_intern {
 #define PERL__TRNENV_JOIN_SEARCHLIST 0x02
 
 /* Handy way to vet calls to VMS system services and RTL routines. */
-#define _ckvmssts(call) STMT_START { register unsigned long int __ckvms_sts; \
+#define _ckvmssts(call) STMT_START { unsigned long int __ckvms_sts; \
   if (!((__ckvms_sts=(call))&1)) { \
   set_errno(EVMSERR); set_vaxc_errno(__ckvms_sts); \
   Perl_croak(aTHX_ "Fatal VMS error (status=%d) at %s, line %d", \
@@ -314,11 +281,11 @@ struct interp_intern {
 
 /* Same thing, but don't call back to Perl's croak(); useful for errors
  * occurring during startup, before Perl's state is initialized */
-#define _ckvmssts_noperl(call) STMT_START { register unsigned long int __ckvms_sts; \
+#define _ckvmssts_noperl(call) STMT_START { unsigned long int __ckvms_sts; \
   if (!((__ckvms_sts=(call))&1)) { \
   set_errno(EVMSERR); set_vaxc_errno(__ckvms_sts); \
-  fprintf(stderr,"Fatal VMS error (status=%d) at %s, line %d", \
-  __ckvms_sts,__FILE__,__LINE__); lib$signal(__ckvms_sts); } } STMT_END
+  (void)fprintf(stderr,"Fatal VMS error (status=%d) at %s, line %d", \
+  __ckvms_sts,__FILE__,__LINE__); (void)lib$signal(__ckvms_sts); } } STMT_END
 
 #ifdef VMS_DO_SOCKETS
 #define PERL_SOCK_SYSREAD_IS_RECV
@@ -327,8 +294,9 @@ struct interp_intern {
 
 #define BIT_BUCKET "/dev/null"
 #define PERL_SYS_INIT_BODY(c,v)	MALLOC_CHECK_TAINT2(*c,*v) vms_image_init((c),(v)); PERLIO_INIT; MALLOC_INIT
-#define PERL_SYS_TERM_BODY()		HINTS_REFCNT_TERM; OP_REFCNT_TERM; PERLIO_TERM; MALLOC_TERM
-#define dXSUB_SYS
+/* Use standard PERL_SYS_TERM_BODY */
+
+#define dXSUB_SYS dNOOP
 #define HAS_KILL
 #define HAS_WAIT
 
@@ -336,8 +304,8 @@ struct interp_intern {
 #  define PERL_FS_VER_FMT	"%d_%d_%d"
 #endif
 #define PERL_FS_VERSION		STRINGIFY(PERL_REVISION) "_" \
-				STRINGIFY(PERL_VERSION) "_" \
-				STRINGIFY(PERL_SUBVERSION)
+                                STRINGIFY(PERL_VERSION) "_" \
+                                STRINGIFY(PERL_SUBVERSION)
 /* Temporary; we need to add support for this to Configure.Com */
 #ifdef PERL_INC_VERSION_LIST
 #  undef PERL_INC_VERSION_LIST
@@ -356,7 +324,7 @@ struct interp_intern {
  *	This symbol, if defined, indicates that the ioctl() routine is
  *	available to set I/O characteristics
  */
-#define	HAS_IOCTL		/**/
+#define HAS_IOCTL               /**/
  
 /* HAS_UTIME:
  *	This symbol, if defined, indicates that the routine utime() is
@@ -369,11 +337,7 @@ struct interp_intern {
  *	getgrgid() routines are available to get group entries.
  *	The getgrent() has a separate definition, HAS_GETGRENT.
  */
-#if __CRTL_VER >= 70302000
 #define HAS_GROUP		/**/
-#else
-#undef HAS_GROUP		/**/
-#endif
 
 /* HAS_PASSWD
  *	This symbol, if defined, indicates that the getpwnam() and
@@ -468,23 +432,12 @@ struct utimbuf {
 #define utime my_utime
 #endif
 
-/* This is what times() returns, but <times.h> calls it tbuffer_t on VMS
- * prior to v7.0.  We check the DECC manifest to see whether it's already
- * done this for us, relying on the fact that perl.h #includes <time.h>
- * before it #includes "vmsish.h".
+/* tbuffer_t was replaced with struct tms in v7.0.  We no longer support
+ * systems prior to v7.0, but there could be old XS code out there that
+ * references tbuffer_t, so provide a compatibility macro.
  */
 
-#ifndef __TMS
-  struct tms {
-    clock_t tms_utime;    /* user time */
-    clock_t tms_stime;    /* system time - always 0 on VMS */
-    clock_t tms_cutime;   /* user time, children */
-    clock_t tms_cstime;   /* system time, children - always 0 on VMS */
-  };
-#else
-   /* The new headers change the times() prototype to tms from tbuffer */
-#  define tbuffer_t struct tms
-#endif
+#define tbuffer_t struct tms
 
 /* Substitute our own routines for gmtime(), localtime(), and time(),
  * which allow us to implement the vmsish 'time' pragma, and work
@@ -504,6 +457,7 @@ struct utimbuf {
 #ifdef KILL_BY_SIGPRC
 #  define kill  Perl_my_kill
 #endif
+# define killpg  Perl_my_killpg
 
 
 /* VMS doesn't use a real sys_nerr, but we need this when scanning for error
@@ -518,9 +472,6 @@ struct utimbuf {
 #define ENVgetenv(v) my_getenv(v,FALSE)
 #define ENVgetenv_len(v,l) my_getenv_len(v,l,FALSE)
 
-
-/* Thin jacket around cuserid() to match Unix' calling sequence */
-#define getlogin my_getlogin
 
 /* Ditto for sys$hash_password() . . . */
 #define crypt(a,b)  Perl_my_crypt(aTHX_ a,b)
@@ -619,7 +570,7 @@ struct passwd {
 #endif
 
 typedef unsigned mydev_t;
-#ifndef _LARGEFILE
+#if !defined(_USE_STD_STAT) && !defined(_LARGEFILE)
 typedef unsigned myino_t;
 #else
 typedef __ino64_t myino_t;
@@ -629,7 +580,7 @@ struct mystat
 {
     struct stat crtl_stat;
     myino_t st_ino;
-#ifndef _LARGEFILE
+#if !defined(_USE_STD_STAT) && !defined(_LARGEFILE)
     unsigned rvn; /* FID (num,seq,rvn) + pad */
 #endif
     mydev_t st_dev;
@@ -650,7 +601,7 @@ struct mystat
 #define st_fab_fsz crtl_stat.st_fab_fsz
 #define st_fab_mrs crtl_stat.st_fab_mrs
 
-#ifdef _USE_STD_STAT
+#if defined(_USE_STD_STAT) || defined(_LARGEFILE)
 #define VMS_INO_T_COMPARE(__a, __b) (__a != __b)
 #define VMS_INO_T_COPY(__a, __b) __a = __b
 #else
@@ -676,11 +627,14 @@ struct mystat
 #define S_IDOTH (S_IWOTH | S_IXOTH)
 
 
-#ifndef PERL_FOR_X2P
 /* Prototypes for functions unique to vms.c.  Don't include replacements
  * for routines in the mainline source files excluded by #ifndef VMS;
  * their prototypes are already in proto.h.
  */
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 void	prime_env_iter (void);
 void	init_os_extras (void);
@@ -728,7 +682,7 @@ bool	Perl_vms_do_aexec (pTHX_ SV *, SV **, SV **);
 int	Perl_vms_case_tolerant(void);
 char *	Perl_my_getenv_len (pTHX_ const char *, unsigned long *, bool);
 int	Perl_vmssetenv (pTHX_ const char *, const char *, struct dsc$descriptor_s **);
-void	Perl_vmssetuserlnm(pTHX_ const char *name, const char *eqv);
+void	Perl_vmssetuserlnm(const char *name, const char *eqv);
 char *	Perl_my_crypt (pTHX_ const char *, const char *);
 Pid_t	Perl_my_waitpid (pTHX_ Pid_t, int *, int);
 char *	my_gconvert (double, int, int, char *);
@@ -740,6 +694,7 @@ int	Perl_my_sigaction (pTHX_ int, const struct sigaction*, struct sigaction*);
 #ifdef KILL_BY_SIGPRC
 unsigned int	Perl_sig_to_vmscondition (int);
 int	Perl_my_kill (int, int);
+int	Perl_my_killpg (int, int);
 void	Perl_csighandler_init (void);
 #endif
 int	Perl_my_utime (pTHX_ const char *, const struct utimbuf *);
@@ -770,7 +725,57 @@ int	Perl_my_flush (pTHX_ FILE *);
 struct passwd *	Perl_my_getpwnam (pTHX_ const char *name);
 struct passwd *	Perl_my_getpwuid (pTHX_ Uid_t uid);
 void	Perl_my_endpwent (pTHX);
-char *	my_getlogin (void);
+
+/*
+ * The following prototypes are in math.h but for some reason they
+ * are ifdefed out for C++.  So we have to repeat them here in order
+ * to build the POSIX extension.
+ */
+
+#ifdef __DECCXX
+
+double exp2(double __x);
+double fdim(double __x, double __y);
+double fma(double __x, double __y, double __z);
+double fmax(double __x, double __y);
+double fmin(double __x, double __y);
+double nexttoward(double __x, long double __y);
+double remainder(double __x, double __y);
+double remquo(double __x, double __y, int *__quo);
+double tgamma(double __x);
+float exp2f(float __x);
+float fdimf(float __x, float __y);
+float fmaf(float __x, float __y, float __z);
+float fmaxf(float __x, float __y);
+float fminf(float __x, float __y);
+float nexttowardf(float __x, long double __y);
+float remainderf(float __x, float __y);
+float remquof(float __x, float __y, int *__quo);
+float tgammaf(float __x);
+long double exp2l(long double __x);
+long double fdiml(long double __x, long double __y);
+long double fmal(long double __x, long double __y, long double __z);
+long double fmaxl(long double __x, long double __y);
+long double fminl(long double __x, long double __y);
+long double nexttowardl(long double __x, long double __y);
+long double remainderl(long double __x, long double __y);
+long double remquol(long double __x, long double __y, int *__quo);
+long double tgammal(long double __x);
+int ilogb(double __x);
+int ilogbf(float __x);
+int ilogbl(long double __x);
+long int lrint(double __x);
+long int lrintf(float __x);
+long int lrintl(long double __x);
+long int lround(double __x);
+long int lroundf(float __x);
+long int lroundl(long double __x);
+
+#endif
+
+
+#ifdef __cplusplus
+}
 #endif
 
 #ifndef VMS_DO_SOCKETS
@@ -797,4 +802,8 @@ char *	my_getlogin (void);
 #define PERL_RMSEXPAND_M_VMS_IN		0x08 /* Assume input is VMS already */
 #define PERL_RMSEXPAND_M_SYMLINK	0x20 /* Use symbolic link, not target */
 
+/* With long doubles, NaN == NaN, which it shouldn't. */
+#ifdef USE_LONG_DOUBLE
+#  define NAN_COMPARE_BROKEN 1
+#endif
 #endif  /* __vmsish_h_included */

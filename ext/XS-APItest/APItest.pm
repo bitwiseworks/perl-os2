@@ -1,11 +1,10 @@
 package XS::APItest;
 
-{ use 5.011001; }
 use strict;
 use warnings;
 use Carp;
 
-our $VERSION = '0.38';
+our $VERSION = '1.43';
 
 require XSLoader;
 
@@ -40,7 +39,7 @@ sub import {
 	}
     }
     foreach (keys %{$exports||{}}) {
-	next unless /\A(?:rpn|calcrpn|stufftest|swaptwostmts|looprest|scopelessblock|stmtasexpr|stmtsasexpr|loopblock|blockasexpr|swaplabel|labelconst|arrayfullexpr|arraylistexpr|arraytermexpr|arrayarithexpr|arrayexprflags)\z/;
+	next unless /\A(?:rpn|calcrpn|stufftest|swaptwostmts|looprest|scopelessblock|stmtasexpr|stmtsasexpr|loopblock|blockasexpr|swaplabel|labelconst|arrayfullexpr|arraylistexpr|arraytermexpr|arrayarithexpr|arrayexprflags|subsignature|DEFSV|with_vars|join_with_space)\z/;
 	$^H{"XS::APItest/$_"} = 1;
 	delete $exports->{$_};
     }
@@ -56,14 +55,6 @@ sub import {
 
 use vars '$WARNINGS_ON_BOOTSTRAP';
 use vars map "\$${_}_called_PP", qw(BEGIN UNITCHECK CHECK INIT END);
-
-BEGIN {
-    # This is arguably a hack, but it disposes of the UNITCHECK block without
-    # needing to preprocess the source code
-    if ($] < 5.009) {
-       eval 'sub UNITCHECK (&) {}; 1' or die $@;
-    }
-}
 
 # Do these here to verify that XS code and Perl code get called at the same
 # times
@@ -222,12 +213,14 @@ what it might be medifying).
 =item B<call_sv>, B<call_pv>, B<call_method>
 
 These exercise the C calls of the same names. Everything after the flags
-arg is passed as the the args to the called function. They return whatever
+arg is passed as the args to the called function. They return whatever
 the C function itself pushed onto the stack, plus the return value from
 the function; for example
 
-    call_sv( sub { @_, 'c' }, G_ARRAY,  'a', 'b'); # returns 'a', 'b', 'c', 3
-    call_sv( sub { @_ },      G_SCALAR, 'a', 'b'); # returns 'b', 1
+    call_sv( sub { @_, 'c' }, G_LIST,  'a', 'b');
+    # returns 'a', 'b', 'c', 3
+    call_sv( sub { @_ },      G_SCALAR, 'a', 'b');
+    # returns 'b', 1
 
 =item B<eval_sv>
 
@@ -251,6 +244,10 @@ These are not supplied by default, but must be explicitly imported.
 They are lexically scoped.
 
 =over
+
+=item DEFSV
+
+Behaves like C<$_>.
 
 =item rpn(EXPRESSION)
 

@@ -1,15 +1,15 @@
 package OptreeCheck;
-use base 'Exporter';
+use parent 'Exporter';
 use strict;
 use warnings;
-use vars qw($TODO $Level $using_open);
+our ($TODO, $Level, $using_open);
 require "test.pl";
 
-our $VERSION = '0.07';
+our $VERSION = '0.17';
 
 # now export checkOptree, and those test.pl functions used by tests
 our @EXPORT = qw( checkOptree plan skip skip_all pass is like unlike
-		  require_ok runperl);
+		  require_ok runperl tempfile);
 
 
 # The hints flags will differ if ${^OPEN} is set.
@@ -135,10 +135,10 @@ results.
 
 =head2 getRendering
 
-getRendering() runs code or prog through B::Concise, and captures its
-rendering.  Errors emitted during rendering are checked against
-expected errors, and are reported as diagnostics by default, or as
-failures if 'report=fail' cmdline-option is given.
+getRendering() runs code or prog or progfile through B::Concise, and
+captures its rendering.  Errors emitted during rendering are checked
+against expected errors, and are reported as diagnostics by default,
+or as failures if 'report=fail' cmdline-option is given.
 
 prog is run in a sub-shell, with $bcopts passed through. This is the way
 to run code intended for main.  The code arg in contrast, is always a
@@ -180,9 +180,9 @@ If name property is not provided, it is synthesized from these params:
 bcopts, note, prog, code.  This is more convenient than trying to do
 it manually.
 
-=head2 code or prog
+=head2 code or prog or progfile
 
-Either code or prog must be present.
+Either code or prog or progfile must be present.
 
 =head2 prog => $perl_source_string
 
@@ -190,6 +190,11 @@ prog => $src provides a snippet of code, which is run in a sub-process,
 via test.pl:runperl, and through B::Concise like so:
 
     './perl -w -MO=Concise,$bcopts_massaged -e $src'
+
+=head2 progfile => $perl_script
+
+progfile => $file provides a file containing a snippet of code which is
+run as per the prog => $src example above.
 
 =head2 code => $perl_source_string || CODEREF
 
@@ -203,7 +208,7 @@ In either case, $coderef is then passed to B::Concise::compile():
 =head2 expect and expect_nt
 
 expect and expect_nt args are the B<golden-sample> renderings, and are
-sampled from known-ok threaded and un-threaded bleadperl (5.9.1) builds.
+sampled from known-ok threaded and un-threaded bleadperl builds.
 They're both required, and the correct one is selected for the platform
 being tested, and saved into the synthesized property B<wanted>.
 
@@ -214,8 +219,8 @@ The bcopts arg can be a single string, or an array of strings.
 
 =head2 errs => $err_str_regex || [ @err_str_regexs ] 
 
-getRendering() processes the code or prog arg under warnings, and both
-parsing and optree-traversal errors are collected.  These are
+getRendering() processes the code or prog or progfile arg under warnings,
+and both parsing and optree-traversal errors are collected.  These are
 validated against the one or more errors you specify.
 
 =head1 testcase modifier properties
@@ -309,21 +314,7 @@ our %gOpts = 	# values are replaced at runtime !!
     );
 
 
-# Not sure if this is too much cheating. Officially we say that
-# $Config::Config{usethreads} is true if some sort of threading is in
-# use, in which case we ought to be able to use it in place of the ||
-# below.  However, it is now possible to Configure perl with "threads"
-# but neither ithreads or 5005threads, which forces the re-entrant
-# APIs, but no perl user visible threading.
-
-# This seems to have the side effect that most of perl doesn't think
-# that it's threaded, hence the ops aren't threaded either.  Not sure
-# if this is actually a "supported" configuration, but given that
-# ponie uses it, it's going to be used by something official at least
-# in the interim. So it's nice for tests to all pass.
-
-our $threaded = 1
-  if $Config::Config{useithreads} || $Config::Config{use5005threads};
+our $threaded = 1 if $Config::Config{usethreads};
 our $platform = ($threaded) ? "threaded" : "plain";
 our $thrstat = ($threaded)  ? "threaded" : "nonthreaded";
 
@@ -404,7 +395,14 @@ sub checkOptree {
 
     print "checkOptree args: ",mydumper($tc) if $tc->{dump};
     SKIP: {
-	skip("$tc->{skip} $tc->{name}", 1) if $tc->{skip};
+	if ($tc->{skip}) {
+	    skip("$tc->{skip} $tc->{name}",
+		    ($gOpts{selftest}
+			? 1
+			: 1 + @{$modes{$gOpts{testmode}}}
+			)
+	    );
+	}
 
 	return runSelftest($tc) if $gOpts{selftest};
 
@@ -463,8 +461,8 @@ sub label {
 
 sub getRendering {
     my $tc = shift;
-    fail("getRendering: code or prog is required")
-	unless $tc->{code} or $tc->{prog};
+    fail("getRendering: code or prog or progfile is required")
+	unless $tc->{code} or $tc->{prog} or $tc->{progfile};
 
     my @opts = get_bcopts($tc);
     my $rendering = ''; # suppress "Use of uninitialized value in open"
@@ -474,6 +472,10 @@ sub getRendering {
     if ($tc->{prog}) {
 	$rendering = runperl( switches => ['-w',join(',',"-MO=Concise",@opts)],
 			      prog => $tc->{prog}, stderr => 1,
+			      ); # verbose => 1);
+    } elsif ($tc->{progfile}) {
+	$rendering = runperl( switches => ['-w',join(',',"-MO=Concise",@opts)],
+			      progfile => $tc->{progfile}, stderr => 1,
 			      ); # verbose => 1);
     } else {
 	my $code = $tc->{code};
@@ -619,16 +621,10 @@ sub mkCheckRex {
 
     $str =~ s/^\# //mg;	# ease cut-paste testcase authoring
 
-    if ($] < 5.009) {
-	# add 5.8 private flags, which bleadperl (5.9.1) doesn't have/use/render
-	# works because it adds no wildcards, which are butchered below..
-        $str =~ s|(mapstart l?K\*?)|$1/2|mg;
-        $str =~ s|(grepstart l?K\*?)|$1/2|msg;
-        $str =~ s|(mapwhile.*? l?K)|$1/1|msg;
-	$str =~ s|(grepwhile.*? l?K)|$1/1|msg;
-    }
     $tc->{wantstr} = $str;
 
+    # make UNOP_AUX flag type literal
+    $str =~ s/<\+>/<\\+>/;
     # make targ args wild
     $str =~ s/\[t\d+\]/[t\\d+]/msg;
 
@@ -661,34 +657,14 @@ sub mkCheckRex {
 		 .*			# all sorts of things follow it
 		 v			# The opening v
 		)
-		(?:(:>,<,%,\\{)		# hints when open.pm is in force
+		(?:(:>,<,%,\\\{)		# hints when open.pm is in force
 		   |(:>,<,%))		# (two variations)
-		(\ ->[0-9a-z]+)?
+		(\ ->(?:-|[0-9a-z]+))?
 		$
 	       ]
-	[$1 . ($2 && ':{') . $4]xegm;	# change to the hints without open.pm
+        [$1 . ($2 && ':\{') . $4]xegm;	# change to the hints without open.pm
     }
 
-    if ($] < 5.009) {
-	# 5.8.x doesn't provide the hints in the OP, which means that
-	# B::Concise doesn't show the symbolic hints. So strip all the
-	# symbolic hints from the golden results.
-	$str =~ s[(			# capture
-		   \(\?:next\|db\)state	# the regexp matching next/db state
-		   .*			# all sorts of things follow it
-		  v			# The opening v
-		  )
-		  :(?:\\[{*]		# \{ or \*
-		      |[^,\\])		# or other symbols on their own
-		    (?:,
-		     (?:\\[{*]
-			|[^,\\])
-		      )*		# maybe some more joined with commas
-		(\ ->[0-9a-z]+)?
-		$
-	       ]
-	[$1$2]xgm;			# change to the hints without flags
-    }
 
     # don't care about:
     $str =~ s/:-?\d+,-?\d+/:-?\\d+,-?\\d+/msg;		# FAKE line numbers
@@ -759,8 +735,9 @@ sub reduceDiffs {
         my $exp = shift @want;
         my $line = shift @got;
         # remove matches, and report
-        unless ($got =~ s/($rex\n)//msg) {
+        unless ($got =~ s/^($rex\n)//ms) {
             _diag("got:\t\t'$line'\nwant:\t $rex\n");
+            last;
         }
     }
     _diag("remainder:\n$got");
@@ -979,7 +956,7 @@ sub OptreeCheck::processExamples {
     # turned into optreeCheck tests,
 
     foreach my $file (@files) {
-	open (my $fh, $file) or die "cant open $file: $!\n";
+	open (my $fh, '<', $file) or die "cant open $file: $!\n";
 	$/ = "";
 	my @chunks = <$fh>;
 	print preamble (scalar @chunks);

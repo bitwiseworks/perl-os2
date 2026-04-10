@@ -1,15 +1,7 @@
-#!/usr/bin/perl -w
-
 # t/xhtml01.t - check basic output from Pod::Simple::XHTML
-
-BEGIN {
-    chdir 't' if -d 't';
-}
-
 use strict;
-use lib '../lib';
-use Test::More tests => 58;
-#use Test::More 'no_plan';
+use warnings;
+use Test::More tests => 62;
 
 use_ok('Pod::Simple::XHTML') or exit;
 
@@ -23,7 +15,7 @@ for my $spec (
     [ 'fo$bar' => 'fo-bar', 'fo-bar' ],
     [ 'f12'    => 'f12',    'f12'    ],
     [ '13'     => 'pod13',  'pod13'  ],
-    [ '**.:'   => 'pod-.:', 'pod-.:' ],
+    [ '**.:'   => 'pod', 'pod' ],
 ) {
     is $parser->idify( $spec->[0] ), $spec->[1],
         qq{ID for "$spec->[0]" should be "$spec->[1]"};
@@ -74,8 +66,8 @@ ok $parser->parse_string_document( "=head1 Foo B<Bar>\n\n=head1 Foo B<Baz>" ),
     'Parse two multiword headers';
 is $results, <<'EOF', 'Should have the index';
 <ul id="index">
-  <li><a href="#Foo-Bar">Foo <b>Bar</b></a></li>
-  <li><a href="#Foo-Baz">Foo <b>Baz</b></a></li>
+  <li><a href="#Foo-Bar">Foo Bar</a></li>
+  <li><a href="#Foo-Baz">Foo Baz</a></li>
 </ul>
 
 <h1 id="Foo-Bar">Foo <b>Bar</b></h1>
@@ -97,6 +89,22 @@ is $results, <<'EOF', 'Should have both and the index';
 <h1 id="Bar">Bar</h1>
 
 EOF
+
+initialize($parser, $results);
+ok $parser->parse_string_document( "=head1 Foo C<Bar>\n\n=head1 C<Baz>" ),
+    'Parse two headers with C<> formatting';
+is $results, <<'EOF', 'Should have the index';
+<ul id="index">
+  <li><a href="#Foo-Bar">Foo Bar</a></li>
+  <li><a href="#Baz">Baz</a></li>
+</ul>
+
+<h1 id="Foo-Bar">Foo <code>Bar</code></h1>
+
+<h1 id="Baz"><code>Baz</code></h1>
+
+EOF
+
 initialize($parser, $results);
 ok $parser->parse_string_document( "=head1 Foo\n\n=head1 Bar\n\n=head1 Baz" ),
     'Parse three headers';
@@ -183,6 +191,48 @@ is $results, <<'EOF', 'Should have the four-level index';
 <h3 id="Baz">Baz</h3>
 
 <h4 id="Howdy">Howdy</h4>
+
+EOF
+
+initialize($parser, $results);
+ok $parser->parse_string_document( "=head1 Foo\n\n=head2 Bar\n\n=head3 Baz\n\n=head4 Howdy\n\n=head5 Deep\n\n=head6 Thought" ),
+    'Parse six levels';
+is $results, <<'EOF', 'Should have the six-level index';
+<ul id="index">
+  <li><a href="#Foo">Foo</a>
+    <ul>
+      <li><a href="#Bar">Bar</a>
+        <ul>
+          <li><a href="#Baz">Baz</a>
+            <ul>
+              <li><a href="#Howdy">Howdy</a>
+                <ul>
+                  <li><a href="#Deep">Deep</a>
+                    <ul>
+                      <li><a href="#Thought">Thought</a></li>
+                    </ul>
+                  </li>
+                </ul>
+              </li>
+            </ul>
+          </li>
+        </ul>
+      </li>
+    </ul>
+  </li>
+</ul>
+
+<h1 id="Foo">Foo</h1>
+
+<h2 id="Bar">Bar</h2>
+
+<h3 id="Baz">Baz</h3>
+
+<h4 id="Howdy">Howdy</h4>
+
+<h5 id="Deep">Deep</h5>
+
+<h6 id="Thought">Thought</h6>
 
 EOF
 
@@ -686,11 +736,11 @@ is $results, <<EOF, 'anchor and h1 use same section id for complex sections';
 EOF
 
 sub initialize {
-	$_[0] = Pod::Simple::XHTML->new;
+    $_[0] = Pod::Simple::XHTML->new;
         $_[0]->html_header('');
         $_[0]->html_footer('');
         $_[0]->index(1);
-	$_[0]->output_string( \$results ); # Send the resulting output to a string
-	$_[1] = '';
-	return;
+    $_[0]->output_string( \$results ); # Send the resulting output to a string
+    $_[1] = '';
+    return;
 }

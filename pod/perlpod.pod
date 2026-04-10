@@ -69,6 +69,8 @@ are
     =head2 Heading Text
     =head3 Heading Text
     =head4 Heading Text
+    =head5 Heading Text
+    =head6 Heading Text
     =over indentlevel
     =item stuff
     =back
@@ -83,8 +85,8 @@ To explain them each in detail:
 =over
 
 =item C<=head1 I<Heading Text>>
-X<=head1> X<=head2> X<=head3> X<=head4>
-X<head1> X<head2> X<head3> X<head4>
+X<=head1> X<=head2> X<=head3> X<=head4> X<=head5> X<=head6>
+X<head1> X<head2> X<head3> X<head4> X<head5> X<head6>
 
 =item C<=head2 I<Heading Text>>
 
@@ -92,21 +94,27 @@ X<head1> X<head2> X<head3> X<head4>
 
 =item C<=head4 I<Heading Text>>
 
-Head1 through head4 produce headings, head1 being the highest
+=item C<=head5 I<Heading Text>>
+
+=item C<=head6 I<Heading Text>>
+
+Head1 through head6 produce headings, head1 being the highest
 level.  The text in the rest of this paragraph is the content of the
 heading.  For example:
 
   =head2 Object Attributes
 
-The text "Object Attributes" comprises the heading there.  (Note that
-head3 and head4 are recent additions, not supported in older Pod
-translators.)  The text in these heading commands can use
-formatting codes, as seen here:
+The text "Object Attributes" comprises the heading there.
+The text in these heading commands can use formatting codes, as seen here:
 
   =head2 Possible Values for C<$/>
 
 Such commands are explained in the
 "L<Formatting Codes|/"Formatting Codes">" section, below.
+
+Note that C<head5> and C<head6> were introduced in 2020 and in
+L<Pod::Simple> 3.41, released in October 2020, so they might not be
+supported on the Pod parser you use.
 
 =item C<=over I<indentlevel>>
 X<=over> X<=item> X<=back> X<over> X<item> X<back>
@@ -156,7 +164,11 @@ And perhaps most importantly, keep the items consistent: either use
 "=item *" for all of them, to produce bullets; or use "=item 1.",
 "=item 2.", etc., to produce numbered lists; or use "=item foo",
 "=item bar", etc.--namely, things that look nothing like bullets or
-numbers.
+numbers.  (If you have a list that contains both: 1) things that don't
+look like bullets nor numbers,  plus 2) things that do, you should
+preface the bullet- or number-like items with C<ZE<lt>E<gt>>.  See
+L<ZE<lt>E<gt>|/ZE<lt>E<gt> -- a null (zero-effect) formatting code>
+below for an example.)
 
 If you start with bullets or numbers, stick with them, as
 formatters use the first "=item" type to decide how to format the
@@ -240,7 +252,7 @@ of text (i.e., the text in "=foo targetname text..."), but with
 "=begin targetname" ... "=end targetname", you can have any amount
 of stuff in between.  (Note that there still must be a blank line
 after the "=begin" command and a blank line before the "=end"
-command.
+command.)
 
 Here are some examples of how to use these:
 
@@ -284,28 +296,35 @@ be for formatting as a footnote).
 X<=encoding> X<encoding>
 
 This command is used for declaring the encoding of a document.  Most
-users won't need this; but if your encoding isn't US-ASCII or Latin-1,
-then put a C<=encoding I<encodingname>> command early in the document so
+users won't need this; but if your encoding isn't US-ASCII,
+then put a C<=encoding I<encodingname>> command very early in the document so
 that pod formatters will know how to decode the document.  For
 I<encodingname>, use a name recognized by the L<Encode::Supported>
-module.  Examples:
+module.  Some pod formatters may try to guess between a Latin-1 or
+CP-1252 versus
+UTF-8 encoding, but they may guess wrong.  It's best to be explicit if
+you use anything besides strict ASCII.  Examples:
+
+  =encoding latin1
 
   =encoding utf8
 
   =encoding koi8-r
-  
-  =encoding ShiftJIS
-  
-  =encoding big5
 
-=back
+  =encoding ShiftJIS
+
+  =encoding big5
 
 C<=encoding> affects the whole document, and must occur only once.
 
-And don't forget, when using any other command, that the command lasts up
+=back
+
+And don't forget, all commands but C<=encoding> last up
 until the end of its I<paragraph>, not its line.  So in the
 examples below, you can see that every command needs the blank
-line after it, to end its paragraph.
+line after it, to end its paragraph.  (And some older Pod translators
+may require the C<=encoding> line to have a following blank line as
+well, even though it should be legal to omit.)
 
 Some examples of lists include:
 
@@ -360,6 +379,13 @@ Used for switches ("C<perl's BE<lt>-nE<gt> switch>"), programs
 ("C<some systems provide a BE<lt>chfnE<gt> for that>"),
 emphasis ("C<be BE<lt>careful!E<gt>>"), and so on
 ("C<and that feature is known as BE<lt>autovivificationE<gt>>").
+
+=item C<UE<lt>textE<gt>> -- underline text
+
+This is a new addition in 2024 and may not be available in all processors or
+output formats.  Note further that some output formats cannot produce both
+italic and underline formatting and therefore even if both are recognised,
+they may not be visually distinct from each other.
 
 =item C<CE<lt>codeE<gt>> -- code text
 X<C> X<< CZ<><> >> X<POD, formatting code, code> X<code>
@@ -501,7 +527,7 @@ in decimal, as in C<EE<lt>181E<gt>>.
 Note that older Pod formatters might not recognize octal or
 hex numeric escapes, and that many formatters cannot reliably
 render characters above 255.  (Some formatters may even have
-to use compromised renderings of Latin-1 characters, like
+to use compromised renderings of Latin-1/CP-1252 characters, like
 rendering C<EE<lt>eacuteE<gt>> as just a plain "e".)
 
 =back
@@ -533,7 +559,42 @@ EE<lt>...E<gt> code sometimes.  For example, instead of
 "C<NEE<lt>ltE<gt>3>" (for "NE<lt>3") you could write
 "C<NZE<lt>E<gt>E<lt>3>" (the "ZE<lt>E<gt>" breaks up the "N" and
 the "E<lt>" so they can't be considered
-the part of a (fictitious) "NE<lt>...E<gt>" code.
+the part of a (fictitious) "NE<lt>...E<gt>" code).
+
+Another use is to indicate that I<stuff> in C<=item ZE<lt>E<gt>I<stuff...>>
+is not to be considered to be a bullet or number.  For example,
+without the C<ZE<lt>E<gt>>, the line
+
+ =item Z<>500 Server error
+
+could possibly be parsed as an item in a numbered list when it isn't
+meant to be.
+
+Still another use is to maintain visual space between C<=item> lines.
+If you specify
+
+ =item foo
+
+ =item bar
+
+it will typically get rendered as
+
+ foo
+ bar
+
+That may be what you want, but if what you really want is
+
+ foo
+
+ bar
+
+you can use C<ZE<lt>E<gt>> to accomplish that
+
+ =item foo
+
+ Z<>
+
+ =item bar
 
 =for comment
  This was formerly explained as a "zero-width character".  But it in
@@ -630,13 +691,17 @@ B<pod2fm>.  Various others are available in CPAN.
 =head2 Embedding Pods in Perl Modules
 X<POD, embedding>
 
-You can embed Pod documentation in your Perl modules and scripts.
-Start your documentation with an empty line, a "=head1" command at the
-beginning, and end it with a "=cut" command and an empty line.  Perl
-will ignore the Pod text.  See any of the supplied library modules for
-examples.  If you're going to put your Pod at the end of the file, and
-you're using an __END__ or __DATA__ cut mark, make sure to put an
-empty line there before the first Pod command.
+You can embed Pod documentation in your Perl modules and scripts.  Start
+your documentation with an empty line, a "=head1" command at the
+beginning, and end it with a "=cut" command and an empty line.  The
+B<perl> executable will ignore the Pod text.  You can place a Pod
+statement where B<perl> expects the beginning of a new statement, but
+not within a statement, as that would result in an error.  See any of
+the supplied library modules for examples.
+
+If you're going to put your Pod at the end of the file, and you're using
+an C<__END__> or C<__DATA__> cut mark, make sure to put an empty line there
+before the first Pod command.
 
   __END__
 

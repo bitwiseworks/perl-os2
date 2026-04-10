@@ -97,6 +97,12 @@ ndbm_FETCH(db, key)
 	NDBM_File	db
 	datum_key	key
 
+#define ndbm_EXISTS(db,key)			cBOOL(dbm_fetch(db->dbp,key).dptr)
+bool
+ndbm_EXISTS(db, key)
+	NDBM_File	db
+	datum_key	key
+
 #define ndbm_STORE(db,key,value,flags)		dbm_store(db->dbp,key,value,flags)
 int
 ndbm_STORE(db, key, value, flags = DBM_REPLACE)
@@ -109,7 +115,7 @@ ndbm_STORE(db, key, value, flags = DBM_REPLACE)
 	    if (RETVAL < 0 && errno == EPERM)
 		croak("No write permission to ndbm file");
 	    croak("ndbm store returned %d, errno %d, key \"%s\"",
-			RETVAL,errno,key.dptr);
+                  RETVAL, errno, (const char *)key.dptr);
 	    dbm_clearerr(db->dbp);
 	}
 
@@ -129,16 +135,22 @@ datum_key
 ndbm_NEXTKEY(db, key)
 	NDBM_File	db
 	datum_key	key = NO_INIT
+    CLEANUP:
+	PERL_UNUSED_VAR(key);
 
 #define ndbm_error(db)				dbm_error(db->dbp)
 int
 ndbm_error(db)
 	NDBM_File	db
+    CLEANUP:
+	PERL_UNUSED_VAR(db);
 
 #define ndbm_clearerr(db)			dbm_clearerr(db->dbp)
 void
 ndbm_clearerr(db)
 	NDBM_File	db
+    CLEANUP:
+	PERL_UNUSED_VAR(db);
 
 
 SV *

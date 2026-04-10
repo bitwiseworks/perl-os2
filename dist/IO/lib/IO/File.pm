@@ -10,29 +10,29 @@ IO::File - supply object methods for filehandles
 
     use IO::File;
 
-    $fh = IO::File->new();
+    my $fh = IO::File->new();
     if ($fh->open("< file")) {
         print <$fh>;
         $fh->close;
     }
 
-    $fh = IO::File->new("> file");
+    my $fh = IO::File->new("> file");
     if (defined $fh) {
         print $fh "bar\n";
         $fh->close;
     }
 
-    $fh = IO::File->new("file", "r");
+    my $fh = IO::File->new("file", "r");
     if (defined $fh) {
         print <$fh>;
         undef $fh;       # automatically closes the file
     }
 
-    $fh = IO::File->new("file", O_WRONLY|O_APPEND);
+    my $fh = IO::File->new("file", O_WRONLY|O_APPEND);
     if (defined $fh) {
         print $fh "corge\n";
 
-        $pos = $fh->getpos;
+        my $pos = $fh->getpos;
         $fh->setpos($pos);
 
         undef $fh;       # automatically closes the file
@@ -93,14 +93,6 @@ it passes all the three arguments to the three-argument C<open> operator.
 For convenience, C<IO::File> exports the O_XXX constants from the
 Fcntl module, if this module is available.
 
-=item binmode( [LAYER] )
-
-C<binmode> sets C<binmode> on the underlying C<IO> object, as documented
-in C<perldoc -f binmode>.
-
-C<binmode> accepts one optional parameter, which is the layer to be
-passed on to the C<binmode> call.
-
 =back
 
 =head1 NOTE
@@ -124,9 +116,8 @@ Derived from FileHandle.pm by Graham Barr E<lt>F<gbarr@pobox.com>E<gt>.
 
 =cut
 
-use 5.006_001;
+use 5.008_001;
 use strict;
-our($VERSION, @EXPORT, @EXPORT_OK, @ISA);
 use Carp;
 use Symbol;
 use SelectSaver;
@@ -134,11 +125,11 @@ use IO::Seekable;
 
 require Exporter;
 
-@ISA = qw(IO::Handle IO::Seekable Exporter);
+our @ISA = qw(IO::Handle IO::Seekable Exporter);
 
-$VERSION = "1.16";
+our $VERSION = "1.55";
 
-@EXPORT = @IO::Seekable::EXPORT;
+our @EXPORT = @IO::Seekable::EXPORT;
 
 eval {
     # Make all Fcntl O_XXX constants available for importing
@@ -185,19 +176,6 @@ sub open {
         }
     }
     open($fh, $file);
-}
-
-################################################
-## Binmode
-##
-
-sub binmode {
-    ( @_ == 1 or @_ == 2 ) or croak 'usage $fh->binmode([LAYER])';
-
-    my($fh, $layer) = @_;
-
-    return binmode $$fh unless $layer;
-    return binmode $$fh, $layer;
 }
 
 1;

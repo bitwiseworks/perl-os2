@@ -25,6 +25,8 @@ calls.
 #include <string.h>
 
 #define PERL_NO_GET_CONTEXT
+#define PERL_EXT
+#define PERL_IN_DL_WIN32_XS
 
 #include "EXTERN.h"
 #include "perl.h"
@@ -47,10 +49,13 @@ OS_Error_String(pTHX)
     dMY_CXT;
     DWORD err = GetLastError();
     STRLEN len;
-    if (!dl_error_sv)
-	dl_error_sv = newSVpvn("",0);
-    PerlProc_GetOSError(dl_error_sv,err);
-    return SvPV(dl_error_sv,len);
+    SV ** l_dl_error_svp = &dl_error_sv;
+    SV * l_dl_error_sv;
+    if (!*l_dl_error_svp)
+	*l_dl_error_svp = newSVpvs("");
+    l_dl_error_sv = *l_dl_error_svp;
+    PerlProc_GetOSError(l_dl_error_sv,err);
+    return SvPV(l_dl_error_sv,len);
 }
 
 static void
@@ -67,9 +72,9 @@ dl_private_init(pTHX)
 static int
 dl_static_linked(char *filename)
 {
-    char **p;
+    const char * const *p;
     char *ptr, *hptr;
-    static char subStr[] = "/auto/";
+    static const char subStr[] = "/auto/";
     char szBuffer[MAX_PATH];
 
     /* avoid buffer overflow when called with invalid filenames */
@@ -77,7 +82,7 @@ dl_static_linked(char *filename)
         return 0;
 
     /* change all the '\\' to '/' */
-    strcpy(szBuffer, filename);
+    my_strlcpy(szBuffer, filename, sizeof(szBuffer));
     for(ptr = szBuffer; ptr = strchr(ptr, '\\'); ++ptr)
 	*ptr = '/';
 
@@ -97,7 +102,7 @@ dl_static_linked(char *filename)
 	if (hptr = strstr(ptr, *p)) {
 	    /* found substring, need more detailed check if module name match */
 	    if (hptr==ptr) {
-		return strcmp(ptr, *p)==0;
+		return strEQ(ptr, *p);
 	    }
 	    if (hptr[strlen(*p)] == 0)
 		return hptr[-1]=='/';
@@ -111,26 +116,33 @@ MODULE = DynaLoader	PACKAGE = DynaLoader
 BOOT:
     (void)dl_private_init(aTHX);
 
-void *
+void
 dl_load_file(filename,flags=0)
     char *		filename
-    int			flags
+#flags is unused
+    SV *		flags = NO_INIT
     PREINIT:
+    void *retv;
+    SV * retsv;
     CODE:
   {
+    PERL_UNUSED_VAR(flags);
     DLDEBUG(1,PerlIO_printf(Perl_debug_log,"dl_load_file(%s):\n", filename));
     if (dl_static_linked(filename) == 0) {
-	RETVAL = PerlProc_DynaLoad(filename);
+	retv = PerlProc_DynaLoad(filename);
     }
     else
-	RETVAL = (void*) Win_GetModuleHandle(NULL);
-    DLDEBUG(2,PerlIO_printf(Perl_debug_log," libref=%x\n", RETVAL));
-    ST(0) = sv_newmortal() ;
-    if (RETVAL == NULL)
+	retv = (void*) Win_GetModuleHandle(NULL);
+    DLDEBUG(2,PerlIO_printf(Perl_debug_log," libref=%x\n", retv));
+
+    if (retv == NULL) {
 	SaveError(aTHX_ "load_file:%s",
 		  OS_Error_String(aTHX)) ;
+	retsv = &PL_sv_undef;
+    }
     else
-	sv_setiv( ST(0), (IV)RETVAL);
+	retsv = sv_2mortal(newSViv((IV)retv));
+    ST(0) = retsv;
   }
 
 int
@@ -138,33 +150,35 @@ dl_unload_file(libref)
     void *	libref
   CODE:
     DLDEBUG(1,PerlIO_printf(Perl_debug_log, "dl_unload_file(%lx):\n", PTR2ul(libref)));
-    RETVAL = FreeLibrary(libref);
+    RETVAL = FreeLibrary((HMODULE)libref);
     if (!RETVAL)
         SaveError(aTHX_ "unload_file:%s", OS_Error_String(aTHX)) ;
     DLDEBUG(2,PerlIO_printf(Perl_debug_log, " retval = %d\n", RETVAL));
   OUTPUT:
     RETVAL
 
-void *
-dl_find_symbol(libhandle, symbolname)
+void
+dl_find_symbol(libhandle, symbolname, ign_err=0)
     void *	libhandle
     char *	symbolname
+    int	        ign_err
+    PREINIT:
+    void *retv;
     CODE:
     DLDEBUG(2,PerlIO_printf(Perl_debug_log,"dl_find_symbol(handle=%x, symbol=%s)\n",
 		      libhandle, symbolname));
-    RETVAL = (void*) GetProcAddress((HINSTANCE) libhandle, symbolname);
-    DLDEBUG(2,PerlIO_printf(Perl_debug_log,"  symbolref = %x\n", RETVAL));
-    ST(0) = sv_newmortal() ;
-    if (RETVAL == NULL)
-	SaveError(aTHX_ "find_symbol:%s",
-		  OS_Error_String(aTHX)) ;
-    else
-	sv_setiv( ST(0), (IV)RETVAL);
+    retv = (void*) GetProcAddress((HINSTANCE) libhandle, symbolname);
+    DLDEBUG(2,PerlIO_printf(Perl_debug_log,"  symbolref = %x\n", retv));
+    ST(0) = sv_newmortal();
+    if (retv == NULL) {
+        if (!ign_err) SaveError(aTHX_ "find_symbol:%s", OS_Error_String(aTHX));
+    } else
+	sv_setiv( ST(0), (IV)retv);
 
 
 void
 dl_undef_symbols()
-    PPCODE:
+    CODE:
 
 
 
@@ -174,7 +188,7 @@ void
 dl_install_xsub(perl_name, symref, filename="$Package")
     char *		perl_name
     void *		symref 
-    char *		filename
+    const char *	filename
     CODE:
     DLDEBUG(2,PerlIO_printf(Perl_debug_log,"dl_install_xsub(name=%s, symref=%x)\n",
 		      perl_name, symref));
@@ -183,11 +197,11 @@ dl_install_xsub(perl_name, symref, filename="$Package")
 					filename)));
 
 
-char *
+SV *
 dl_error()
     CODE:
     dMY_CXT;
-    RETVAL = dl_last_error;
+    RETVAL = newSVsv(MY_CXT.x_dl_last_error);
     OUTPUT:
     RETVAL
 
@@ -198,11 +212,13 @@ CLONE(...)
     CODE:
     MY_CXT_CLONE;
 
+    PERL_UNUSED_VAR(items);
+
     /* MY_CXT_CLONE just does a memcpy on the whole structure, so to avoid
      * using Perl variables that belong to another thread, we create our 
      * own for this thread.
      */
-    MY_CXT.x_dl_last_error = newSVpvn("", 0);
+    MY_CXT.x_dl_last_error = newSVpvs("");
 
 #endif
 

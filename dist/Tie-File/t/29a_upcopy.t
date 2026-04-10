@@ -1,4 +1,10 @@
 #!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use File::Temp ();
+
 #
 # Unit tests of _upcopy function
 #
@@ -10,7 +16,15 @@
 # but the source and destination regions may overlap.)
 
 
-my $file = "tf$$.txt";
+# Make a temp dir under the OS's normal temp directory for creating
+# test files in. By using the OS's temp dir rather than the current
+# directory, we increase the chances that the tests are run on a tmpfs
+# file system or similar. This becomes important when the current
+# directory is on a very slow USB drive for example, as this test file
+# does lots of file creating, modifying and deleting.
+
+my $tempdir = File::Temp::tempdir("Tie-File-XXXXXX",
+                                    TMPDIR => 1, CLEANUP => 1);
 
 print "1..55\n";
 
@@ -22,7 +36,7 @@ $: = Tie::File::_default_recsep();
 
 my @subtests = qw(x <x x> x><x <x> <x><x x><x> <x><x> <x><x><x> 0);
 
-$FLEN = 40970;  # 2410 records of 17 chars each
+my $FLEN = 40970;  # 2410 records of 17 chars each
 
 # (2-7) Trivial non-moves at start of file
 try(0, 0, 0);
@@ -98,8 +112,15 @@ try($FLEN-20000, 200, undef);
 
 sub try {
   my ($src, $dst, $len) = @_;
-  open F, "> $file" or die "Couldn't open file $file: $!";
-  binmode F;
+
+  my $line = (caller(0))[2];
+  my $desc = sprintf "try(%5s, %5s, %5s) FLEN=%5s called from line %d",
+                map { defined $_ ? $_ : 'undef' }
+                    $src, $dst, $len, $FLEN, $line;
+
+  my ($fh, $file) = File::Temp::tempfile("29A-XXXXX", DIR => $tempdir);
+
+  binmode $fh;
 
   # The record has exactly 17 characters.  This will help ensure that
   # even if _upcopy screws up, the data doesn't coincidentally
@@ -111,8 +132,8 @@ sub try {
   my $oldfile = $d x $recs;
   my $flen = defined($FLEN) ? $FLEN : $recs * 17;
   substr($oldfile, $FLEN) = "" if defined $FLEN;  # truncate
-  print F $oldfile;
-  close F;
+  print $fh $oldfile;
+  close $fh;
 
   die "wrong length!" unless -s $file == $flen;
 
@@ -126,14 +147,16 @@ sub try {
   }
 
   my $o = tie my @lines, 'Tie::File', $file or die $!;
+  # allocate more time for the test if we are running parallel tests
+  my $alarm_time = ($ENV{TEST_JOBS} || $ENV{HARNESS_OPTIONS}) ? 20 : 10;
   local $SIG{ALRM} = sub { die "Alarm clock" };
-  my $a_retval = eval { alarm(5) unless $^P; $o->_upcopy($src, $dst, $len) };
+  my $a_retval = eval { alarm($alarm_time) unless $^P; $o->_upcopy($src, $dst, $len) };
   my $err = $@;
   undef $o; untie @lines; alarm(0);
   if ($err) {
     if ($err =~ /^Alarm clock/) {
-      print "# Timeout\n";
-      print "not ok $N\n"; $N++;
+      print STDERR "# $0 Timeout after $alarm_time seconds at test $N - $desc\n";
+      print "not ok $N - $desc\n"; $N++;
       return;
     } else {
       $@ = $err;
@@ -141,7 +164,7 @@ sub try {
     }
   }
 
-  open F, "< $file" or die "Couldn't open file $file: $!";
+  open F, '<', $file or die "Couldn't open file $file: $!";
   binmode F;
   my $actual;
   { local $/;
@@ -153,46 +176,7 @@ sub try {
   unless ($alen == $xlen) {
     print "# try(@_) expected file length $xlen, actual $alen!\n";
   }
-  print $actual eq $expected ? "ok $N\n" : "not ok $N\n";
-  $N++;
-}
-
-
-
-use POSIX 'SEEK_SET';
-sub check_contents {
-  my @c = @_;
-  my $x = join $:, @c, '';
-  local *FH = $o->{fh};
-  seek FH, 0, SEEK_SET;
-#  my $open = open FH, "< $file";
-  my $a;
-  { local $/; $a = <FH> }
-  $a = "" unless defined $a;
-  if ($a eq $x) {
-    print "ok $N\n";
-  } else {
-    ctrlfix($a, $x);
-    print "not ok $N\n# expected <$x>, got <$a>\n";
-  }
-  $N++;
-
-  # now check FETCH:
-  my $good = 1;
-  my $msg;
-  for (0.. $#c) {
-    my $aa = $a[$_];
-    unless ($aa eq "$c[$_]$:") {
-      $msg = "expected <$c[$_]$:>, got <$aa>";
-      ctrlfix($msg);
-      $good = 0;
-    }
-  }
-  print $good ? "ok $N\n" : "not ok $N # $msg\n";
-  $N++;
-
-  print $o->_check_integrity($file, $ENV{INTEGRITY}) 
-      ? "ok $N\n" : "not ok $N\n";
+  print $actual eq $expected ? "ok $N - $desc\n" : "not ok $N - $desc\n";
   $N++;
 }
 
@@ -202,10 +186,3 @@ sub ctrlfix {
     s/\r/\\r/g;
   }
 }
-
-END {
-  undef $o;
-  untie @a;
-  1 while unlink $file;
-}
-

@@ -81,7 +81,7 @@ $array[128]=1
 ########
 $x=0x0eabcd; print $x->ref;
 EXPECT
-Can't call method "ref" without a package or object reference at - line 1.
+Can't locate object method "ref" via package "961485" (perhaps you forgot to load "961485"?) at - line 1.
 ########
 chop ($str .= <DATA>);
 ########
@@ -194,8 +194,8 @@ BEGIN failed--compilation aborted at - line 1.
 ########
 BEGIN { undef = 0 }
 EXPECT
-Modification of a read-only value attempted at - line 1.
-BEGIN failed--compilation aborted at - line 1.
+Can't modify undef operator in scalar assignment at - line 1, near "0 }"
+BEGIN not safe after errors--compilation aborted at - line 1.
 ########
 {
     package foo;
@@ -349,15 +349,12 @@ sub foo { local $_ = shift; @_ = split; @_ }
 @x = foo(' x  y  z ');
 print "you die joe!\n" unless "@x" eq 'x y z';
 ########
-/(?{"{"})/	# Check it outside of eval too
+"A" =~ /(?{"{"})/	# Check it outside of eval too
 EXPECT
-Sequence (?{...}) not terminated or not {}-balanced in regex; marked by <-- HERE in m/(?{ <-- HERE "{"})/ at - line 1.
 ########
 /(?{"{"}})/	# Check it outside of eval too
 EXPECT
-Unmatched right curly bracket at (re_eval 1) line 1, at end of line
-syntax error at (re_eval 1) line 1, near ""{"}"
-Compilation failed in regexp at - line 1.
+Sequence (?{...}) not terminated with ')' at - line 1.
 ########
 BEGIN { @ARGV = qw(a b c d e) }
 BEGIN { print "argv <@ARGV>\nbegin <",shift,">\n" }
@@ -530,12 +527,13 @@ my $x = "foo";
 EXPECT
 foo
 ########
+# [perl #3066]
 sub C () { 1 }
-sub M { $_[0] = 2; }
+sub M { print "$_[0]\n" }
 eval "C";
 M(C);
 EXPECT
-Modification of a read-only value attempted at - line 2.
+1
 ########
 print qw(ab a\b a\\b);
 EXPECT
@@ -565,13 +563,13 @@ EOT
 EXPECT
 ok
 ########
-# [ID 20001202.002] and change #8066 added 'at -e line 1';
+# [ID 20001202.002 (#4821)] and change #8066 added 'at -e line 1';
 # reversed again as a result of [perl #17763]
 die qr(x)
 EXPECT
 (?^:x)
 ########
-# 20001210.003 mjd@plover.com
+# 20001210.003 (#4893) mjd@plover.com
 format REMITOUT_TOP =
 FOO
 .
@@ -617,23 +615,11 @@ new_pmop "abcdef"; reset;
 close STDERR; die;
 EXPECT
 ########
-# core dump in 20000716.007
+# core dump in 20000716.007 (#3516)
 -w
 "x" =~ /(\G?x)?/;
 ########
-# Bug 20010515.004
-my @h = 1 .. 10;
-bad(@h);
-sub bad {
-   undef @h;
-   print "O";
-   print for @_;
-   print "K";
-}
-EXPECT
-OK
-########
-# Bug 20010506.041
+# Bug 20010506.041 (#6952)
 "abcd\x{1234}" =~ /(a)(b[c])(d+)?/i and print "ok\n";
 EXPECT
 ok
@@ -664,13 +650,13 @@ Bar=ARRAY(0x...)
 BEGIN { print "ok\n" }
 EXPECT
 ok
-######## scalar ref to file test operator segfaults on 5.6.1 [ID 20011127.155]
+######## scalar ref to file test operator segfaults on 5.6.1 [ID 20011127.155 (#7947)]
 # This only happens if the filename is 11 characters or less.
 $foo = \-f "blah";
 print "ok" if ref $foo && !$$foo;
 EXPECT
 ok
-######## [ID 20011128.159] 'X' =~ /\X/ segfault in 5.6.1
+######## [ID 20011128.159 (#7951)] 'X' =~ /\X/ segfault in 5.6.1
 print "ok" if 'X' =~ /\X/;
 EXPECT
 ok
@@ -681,7 +667,6 @@ print join '', @a, "\n";
 EXPECT
 123456789
 ######## example from Camel 5, ch. 15, pp.406 (with my)
-# SKIP: ord "A" == 193 # EBCDIC
 use strict;
 use utf8;
 my $人 = 2; # 0xe4 0xba 0xba: U+4eba, "human" in CJK ideograph
@@ -690,7 +675,6 @@ print $人, "\n";
 EXPECT
 3
 ######## example from Camel 5, ch. 15, pp.406 (with our)
-# SKIP: ord "A" == 193 # EBCDIC
 use strict;
 use utf8;
 our $人 = 2; # 0xe4 0xba 0xba: U+4eba, "human" in CJK ideograph
@@ -699,7 +683,6 @@ print $人, "\n";
 EXPECT
 3
 ######## example from Camel 5, ch. 15, pp.406 (with package vars)
-# SKIP: ord "A" == 193 # EBCDIC
 use utf8;
 $人 = 2; # 0xe4 0xba 0xba: U+4eba, "human" in CJK ideograph
 $人++; # a child is born
@@ -707,7 +690,6 @@ print $人, "\n";
 EXPECT
 3
 ######## example from Camel 5, ch. 15, pp.406 (with use vars)
-# SKIP: ord "A" == 193 # EBCDIC
 use strict;
 use utf8;
 use vars qw($人);
@@ -726,7 +708,7 @@ $code = eval q[
 print $x;
 EXPECT
 ok 1
-######## [ID 20020623.009] nested eval/sub segfaults
+######## [ID 20020623.009 (#9728)] nested eval/sub segfaults
 $eval = eval 'sub { eval "sub { %S }" }';
 $eval->({});
 ######## [perl #17951] Strange UTF error
@@ -744,6 +726,8 @@ utf8::upgrade($_); # the original code used a UTF-8 locale (affects STDIN)
 /^([[:digit:]]+)/;
 EXPECT
 ######## [perl #20667] unicode regex vs non-unicode regex
+# SKIP: !defined &DynaLoader::boot_DynaLoader && !eval 'require "unicore/UCD.pl"'
+# (skip under miniperl if Unicode tables are not built yet)
 $toto = 'Hello';
 $toto =~ /\w/; # this line provokes the problem!
 $name = 'A B';
@@ -759,32 +743,6 @@ It's good! >A< >B<
 $_="foo";utf8::upgrade($_);/bar/i,warn$_;
 EXPECT
 foo at - line 1.
-######## glob() bug Mon, 01 Sep 2003 02:25:41 -0700 <200309010925.h819Pf0X011457@smtp3.ActiveState.com>
--lw
-# Make sure the presence of the CORE::GLOBAL::glob typeglob does not affect
-# whether File::Glob::csh_glob is called.
-if ($^O eq 'VMS') {
-    # A pattern with a double quote in it is a syntax error to LIB$FIND_FILE
-    # Should we strip quotes in Perl_vms_start_glob the way csh_glob() does?
-    print "ok1\nok2\n";
-}
-else {
-    ++$INC{"File/Glob.pm"}; # prevent it from loading
-    my $called1 =
-    my $called2 = 0;
-    *File::Glob::csh_glob = sub { ++$called1 };
-    my $output1 = eval q{ glob(q(./"TEST")) };
-    undef *CORE::GLOBAL::glob; # but leave the typeglob itself there
-    ++$CORE::GLOBAL::glob if 0; # "used only once"
-    undef *File::Glob::csh_glob; # avoid redefinition warnings
-    *File::Glob::csh_glob = sub { ++$called2 };
-    my $output2 = eval q{ glob(q(./"TEST")) };
-    print "ok1" if $called1 eq $called2;
-    print "ok2" if $output1 eq $output2;
-}
-EXPECT
-ok1
-ok2
 ######## "#75146: 27e904532594b7fb (fix for #23810) introduces a #regression"
 use strict;
 
@@ -825,3 +783,51 @@ eval {
 print "If you get here, you didn't crash\n";
 EXPECT
 If you get here, you didn't crash
+######## [perl #112312] crash on syntax error
+# SKIP: !defined &DynaLoader::boot_DynaLoader # miniperl
+#!/usr/bin/perl
+use strict;
+use warnings;
+sub meow (&);
+my %h;
+my $k;
+meow {
+	my $t : need_this;
+	$t = {
+		size =>  $h{$k}{size};
+		used =>  $h{$k}(used}
+	};
+};
+EXPECT
+syntax error at - line 12, near "used"
+Execution of - aborted due to compilation errors.
+######## [perl #112312] crash on syntax error - another test
+# SKIP: !defined &DynaLoader::boot_DynaLoader # miniperl
+#!/usr/bin/perl
+use strict;
+use warnings;
+
+sub meow (&);
+
+my %h;
+my $k;
+
+meow {
+        my $t : need_this;
+        $t = {
+                size => $h{$k}{size};
+                used => $h{$k}(used}
+        };
+};
+
+sub testo {
+        my $value = shift;
+        print;
+        print;
+        print;
+        1;
+}
+
+EXPECT
+syntax error at - line 15, near "used"
+Execution of - aborted due to compilation errors.

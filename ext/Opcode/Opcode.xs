@@ -12,16 +12,24 @@
 typedef struct {
     HV *	x_op_named_bits;	/* cache shared for whole process */
     SV *	x_opset_all;		/* mask with all bits set	*/
-    IV		x_opset_len;		/* length of opmasks in bytes	*/
-    int		x_opcode_debug;
+#ifdef OPCODE_DEBUG
+    int		x_opcode_debug;		/* unused warn() emitting debugging code */
+#endif
 } my_cxt_t;
 
 START_MY_CXT
 
+/* length of opmasks in bytes */
+static const STRLEN opset_len = (PL_maxo + 7) / 8;
+
 #define op_named_bits		(MY_CXT.x_op_named_bits)
 #define opset_all		(MY_CXT.x_opset_all)
-#define opset_len		(MY_CXT.x_opset_len)
-#define opcode_debug		(MY_CXT.x_opcode_debug)
+#ifdef OPCODE_DEBUG
+#  define opcode_debug		(MY_CXT.x_opcode_debug)
+#else
+ /* no API to turn this on at runtime, so constant fold the code away */
+#  define opcode_debug		0
+#endif
 
 static SV  *new_opset (pTHX_ SV *old_opset);
 static int  verify_opset (pTHX_ SV *opset, int fatal);
@@ -43,12 +51,13 @@ op_names_init(pTHX)
 {
     int i;
     STRLEN len;
-    char **op_names;
-    char *bitmap;
+    const char *const *op_names;
+    U8 *bitmap;
     dMY_CXT;
 
     op_named_bits = newHV();
-    op_names = get_op_names();
+    hv_ksplit(op_named_bits, PL_maxo);
+    op_names = PL_op_name;
     for(i=0; i < PL_maxo; ++i) {
 	SV * const sv = newSViv(i);
 	SvREADONLY_on(sv);
@@ -58,10 +67,11 @@ op_names_init(pTHX)
     put_op_bitspec(aTHX_ STR_WITH_LEN(":none"), sv_2mortal(new_opset(aTHX_ Nullsv)));
 
     opset_all = new_opset(aTHX_ Nullsv);
-    bitmap = SvPV(opset_all, len);
+    bitmap = (U8*)SvPV(opset_all, len);
     memset(bitmap, 0xFF, len-1); /* deal with last byte specially, see below */
     /* Take care to set the right number of bits in the last byte */
-    bitmap[len-1] = (PL_maxo & 0x07) ? ~(0xFF << (PL_maxo & 0x07)) : 0xFF;
+    bitmap[len-1] = (PL_maxo & 0x07) ? ((U8) (~(0xFF << (PL_maxo & 0x07))))
+                                     : 0xFF;
     put_op_bitspec(aTHX_ STR_WITH_LEN(":all"), opset_all); /* don't mortalise */
 }
 
@@ -119,7 +129,6 @@ static SV *
 new_opset(pTHX_ SV *old_opset)
 {
     SV *opset;
-    dMY_CXT;
 
     if (old_opset) {
 	verify_opset(aTHX_ old_opset,1);
@@ -140,11 +149,10 @@ static int
 verify_opset(pTHX_ SV *opset, int fatal)
 {
     const char *err = NULL;
-    dMY_CXT;
 
     if      (!SvOK(opset))              err = "undefined";
     else if (!SvPOK(opset))             err = "wrong type";
-    else if (SvCUR(opset) != (STRLEN)opset_len) err = "wrong size";
+    else if (SvCUR(opset) != opset_len) err = "wrong size";
     if (err && fatal) {
 	croak("Invalid opset: %s", err);
     }
@@ -155,8 +163,6 @@ verify_opset(pTHX_ SV *opset, int fatal)
 static void
 set_opset_bits(pTHX_ char *bitmap, SV *bitspec, int on, const char *opname)
 {
-    dMY_CXT;
-
     if (SvIOK(bitspec)) {
 	const int myopcode = SvIV(bitspec);
 	const int offset = myopcode >> 3;
@@ -171,7 +177,7 @@ set_opset_bits(pTHX_ char *bitmap, SV *bitspec, int on, const char *opname)
 	else
 	    bitmap[offset] &= ~(1 << bit);
     }
-    else if (SvPOK(bitspec) && SvCUR(bitspec) == (STRLEN)opset_len) {
+    else if (SvPOK(bitspec) && SvCUR(bitspec) == opset_len) {
 
 	STRLEN len;
 	const char * const specbits = SvPV(bitspec, len);
@@ -191,11 +197,10 @@ set_opset_bits(pTHX_ char *bitmap, SV *bitspec, int on, const char *opname)
 static void
 opmask_add(pTHX_ SV *opset)	/* THE ONLY FUNCTION TO EDIT PL_op_mask ITSELF	*/
 {
-    int i,j;
+    int j;
     char *bitmask;
     STRLEN len;
     int myopcode = 0;
-    dMY_CXT;
 
     verify_opset(aTHX_ opset,1);		/* croaks on bad opset	*/
 
@@ -205,7 +210,7 @@ opmask_add(pTHX_ SV *opset)	/* THE ONLY FUNCTION TO EDIT PL_op_mask ITSELF	*/
     /* OPCODES ALREADY MASKED ARE NEVER UNMASKED. See opmask_addlocal()	*/
 
     bitmask = SvPV(opset, len);
-    for (i=0; i < opset_len; i++) {
+    for (STRLEN i=0; i < opset_len; i++) {
 	const U16 bits = bitmask[i];
 	if (!bits) {	/* optimise for sparse masks */
 	    myopcode += 8;
@@ -220,14 +225,17 @@ static void
 opmask_addlocal(pTHX_ SV *opset, char *op_mask_buf) /* Localise PL_op_mask then opmask_add() */
 {
     char *orig_op_mask = PL_op_mask;
+#ifdef OPCODE_DEBUG
     dMY_CXT;
+#endif
 
     SAVEVPTR(PL_op_mask);
     /* XXX casting to an ordinary function ptr from a member function ptr
      * is disallowed by Borland
      */
     if (opcode_debug >= 2)
-	SAVEDESTRUCTOR((void(*)(void*))Perl_warn,"PL_op_mask restored");
+	SAVEDESTRUCTOR((void(*)(void*))Perl_warn_nocontext,
+            "PL_op_mask restored");
     PL_op_mask = &op_mask_buf[0];
     if (orig_op_mask)
 	Copy(orig_op_mask, PL_op_mask, PL_maxo, char);
@@ -245,8 +253,7 @@ PROTOTYPES: ENABLE
 BOOT:
 {
     MY_CXT_INIT;
-    assert(PL_maxo < OP_MASK_BUF_SIZE);
-    opset_len = (PL_maxo + 7) / 8;
+    STATIC_ASSERT_STMT(PL_maxo < OP_MASK_BUF_SIZE);
     if (opcode_debug >= 1)
 	warn("opset_len %ld\n", (long)opset_len);
     op_names_init(aTHX);
@@ -257,11 +264,13 @@ _safe_pkg_prep(Package)
     SV *Package
 PPCODE:
     HV *hv; 
+    char *hvname;
     ENTER;
    
     hv = gv_stashsv(Package, GV_ADDWARN); /* should exist already	*/
 
-    if (strNE(HvNAME_get(hv),"main")) {
+    hvname = HvNAME_get(hv);
+    if (!hvname || strNE(hvname, "main")) {
         /* make it think it's in main:: */
 	hv_name_set(hv, "main", 4, 0);
         (void) hv_store(hv,"_",1,(SV *)PL_defgv,0);  /* connect _ to global */
@@ -308,15 +317,20 @@ PPCODE:
     dummy_hv = save_hash(PL_incgv);
     GvHV(PL_incgv) = (HV*)SvREFCNT_inc(GvHV(gv_HVadd(gv_fetchpvs("INC",GV_ADD,SVt_PVHV))));
 
-    /* Invalidate ISA and method caches */
+    /* Invalidate class and method caches */
     ++PL_sub_generation;
     hv_clear(PL_stashcache);
 
     PUSHMARK(SP);
-    perl_call_sv(codesv, GIMME|G_EVAL|G_KEEPERR); /* use callers context */
+    /* use caller’s context */
+    perl_call_sv(codesv, GIMME_V|G_EVAL|G_KEEPERR);
     sv_free( (SV *) dummy_hv);  /* get rid of what save_hash gave us*/
     SPAGAIN; /* for the PUTBACK added by xsubpp */
     LEAVE;
+
+    /* Invalidate again */
+    ++PL_sub_generation;
+    hv_clear(PL_stashcache);
 
 
 int
@@ -334,7 +348,6 @@ invert_opset(opset)
 CODE:
     {
     char *bitmap;
-    dMY_CXT;
     STRLEN len = opset_len;
 
     opset = sv_2mortal(new_opset(aTHX_ opset));	/* verify and clone opset */
@@ -343,7 +356,7 @@ CODE:
 	bitmap[len] = ~bitmap[len];
     /* take care of extra bits beyond PL_maxo in last byte	*/
     if (PL_maxo & 07)
-	bitmap[opset_len-1] &= ~(0xFF << (PL_maxo & 0x07));
+	bitmap[opset_len-1] &= ~(char)(0xFF << (PL_maxo & 0x07));
     }
     ST(0) = opset;
 
@@ -355,10 +368,10 @@ opset_to_ops(opset, desc = 0)
 PPCODE:
     {
     STRLEN len;
-    int i, j, myopcode;
+    STRLEN i;
+    int j, myopcode;
     const char * const bitmap = SvPV(opset, len);
-    char **names = (desc) ? get_op_descs() : get_op_names();
-    dMY_CXT;
+    const char *const *names = (desc) ? PL_op_desc : PL_op_name;
 
     verify_opset(aTHX_ opset,1);
     for (myopcode=0, i=0; i < opset_len; i++) {
@@ -417,7 +430,7 @@ CODE:
 
     if (!SvROK(safe) || !SvOBJECT(SvRV(safe)) || SvTYPE(SvRV(safe))!=SVt_PVHV)
 	croak("Not a Safe object");
-    mask = *hv_fetch((HV*)SvRV(safe), "Mask",4, 1);
+    mask = *hv_fetchs((HV*)SvRV(safe), "Mask", 1);
     if (ONLY_THESE)	/* *_only = new mask, else edit current	*/
 	sv_setsv(mask, sv_2mortal(new_opset(aTHX_ PERMITING ? opset_all : Nullsv)));
     else
@@ -448,8 +461,7 @@ PPCODE:
     int i;
     STRLEN len;
     SV **args;
-    char **op_desc = get_op_descs(); 
-    dMY_CXT;
+    const char *const *op_desc = PL_op_desc;
 
     /* copy args to a scratch area since we may push output values onto	*/
     /* the stack faster than we read values off it if masks are used.	*/
@@ -464,8 +476,9 @@ PPCODE:
 	    XPUSHs(newSVpvn_flags(op_desc[myopcode], strlen(op_desc[myopcode]),
 				  SVs_TEMP));
 	}
-	else if (SvPOK(bitspec) && SvCUR(bitspec) == (STRLEN)opset_len) {
-	    int b, j;
+        else if (SvPOK(bitspec) && SvCUR(bitspec) == opset_len) {
+            STRLEN b;
+            int j;
 	    const char * const bitmap = SvPV_nolen_const(bitspec);
 	    int myopcode = 0;
 	    for (b=0; b < opset_len; b++) {
@@ -518,7 +531,7 @@ CODE:
 void
 opcodes()
 PPCODE:
-    if (GIMME == G_ARRAY) {
+    if (GIMME_V == G_LIST) {
 	croak("opcodes in list context not yet implemented"); /* XXX */
     }
     else {

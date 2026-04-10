@@ -15,13 +15,11 @@
  * here.
  */
 
-#ifndef PERL_MICRO
-
 /* HAS_IOCTL:
  *	This symbol, if defined, indicates that the ioctl() routine is
  *	available to set I/O characteristics
  */
-#define	HAS_IOCTL		/**/
+#define HAS_IOCTL               /**/
  
 /* HAS_UTIME:
  *	This symbol, if defined, indicates that the routine utime() is
@@ -46,8 +44,6 @@
 #define HAS_KILL
 #define HAS_WAIT
 
-#endif /* !PERL_MICRO */
-  
 /* USEMYBINMODE
  *	This symbol, if defined, indicates that the program should
  *	use the routine my_binmode(FILE *fp, char iotype) to insure
@@ -122,36 +118,58 @@
 #define fwrite1 fwrite
 
 #define Stat(fname,bufptr) stat((fname),(bufptr))
-#define Fstat(fd,bufptr)   fstat((fd),(bufptr))
+
+#ifdef __amigaos4__
+int afstat(int fd, struct stat *statb);
+#  define Fstat(fd,bufptr) afstat((fd),(bufptr))
+#endif
+
+#ifndef Fstat
+#  define Fstat(fd,bufptr)   fstat((fd),(bufptr))
+#endif
+
 #define Fflush(fp)         fflush(fp)
 #define Mkdir(path,mode)   mkdir((path),(mode))
 
-#ifndef PERL_SYS_INIT_BODY
-#  define PERL_SYS_INIT_BODY(c,v)					\
-	MALLOC_CHECK_TAINT2(*c,*v) PERL_FPU_INIT; PERLIO_INIT; MALLOC_INIT
+#if defined(__amigaos4__)
+#  define PLATFORM_SYS_TERM_  amigaos4_dispose_fork_array()
+#  define PLATFORM_SYS_INIT_ STMT_START {                       \
+                                amigaos4_init_fork_array();     \
+                                amigaos4_init_environ_sema();   \
+                             } STMT_END
+#else 
+#  define PLATFORM_SYS_TERM_  NOOP
+#  define PLATFORM_SYS_INIT_  NOOP
 #endif
 
-#ifndef PERL_SYS_TERM_BODY
-#  define PERL_SYS_TERM_BODY() \
-    HINTS_REFCNT_TERM; OP_CHECK_MUTEX_TERM; \
-    OP_REFCNT_TERM; PERLIO_TERM; MALLOC_TERM;
+#ifndef PERL_SYS_INIT_BODY
+#define PERL_SYS_INIT_BODY(c,v)					\
+	MALLOC_CHECK_TAINT2(*c,*v) PERL_FPU_INIT; PERLIO_INIT;  \
+        MALLOC_INIT; PLATFORM_SYS_INIT_;
+#endif
 
+/* Generally add things last-in first-terminated.  IO and memory terminations
+ * need to be generally last
+ *
+ * BEWARE that using PerlIO in these will be using freed memory, so may appear
+ * to work, but must NOT be retained in production code. */
+#ifndef PERL_SYS_TERM_BODY
+#  define PERL_SYS_TERM_BODY()                                          \
+                    SHUTDOWN_TERM; ENV_TERM; USER_PROP_MUTEX_TERM;      \
+                    LOCALE_TERM; HINTS_REFCNT_TERM;                     \
+                    KEYWORD_PLUGIN_MUTEX_TERM; OP_CHECK_MUTEX_TERM;     \
+                    OP_REFCNT_TERM; PERLIO_TERM; MALLOC_TERM;           \
+                    PLATFORM_SYS_TERM_;
 #endif
 
 #define BIT_BUCKET "/dev/null"
 
-#define dXSUB_SYS
+#define dXSUB_SYS dNOOP
 
 #ifndef NO_ENVIRON_ARRAY
 #define USE_ENVIRON_ARRAY
 #endif
 
 /*
- * Local variables:
- * c-indentation-style: bsd
- * c-basic-offset: 4
- * indent-tabs-mode: t
- * End:
- *
- * ex: set ts=8 sts=4 sw=4 noet:
+ * ex: set ts=8 sts=4 sw=4 et:
  */

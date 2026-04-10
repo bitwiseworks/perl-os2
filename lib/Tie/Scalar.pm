@@ -1,6 +1,6 @@
 package Tie::Scalar;
 
-our $VERSION = '1.02';
+our $VERSION = '1.06';
 
 =head1 NAME
 
@@ -22,7 +22,8 @@ Tie::Scalar, Tie::StdScalar - base class definitions for tied scalars
 
     @ISA = qw(Tie::StdScalar);
 
-    # All methods provided by default, so define only what needs be overridden
+    # All methods provided by default, so define
+    # only what needs be overridden
     sub FETCH { ... }
 
 
@@ -40,7 +41,7 @@ as methods C<TIESCALAR>, C<FETCH> and C<STORE>. The B<Tie::StdScalar>
 package provides all the methods specified in  L<perltie>. It inherits from
 B<Tie::Scalar> and causes scalars tied to it to behave exactly like the
 built-in scalars, allowing for selective overloading of methods. The C<new>
-method is provided as a means of grandfathering, for classes that forget to
+method is provided as a means of legacy support for classes that forget to
 provide their own C<TIESCALAR> method.
 
 For developers wishing to write their own tied-scalar classes, the methods
@@ -81,7 +82,7 @@ C<< Tie::Scalar::STORE >> results in a (trappable) croak. And if you inherit
 from C<< Tie::Scalar >>, you I<must> provide either a C<< new >> or a
 C<< TIESCALAR >> method. 
 
-If you are looking for a class that does everything for you you don't
+If you are looking for a class that does everything for you that you don't
 define yourself, use the C<< Tie::StdScalar >> class, not the
 C<< Tie::Scalar >> one.
 
@@ -100,7 +101,7 @@ sub new {
     $pkg->TIESCALAR(@_);
 }
 
-# "Grandfather" the new, a la Tie::Hash
+# Legacy support for new(), a la Tie::Hash
 
 sub TIESCALAR {
     my $pkg = shift;
@@ -144,7 +145,7 @@ package Tie::StdScalar;
 
 sub TIESCALAR {
     my $class = shift;
-    my $instance = shift || undef;
+    my $instance = @_ ? shift : undef;
     return bless \$instance => $class;
 }
 

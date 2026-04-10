@@ -1,6 +1,5 @@
-#!/usr/bin/perl
-
 use strict;
+use warnings;
 use Test::More tests => 4;
 
 BEGIN {
@@ -28,6 +27,7 @@ ok(!$@);
 package Foo;
 
 use strict;
+use warnings;
 use overload (
     'eq' => sub { 0 },
     '""' => sub { $_[0] },
@@ -41,6 +41,7 @@ sub TO_JSON {
 package Bar;
 
 use strict;
+use warnings;
 use overload (
     'eq' => sub { 0 },
     '""' => sub { $_[0] },

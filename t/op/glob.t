@@ -2,11 +2,11 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = qw(. ../lib);
-    require 'test.pl';
+    require './test.pl';
+    set_up_inc( qw(. ../lib) );
 }
 
-plan( tests => 17 );
+plan( tests => 18 );
 
 @oops = @ops = <op/*>;
 
@@ -19,10 +19,16 @@ elsif ($^O eq 'VMS') {
   map { s/;.*$//; delete $files{lc($_)}; } split /[\n]/, `directory/noheading/notrailing/versions=1 [.op]`,
 }
 else {
+  local %ENV = %ENV;
+  # disable any env vars that might cause ls or dir to add colors or
+  # otherwise modify the output.
+  /COLOR|LS|CLI/i and delete $ENV{$_} for keys %ENV;
+
   map { $files{$_}++ } <op/*>;
-  map { delete $files{$_} } split /[\s\n]/, `echo op/*`;
+  map { delete $files{"op/$_"} } split /\n/, `ls op/ | cat`;
 }
-ok( !(keys(%files)),'leftover op/* files' ) or diag(join(' ',sort keys %files));
+ok( !(keys(%files)),'glob and directory listing agree' )
+    or diag(join(' ',sort keys %files));
 
 cmp_ok($/,'eq',"\n",'sane input record separator');
 
@@ -109,4 +115,38 @@ SKIP: {
     local *CORE::GLOBAL::glob = sub { ++$called };
     eval 'CORE::glob("0")';
     ok !$called, 'CORE::glob bypasses overrides';
+}
+
+######## glob() bug Mon, 01 Sep 2003 02:25:41 -0700 <200309010925.h819Pf0X011457@smtp3.ActiveState.com>
+
+SKIP: {
+    use Config;
+    skip("glob() works when cross-compiling, but this test doesn't", 1)
+        if $Config{usecrosscompile};
+
+    my $switches = [qw(-lw)];
+    my $expected = "ok1\nok2\n";
+    my $name     = "Make sure the presence of the CORE::GLOBAL::glob typeglob does not affect whether File::Glob::csh_glob is called.";
+
+    fresh_perl_is(<<'EOP', $expected, { switches => $switches }, $name);
+    if ($^O eq 'VMS') {
+        # A pattern with a double quote in it is a syntax error to LIB$FIND_FILE
+        # Should we strip quotes in Perl_vms_start_glob the way csh_glob() does?
+        print "ok1\nok2\n";
+    }
+    else {
+        ++$INC{"File/Glob.pm"}; # prevent it from loading
+        my $called1 = 0;
+        my $called2 = 0;
+        *File::Glob::csh_glob = sub { ++$called1 };
+        my $output1 = eval q{ glob(q(./"TEST")) };
+        undef *CORE::GLOBAL::glob; # but leave the typeglob itself there
+        ++$CORE::GLOBAL::glob if 0; # "used only once"
+        undef *File::Glob::csh_glob; # avoid redefinition warnings
+        *File::Glob::csh_glob = sub { ++$called2 };
+        my $output2 = eval q{ glob(q(./"TEST")) };
+        print "ok1" if $called1 eq $called2;
+        print "ok2" if $output1 eq $output2;
+    }
+EOP
 }

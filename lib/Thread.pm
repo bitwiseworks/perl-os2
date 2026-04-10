@@ -4,7 +4,7 @@ use strict;
 use warnings;
 no warnings 'redefine';
 
-our $VERSION = '3.02';
+our $VERSION = '3.06';
 $VERSION = eval $VERSION;
 
 BEGIN {
@@ -61,7 +61,7 @@ In Perl 5.005, the thread model was that all data is implicitly shared, and
 shared access to data has to be explicitly synchronized.  This model is called
 I<5005threads>.
 
-In Perl 5.6, a new model was introduced in which all is was thread local and
+In Perl 5.6, a new model was introduced in which all data is thread local and
 shared access to data has to be explicitly declared.  This model is called
 I<ithreads>, for "interpreter threads".
 
@@ -117,7 +117,7 @@ C<new> starts a new thread of execution in the referenced subroutine. The
 optional list is passed as parameters to the subroutine. Execution
 continues in both the subroutine and the code after the C<new> call.
 
-C<Thread-&gt;new> returns a thread object representing the newly created
+C<< Thread->new >> returns a thread object representing the newly created
 thread.
 
 =item lock VARIABLE
@@ -148,7 +148,7 @@ C<lock(\$a)> is equivalent to C<lock($a)>, while C<lock(\\$a)> is not.
 
 C<async> creates a thread to execute the block immediately following
 it.  This block is treated as an anonymous sub, and so must have a
-semi-colon after the closing brace. Like C<Thread-&gt;new>, C<async>
+semi-colon after the closing brace. Like C<< Thread->new >>, C<async>
 returns a thread object.
 
 =item Thread->self
@@ -168,7 +168,7 @@ does a C<cond_signal> or C<cond_broadcast> for that same locked
 variable. The variable that C<cond_wait> blocked on is relocked
 after the C<cond_wait> is satisfied.  If there are multiple threads
 C<cond_wait>ing on the same variable, all but one will reblock waiting
-to reaquire the lock on the variable.  (So if you're only using
+to re-acquire the lock on the variable.  (So if you're only using
 C<cond_wait> for synchronization, give up the lock as soon as
 possible.)
 

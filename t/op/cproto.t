@@ -3,11 +3,11 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
+    require './test.pl';
+    set_up_inc('../lib');
 }
 
-BEGIN { require './test.pl'; }
-plan tests => 248;
+plan tests => 254;
 
 while (<DATA>) {
     chomp;
@@ -20,7 +20,10 @@ while (<DATA>) {
 	like( $@, qr/Can't find an opnumber for/, $keyword );
     }
     else {
-	is( "(".prototype("CORE::".$keyword).")", $proto, $keyword );
+	is(
+	    "(".(prototype("CORE::".$keyword) // 'undef').")", $proto,
+	    $keyword
+	);
     }
 }
 
@@ -33,7 +36,13 @@ __PACKAGE__ ()
 __DATA__ undef
 __END__ undef
 __SUB__ ()
+AUTOLOAD undef
+BEGIN undef
 CORE unknown
+DESTROY undef
+END undef
+INIT undef
+CHECK undef
 abs (_)
 accept (**)
 alarm (_)
@@ -66,7 +75,7 @@ delete undef
 die (@)
 do undef
 dump ()
-each (+)
+each (\[%@])
 else undef
 elsif undef
 endgrent ()
@@ -120,7 +129,7 @@ getservent ()
 getsockname (*)
 getsockopt (*$$)
 given undef
-glob undef
+glob (_;)
 gmtime (;$)
 goto undef
 grep undef
@@ -131,7 +140,7 @@ index ($$;$)
 int (_)
 ioctl (*$$)
 join ($@)
-keys (+)
+keys (\[%@])
 kill (@)
 last undef
 lc (_)
@@ -167,12 +176,12 @@ our undef
 pack ($@)
 package undef
 pipe (**)
-pop (;+)
-pos undef
+pop (;\@)
+pos (;\[$*])
 print undef
 printf undef
-prototype undef
-push (+@)
+prototype (_)
+push (\@@)
 q undef
 qq undef
 qr undef
@@ -198,7 +207,7 @@ rindex ($$;$)
 rmdir (_)
 s undef
 say undef
-scalar undef
+scalar ($)
 seek (*$$)
 seekdir (*$)
 select undef
@@ -215,7 +224,7 @@ setprotoent ($)
 setpwent ()
 setservent ($)
 setsockopt (*$$$)
-shift (;+)
+shift (;\@)
 shmctl ($$$)
 shmget ($$$)
 shmread ($$$$)
@@ -226,14 +235,14 @@ sleep (;$)
 socket (*$$$)
 socketpair (**$$$)
 sort undef
-splice (+;$$@)
+splice (\@;$$@)
 split undef
 sprintf ($@)
 sqrt (_)
 srand (;$)
 stat (;*)
 state undef
-study undef
+study (_)
 sub undef
 substr ($$;$$)
 symlink ($$)
@@ -254,16 +263,16 @@ truncate ($$)
 uc (_)
 ucfirst (_)
 umask (;$)
-undef undef
+undef (;\[$@%&*])
 unless undef
 unlink (@)
 unpack ($_)
-unshift (+@)
+unshift (\@@)
 untie (\[$@%*])
 until undef
 use undef
 utime (@)
-values (+)
+values (\[%@])
 vec ($$$)
 wait ()
 waitpid ($$)

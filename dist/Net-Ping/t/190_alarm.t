@@ -4,11 +4,10 @@
 # Based on code written by radu@netsoft.ro (Radu Greab).
 
 BEGIN {
-  if ($ENV{PERL_CORE}) {
-    unless ($ENV{PERL_TEST_Net_Ping}) {
-      print "1..0 \# Skip: network dependent test\n";
-        exit;
-    }
+  if ($ENV{NO_NETWORK_TESTING} ||
+      ($ENV{PERL_CORE}) && !$ENV{PERL_TEST_Net_Ping}) {
+    print "1..0 \# Skip: network dependent test\n";
+    exit;
   } 
   unless (eval "require Socket") {
     print "1..0 \# Skip: no Socket\n";
@@ -28,6 +27,9 @@ use strict;
 use Test::More tests => 6;
 BEGIN {use_ok 'Net::Ping'};
 
+# Hopefully this is never a routeable host
+my $fail_ip = $ENV{NET_PING_FAIL_IP} || "192.0.2.0";
+
 eval {
   my $timeout = 11;
 
@@ -42,7 +44,7 @@ eval {
     my $ping = Net::Ping->new("tcp", 2);
     # It does not matter if alive or not
     $ping->ping("127.0.0.1");
-    $ping->ping("172.29.249.249");
+    $ping->ping($fail_ip);
     die "alarm failed" if time > $start + $timeout + 1;
   }
 };

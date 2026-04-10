@@ -4,8 +4,8 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
     require './test.pl';
+    set_up_inc('../lib');
     skip_all_if_miniperl("miniperl can't load attributes");
 }
 
@@ -18,7 +18,7 @@ sub eval_ok ($;$) {
     is( $@, '', @_);
 }
 
-fresh_perl_is 'use attributes; print "ok"', 'ok',
+fresh_perl_is 'use attributes; print "ok"', 'ok', {},
    'attributes.pm can load without warnings.pm already loaded';
 
 our $anon1; eval_ok '$anon1 = sub : method { $_[0]++ }';
@@ -30,7 +30,7 @@ eval 'sub e2 ($) : plugh(0,0) xyzzy ;';
 like $@, qr/^Invalid CODE attributes: ["']?plugh\(0,0\)["']? /;
 
 eval 'sub e3 ($) : plugh(0,0 xyzzy ;';
-like $@, qr/Unterminated attribute parameter in attribute list at/;
+like $@, qr/^Unterminated attribute parameter in attribute list at \(eval \d+\) line 1\.$/;
 
 eval 'sub e4 ($) : plugh + XYZZY ;';
 like $@, qr/Invalid separator character '[+]' in attribute list at/;
@@ -52,7 +52,7 @@ like $@, qr/^Invalid SCALAR attribute: ["']?plugh["']? at/;
 eval '{my $x : plugh}';
 like $@, qr/^Invalid SCALAR attribute: ["']?plugh["']? at/;
 eval '{my ($x,$y) : plugh(})}';
-like $@, qr/^Invalid SCALAR attribute: ["']?plugh\(}\)["']? at/;
+like $@, qr/^Invalid SCALAR attribute: ["']?plugh\(\}\)["']? at/;
 
 # More syntax tests from the attributes manpage
 eval 'my $x : switch(10,foo(7,3))  :  expensive;';
@@ -64,9 +64,9 @@ like $@, qr/^Invalid SCALAR attribute: ["']?_5x5["']? at/;
 eval 'my $x : locked method;';
 like $@, qr/^Invalid SCALAR attributes: ["']?locked : method["']? at/;
 eval 'my $x : switch(10,foo();';
-like $@, qr/^Unterminated attribute parameter in attribute list at/;
+like $@, qr/^Unterminated attribute parameter in attribute list at \(eval \d+\) line 1\.$/;
 eval q/my $x : Ugly('(');/;
-like $@, qr/^Unterminated attribute parameter in attribute list at/;
+like $@, qr/^Unterminated attribute parameter in attribute list at \(eval \d+\) line 1\.$/;
 eval 'my $x : 5x5;';
 like $@, qr/error/;
 eval 'my $x : Y2::north;';
@@ -84,10 +84,10 @@ eval 'my A $x : plugh;';
 is $@, '';
 
 eval 'package Cat; my Cat @socks;';
-like $@, '';
+is $@, '';
 
 eval 'my Cat %nap;';
-like $@, '';
+is $@, '';
 
 sub X::MODIFY_CODE_ATTRIBUTES { die "$_[0]" }
 sub X::foo { 1 }
@@ -111,6 +111,11 @@ is "@attrs", "method Z";
 eval 'package A; sub PS : lvalue';
 @attrs = eval 'attributes::get \&A::PS';
 is "@attrs", "lvalue";
+
+# Multiple attributes at once
+eval 'package A; sub PS2 : lvalue method';
+@attrs = eval 'attributes::get \&A::PS2';
+is "@attrs", "lvalue method", 'Multiple builtin attributes can be set at once';
 
 # Test attributes on predeclared subroutines, after definition
 eval 'package A; sub PS : lvalue; sub PS { }';
@@ -160,24 +165,24 @@ like $@, qr/Can't declare scalar dereference in "my"/;
 
 my @code = qw(lvalue method);
 my @other = qw(shared);
-my @deprecated = qw(locked unique);
+my @deprecated = qw();
+my @invalid = qw(unique locked);
 my %valid;
 $valid{CODE} = {map {$_ => 1} @code};
 $valid{SCALAR} = {map {$_ => 1} @other};
 $valid{ARRAY} = $valid{HASH} = $valid{SCALAR};
 my %deprecated;
-$deprecated{CODE} = { locked => 1 };
-$deprecated{ARRAY} = $deprecated{HASH} = $deprecated{SCALAR} = { unique => 1 };
 
 our ($scalar, @array, %hash);
 foreach my $value (\&foo, \$scalar, \@array, \%hash) {
     my $type = ref $value;
     foreach my $negate ('', '-') {
-	foreach my $attr (@code, @other, @deprecated) {
+	foreach my $attr (@code, @other, @deprecated, @invalid) {
 	    my $attribute = $negate . $attr;
 	    eval "use attributes __PACKAGE__, \$value, '$attribute'";
 	    if ($deprecated{$type}{$attr}) {
-		like $@, qr/^Attribute "$attr" is deprecated at \(eval \d+\)/,
+		like $@, qr/^Attribute "$attr" is deprecated, (?#:
+                            )and will disappear in Perl 5.28 at \(eval \d+\)/,
 		    "$type attribute $attribute deprecated";
 	    } elsif ($valid{$type}{$attr}) {
 		if ($attribute eq '-shared') {
@@ -313,6 +318,16 @@ foreach my $test (@tests) {
      'Calling closure proto with no @_ that returns a lexical';
 }
 
+# Referencing closure prototypes
+{
+  package buckbuck;
+  my @proto;
+  sub MODIFY_CODE_ATTRIBUTES { push @proto, $_[1], \&{$_[1]}; _: }
+  my $id;
+  () = sub :buck {$id};
+  &::is(@proto, 'referencing closure prototype');
+}
+
 # [perl #68658] Attributes on stately variables
 {
   package thwext;
@@ -372,5 +387,132 @@ unlike runperl(
        ),
        qr/Unbalanced/,
       'attribute errors do not cause op trees to leak';
+
+package ProtoTest {
+    sub MODIFY_CODE_ATTRIBUTES { $Proto = prototype $_[1]; () }
+    sub foo ($) : gelastic {}
+}
+is $ProtoTest::Proto, '$', 'prototypes are visible in attr handlers';
+
+{
+    my $w;
+    local $SIG{__WARN__} = sub { $w = shift };
+    attributes ->import(__PACKAGE__, \&foo, "const");
+    like $w, qr/^Useless use of attribute "const" at /,
+            'Warning for useless const via attributes.pm';
+    $w = '';
+    attributes ->import(__PACKAGE__, \&foo, "const");
+    is $w, '', 'no warning for const if already applied';
+    attributes ->import(__PACKAGE__, \&foo, "-const");
+    is $w, '', 'no warning for -const with attr already applied';
+    attributes ->import(__PACKAGE__, \&bar, "-const");
+    is $w, '', 'no warning for -const with attr not already applied';
+    package ConstTest;
+    sub MODIFY_CODE_ATTRIBUTES {
+        attributes->import(shift, shift, lc shift) if $_[2]; ()
+    }
+    $_ = 32487;
+    my $sub = eval '+sub : Const { $_ }';
+    ::is $w, '',
+     'no warning for :const applied to closure protosub via attributes.pm';
+    undef $_;
+    ::is &$sub, 32487,
+        'applying const attr via attributes.pm';
+}
+
+# [perl #123817] Attributes in list-type operators
+# These tests used to fail an assertion because the list op generated by
+# the lexical attribute declaration was converted to another op type with
+# the OPpLVAL_INTRO flag still set.  These op types were not expecting that
+# flag to be set, though it was harmless for non-debugging builds.
+package _123817 {
+    sub MODIFY_SCALAR_ATTRIBUTES {()}
+    eval '{my $x : m}';
+    eval '[(my $x : m)]';
+    eval 'formline my $x : m';
+    eval 'return my $x : m';
+}
+
+# [perl #126257]
+# attributed lex var as function arg caused assertion failure
+
+package P126257 {
+    sub MODIFY_SCALAR_ATTRIBUTES {}
+    sub MODIFY_ARRAY_ATTRIBUTES  {}
+    sub MODIFY_HASH_ATTRIBUTES   {}
+    sub MODIFY_CODE_ATTRIBUTES   {}
+    sub foo {}
+    eval { foo(my $x : bar); };
+    ::is $@, "", "RT 126257 scalar";
+    eval { foo(my @x : bar); };
+    ::is $@, "", "RT 126257 array";
+    eval { foo(my %x : bar); };
+    ::is $@, "", "RT 126257 hash";
+    eval { foo(sub : bar {}); };
+    ::is $@, "", "RT 126257 sub";
+}
+
+# RT #129099
+# Setting an attribute on a BEGIN prototype causes
+#       BEGIN { require "attributes"; ... }
+# to be compiled, which caused problems with ops being prematurely
+# freed when CvSTART was transferred from the old BEGIN to the new BEGIN
+
+is runperl(
+       prog => 'package Foo; sub MODIFY_CODE_ATTRIBUTES {()} '
+             . 'sub BEGIN :Foo; print qq{OK\n}',
+       stderr => 1,
+   ),
+   "OK\n",
+  'RT #129099 BEGIN';
+is runperl(
+       prog => 'package Foo; sub MODIFY_CODE_ATTRIBUTES {()} '
+             . 'no warnings q{prototype}; sub BEGIN() :Foo; print qq{OK\n}',
+       stderr => 1,
+   ),
+   "OK\n",
+  'RT #129099 BEGIN()';
+
+
+#129086
+# When printing error message for an attribute arg without closing ')',
+# if the buffer got reallocated during the scan of the arg, the error
+# message would try to use the old buffer
+fresh_perl_like(
+   'my $abc: abcdefg(' . 'x' x 195 . "\n" . 'x' x 8200 ."\n",
+    qr/^Unterminated attribute parameter in attribute list at - line 1\.$/,
+    { stderr => 1 },
+    'RT #129086 attr(00000'
+);
+
+TODO: {
+    local $TODO = 'RT #3605: Attribute syntax causes parsing errors near my $var :';
+    my $out = runperl(prog => <<'EOP', stderr => 1);
+    $ref = \($1 ? my $var : my $othervar);
+EOP
+    unlike($out, qr/Invalid separator character/, 'RT #3605: Errors near attribute colon need a better error message');
+    is($out, '', 'RT #3605: $a ? my $var : my $othervar is perfectly valid syntax');
+}
+
+fresh_perl_is('sub dummy {} our $dummy : Dummy', <<EOS, {},
+Invalid SCALAR attribute: Dummy at - line 1.
+BEGIN failed--compilation aborted at - line 1.
+EOS
+              "attribute on our scalar with sub of same name");
+
+fresh_perl_is('sub dummy {} our @dummy : Dummy', <<EOS, {},
+Invalid ARRAY attribute: Dummy at - line 1.
+BEGIN failed--compilation aborted at - line 1.
+EOS
+              "attribute on our array with sub of same name");
+
+fresh_perl_is('sub dummy {} our %dummy : Dummy', <<EOS, {},
+Invalid HASH attribute: Dummy at - line 1.
+BEGIN failed--compilation aborted at - line 1.
+EOS
+              "attribute on our hash with sub of same name");
+
+fresh_perl_is('$_ = ""; s/^/ { my $x : shared = 1; } /e;', "", {},
+              "attributes in sub-parse");
 
 done_testing();

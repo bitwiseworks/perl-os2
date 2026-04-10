@@ -16,7 +16,7 @@ features. If you're looking for an introduction to object-oriented
 programming in Perl, please see L<perlootut>.
 
 In order to understand Perl objects, you first need to understand
-references in Perl. See L<perlref> for details.
+references in Perl. See L<perlreftut> for details.
 
 This document describes all of Perl's object-oriented (OO) features
 from the ground up. If you're just looking to write some
@@ -131,7 +131,7 @@ documented methods on the object.
 Note, however, that (unlike most other OO languages) Perl does not
 ensure or enforce encapsulation in any way. If you want objects to
 actually I<be> opaque you need to arrange for that yourself. This can
-be done in a varierty of ways, including using L<"Inside-Out objects">
+be done in a variety of ways, including using L</"Inside-Out objects">
 or modules from CPAN.
 
 =head3 Objects Are Blessed; Variables Are Not
@@ -148,10 +148,10 @@ demonstrated with this code:
   my $bar = $foo;
 
   bless $foo, 'Class';
-  print blessed( $bar );      # prints "Class"
+  print blessed( $bar ) // 'not blessed';    # prints "Class"
 
   $bar = "some other value";
-  print blessed( $bar );      # prints undef
+  print blessed( $bar ) // 'not blessed';    # prints "not blessed"
 
 When we call C<bless> on a variable, we are actually blessing the
 underlying data structure that the variable refers to. We are not
@@ -163,7 +163,7 @@ object.
 You will sometimes see older books or documentation mention "blessing a
 reference" or describe an object as a "blessed reference", but this is
 incorrect. It isn't the reference that is blessed as an object; it's
-the thing the reference refers to (i.e. the referent).
+the thing the reference refers to (I<i.e.>, the referent).
 
 =head2 A Class is Simply a Package
 X<class> X<package> X<@ISA> X<inheritance>
@@ -179,12 +179,12 @@ Each package contains a special array called C<@ISA>. The C<@ISA> array
 contains a list of that class's parent classes, if any. This array is
 examined when Perl does method resolution, which we will cover later.
 
-It is possible to manually set C<@ISA>, and you may see this in older
-Perl code. Much older code also uses the L<base> pragma. For new code,
-we recommend that you use the L<parent> pragma to declare your parents.
-This pragma will take care of setting C<@ISA>.  It will also load the
-parent classes and make sure that the package doesn't inherit from
-itself.
+Calling methods from a package means it must be loaded, of course, so
+you will often want to load a module and add it to C<@ISA> at the same
+time. You can do so in a single step using the L<parent> pragma.
+(In older code you may encounter the L<base> pragma, which is nowadays
+discouraged except when you have to work with the equally discouraged
+L<fields> pragma.)
 
 However the parent classes are set, the package's C<@ISA> variable will
 contain a list of those parents. This is simply a list of scalars, each
@@ -232,7 +232,7 @@ object (or class name), and the right hand side is the method name.
   my $pod = File->new( 'perlobj.pod', $data );
   $pod->save();
 
-The C<< -> >> syntax is also used when dereferencing a reference.  It
+The C<< -> >> syntax is also used when dereferencing a reference. It
 looks like the same operator, but these are two different operations.
 
 When you call a method, the thing on the left side of the arrow is
@@ -325,14 +325,12 @@ methods.
   sub speak {
       my $self = shift;
 
-      $self->SUPER::speak();
-
       say 'A';
   }
 
   package B;
 
-  use parent 'A';
+  use parent -norequire, 'A';
 
   sub speak {
       my $self = shift;
@@ -344,7 +342,7 @@ methods.
 
   package C;
 
-  use parent 'B';
+  use parent -norequire, 'B';
 
   sub speak {
       my $self = shift;
@@ -366,7 +364,7 @@ In this example, we will get the following output:
 This demonstrates how C<SUPER> is resolved. Even though the object is
 blessed into the C<C> class, the C<speak()> method in the C<B> class
 can still call C<SUPER::speak()> and expect it to correctly look in the
-parent class of C<B> (i.e the class the method call is in), not in the
+parent class of C<B> (I<i.e.>, the class the method call is in), not in the
 parent class of C<C> (i.e. the class the object belongs to).
 
 There are rare cases where this package-based resolution can be a
@@ -491,8 +489,8 @@ As you can see, we've stored the path and file data in the object
 itself. Remember, under the hood, this object is still just a hash.
 Later, we'll write accessors to manipulate this data.
 
-For our File::MP3 class, we can check to make sure that the path we're
-given ends with ".mp3":
+For our C<File::MP3> class, we can check to make sure that the path
+we're given ends with ".mp3":
 
   package File::MP3;
 
@@ -583,6 +581,34 @@ X<method>
 Perl supports several other ways to call methods besides the C<<
 $object->method() >> usage we've seen so far.
 
+=head3 Method Names with a Fully Qualified Name
+
+Perl allows you to call methods using their fully qualified name (the
+package and method name):
+
+  my $mp3 = File::MP3->new( 'Regin.mp3', $data );
+  $mp3->File::save();
+
+When you call a fully qualified method name like C<File::save>, the method
+resolution search for the C<save> method starts in the C<File> class,
+skipping any C<save> method the C<File::MP3> class may have defined. It
+still searches the C<File> class's parents if necessary.
+
+While this feature is most commonly used to explicitly call methods
+inherited from an ancestor class, there is no technical restriction
+that enforces this:
+
+  my $obj = Tree->new();
+  $obj->Dog::bark();
+
+This calls the C<bark> method from class C<Dog> on an object of class
+C<Tree>, even if the two classes are completely unrelated. Use this
+with great care.
+
+The C<SUPER> pseudo-class that was described earlier is I<not> the same
+as calling a method with a fully-qualified name. See the earlier
+L</Inheritance> section for details.
+
 =head3 Method Names as Strings
 
 Perl lets you use a scalar variable containing a string as a method
@@ -626,7 +652,7 @@ this idiom in the wild combined with a call to C<can>:
       $object->$meth();
   }
 
-=head3 Deferencing Method Call
+=head3 Dereferencing Method Call
 
 Perl also lets you use a dereferenced scalar reference in a method
 call. That's a mouthful, so let's look at some code:
@@ -634,7 +660,7 @@ call. That's a mouthful, so let's look at some code:
   $file->${ \'save' };
   $file->${ returns_scalar_ref() };
   $file->${ \( returns_scalar() ) };
-  $file->${ returns_sub_ref() };
+  $file->${ returns_ref_to_sub_ref() };
 
 This works if the dereference produces a string I<or> a subroutine
 reference.
@@ -687,10 +713,10 @@ thing as well:
 =head3 Indirect Object Syntax
 X<indirect object>
 
-B<Outside of the file handle case, use of this syntax is discouraged,
-as it can confuse the Perl interpreter. See below for more details.>
+B<Outside of the file handle case, use of this syntax is discouraged as
+it can confuse the Perl interpreter. See below for more details.>
 
-Perl suports another method invocation syntax called "indirect object"
+Perl supports another method invocation syntax called "indirect object"
 notation. This syntax is called "indirect" because the method comes
 before the object it is being invoked on.
 
@@ -721,9 +747,19 @@ particularly for constructors, so you may still find it in the wild.
 However, we encourage you to avoid using it in new code.
 
 You can force Perl to interpret the bareword as a class name by
-appending "::" to it, like we saw earlier:
+appending C<::> to it, like we saw earlier:
 
   my $file = new File:: $path, $data;
+
+Indirect object syntax is only available when the 
+L<C<"indirect">|feature/The 'indirect' feature> named feature is enabled.
+This is enabled by default, but can be disabled if requested.  This
+feature is present in older feature version bundles, but was removed
+from the C<:5.36> bundle; so a L<C<use VERSION>|perlfunc/use VERSION>
+declaration of C<v5.36> or above will also disable the feature.
+
+    use v5.36;
+    # indirect object syntax is no longer available
 
 =head2 C<bless>, C<blessed>, and C<ref>
 
@@ -756,7 +792,7 @@ contain a reference to a blessed object, the C<blessed> function
 returns C<undef>.
 
 Note that C<blessed($thing)> will also return false if C<$thing> has
-been blessed into a class named "0". This is a possible, but quite
+been blessed into a class named "0". This is possible, but quite
 pathological. Don't create a class named "0" unless you know what
 you're doing.
 
@@ -852,7 +888,7 @@ returned to the caller.
 
 The fully qualified method name that was called is available in the
 C<$AUTOLOAD> package global for your class. Since this is a global, if
-you want to refer to do it without a package name prefix under C<strict
+you want to refer to it without a package name prefix under C<strict
 'vars'>, you need to declare it.
 
   # XXX - this is a terrible way to implement accessors, but it makes
@@ -877,7 +913,7 @@ you want to refer to do it without a package name prefix under C<strict
 Without the C<our $AUTOLOAD> declaration, this code will not compile
 under the L<strict> pragma.
 
-As the comment says, this is not a good way to implement accessors. 
+As the comment says, this is not a good way to implement accessors.
 It's slow and too clever by far. However, you may see this as a way to
 provide accessors in older Perl code. See L<perlootut> for
 recommendations on OO coding in Perl.
@@ -905,15 +941,22 @@ argument. It does not receive any additional arguments. However, the
 C<$_[0]> variable will be read-only in the destructor, so you cannot
 assign a value to it.
 
-If your C<DESTROY> method throws an error, this error will be ignored.
-It will not be sent to C<STDERR> and it will not cause the program to
-die. However, if your destructor is running inside an C<eval {}> block,
-then the error will change the value of C<$@>.
+If your C<DESTROY> method throws an exception, this will not cause
+any control transfer beyond exiting the method.  The exception will be
+reported to C<STDERR> as a warning, marked "(in cleanup)", and Perl will
+continue with whatever it was doing before.
 
-Because C<DESTROY> methods can be called at any time, you should
-localize any global variables you might update in your C<DESTROY>. In
-particular, if you use C<eval {}> you should localize C<$@>, and if you
-use C<system> or backticks, you should localize C<$?>.
+Because C<DESTROY> methods can be called at any time, you should localize
+any global status variables that might be set by anything you do in
+your C<DESTROY> method.  If you are in doubt about a particular status
+variable, it doesn't hurt to localize it.  There are five global status
+variables, and the safest way is to localize all five of them:
+
+  sub DESTROY {
+      local($., $@, $!, $^E, $?);
+      my $self = shift;
+      ...;
+  }
 
 If you define an C<AUTOLOAD> in your class, then Perl will call your
 C<AUTOLOAD> to handle the C<DESTROY> method. You can prevent this by
@@ -951,7 +994,7 @@ C<Devel::GlobalDestruction> module on CPAN.
 
 If your C<DESTROY> method issues a warning during global destruction,
 the Perl interpreter will append the string " during global
-destruction" the warning.
+destruction" to the warning.
 
 During global destruction, Perl will always garbage collect objects
 before unblessed references. See L<perlhacktips/PERL_DESTRUCT_LEVEL>
@@ -968,8 +1011,7 @@ Here's an example of a module as a blessed scalar:
 
   package Time;
 
-  use strict;
-  use warnings;
+  use v5.36;
 
   sub new {
       my $class = shift;
@@ -980,7 +1022,7 @@ Here's an example of a module as a blessed scalar:
 
   sub epoch {
       my $self = shift;
-      return ${ $self };
+      return $$self;
   }
 
   my $time = Time->new();
@@ -1007,8 +1049,7 @@ to support inside-out object implementations.
 
   package Time;
 
-  use strict;
-  use warnings;
+  use v5.36;
 
   use Hash::Util::FieldHash 'fieldhash';
 
@@ -1038,7 +1079,7 @@ to support inside-out object implementations.
 The pseudo-hash feature was an experimental feature introduced in
 earlier versions of Perl and removed in 5.10.0. A pseudo-hash is an
 array reference which can be accessed using named keys like a hash. You
-may run in to some code in the wild which uses it. See the L<fields>
+may run into some code in the wild which uses it. See the L<fields>
 pragma for more information.
 
 =head1 SEE ALSO

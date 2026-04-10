@@ -8,20 +8,20 @@ IO::Handle - supply object methods for I/O handles
 
     use IO::Handle;
 
-    $io = IO::Handle->new();
+    my $io = IO::Handle->new();
     if ($io->fdopen(fileno(STDIN),"r")) {
         print $io->getline;
         $io->close;
     }
 
-    $io = IO::Handle->new();
+    my $io = IO::Handle->new();
     if ($io->fdopen(fileno(STDOUT),"w")) {
         $io->print("Some text\n");
     }
 
     # setvbuf is not available by default on Perls 5.8.0 and later.
     use IO::Handle '_IOLBF';
-    $io->setvbuf($buffer_var, _IOLBF, 1024);
+    $io->setvbuf(my $buffer_var, _IOLBF, 1024);
 
     undef $io;       # automatically closes the file if it's open
 
@@ -122,8 +122,8 @@ otherwise.
 This works like <$io> described in L<perlop/"I/O Operators">
 except that it's more readable and can be safely called in a
 list context but still returns just one line.  If used as the conditional
-+within a C<while> or C-style C<for> loop, however, you will need to
-+emulate the functionality of <$io> with C<< defined($_ = $io->getline) >>.
+within a C<while> or C-style C<for> loop, however, you will need to
+emulate the functionality of <$io> with C<< defined($_ = $io->getline) >>.
 
 =item $io->getlines
 
@@ -139,9 +139,12 @@ guaranteed.
 
 =item $io->write ( BUF, LEN [, OFFSET ] )
 
-This C<write> is like C<write> found in C, that is it is the
+This C<write> is somewhat like C<write> found in C, in that it is the
 opposite of read. The wrapper for the perl C<write> function is
-called C<format_write>.
+called C<format_write>. However, whilst the C C<write> function returns
+the number of bytes written, this C<write> function simply returns true
+if successful (like C<print>). A more C-like C<write> is C<syswrite>
+(see above).
 
 =item $io->error
 
@@ -188,6 +191,14 @@ current setting if C<BOOL> is not given.
 
 If an error occurs C<blocking> will return undef and C<$!> will be set.
 
+=item binmode( [LAYER] )
+
+C<binmode> sets C<binmode> on the underlying C<IO> object, as documented
+in C<perldoc -f binmode>.
+
+C<binmode> accepts one optional parameter, which is the layer to be
+passed on to the C<binmode> call.
+
 =back
 
 
@@ -231,7 +242,7 @@ the taint-clean flag failed. (eg invalid handle)
 =head1 NOTE
 
 An C<IO::Handle> object is a reference to a symbol/GLOB reference (see
-the C<Symbol> package).  Some modules that
+the L<Symbol> package).  Some modules that
 inherit from C<IO::Handle> may want to keep object related variables
 in the hash table part of the GLOB. In an attempt to prevent modules
 trampling on each other I propose the that any such module should prefix
@@ -257,21 +268,19 @@ Derived from FileHandle.pm by Graham Barr E<lt>F<gbarr@pobox.com>E<gt>
 
 =cut
 
-use 5.006_001;
+use 5.008_001;
 use strict;
-our($VERSION, @EXPORT_OK, @ISA);
 use Carp;
 use Symbol;
 use SelectSaver;
 use IO ();	# Load the XS module
 
 require Exporter;
-@ISA = qw(Exporter);
+our @ISA = qw(Exporter);
 
-$VERSION = "1.33";
-$VERSION = eval $VERSION;
+our $VERSION = "1.55";
 
-@EXPORT_OK = qw(
+our @EXPORT_OK = qw(
     autoflush
     output_field_separator
     output_record_separator
@@ -363,7 +372,7 @@ sub fdopen {
     my ($io, $fd, $mode) = @_;
     local(*GLOB);
 
-    if (ref($fd) && "".$fd =~ /GLOB\(/o) {
+    if (ref($fd) && "$fd" =~ /GLOB\(/o) {
 	# It's a glob reference; Alias it as we cannot get name of anon GLOBs
 	my $n = qualify(*GLOB);
 	*GLOB = *{*$fd};
@@ -430,26 +439,6 @@ sub say {
     print $this @_;
 }
 
-# Special XS wrapper to make them inherit lexical hints from the caller.
-_create_getline_subs( <<'END' ) or die $@;
-sub getline {
-    @_ == 1 or croak 'usage: $io->getline()';
-    my $this = shift;
-    return scalar <$this>;
-} 
-
-sub getlines {
-    @_ == 1 or croak 'usage: $io->getlines()';
-    wantarray or
-	croak 'Can\'t call $io->getlines in a scalar context, use $io->getline';
-    my $this = shift;
-    return <$this>;
-}
-1; # return true for error checking
-END
-
-*gets = \&getline;  # deprecated
-
 sub truncate {
     @_ == 2 or croak 'usage: $io->truncate(LEN)';
     truncate($_[0], $_[1]);
@@ -491,7 +480,7 @@ sub stat {
 ##
 
 sub autoflush {
-    my $old = new SelectSaver qualify($_[0], caller);
+    my $old = SelectSaver->new(qualify($_[0], caller));
     my $prev = $|;
     $| = @_ > 1 ? $_[1] : 1;
     $prev;
@@ -531,7 +520,7 @@ sub input_line_number {
 
 sub format_page_number {
     my $old;
-    $old = new SelectSaver qualify($_[0], caller) if ref($_[0]);
+    $old = SelectSaver->new(qualify($_[0], caller)) if ref($_[0]);
     my $prev = $%;
     $% = $_[1] if @_ > 1;
     $prev;
@@ -539,7 +528,7 @@ sub format_page_number {
 
 sub format_lines_per_page {
     my $old;
-    $old = new SelectSaver qualify($_[0], caller) if ref($_[0]);
+    $old = SelectSaver->new(qualify($_[0], caller)) if ref($_[0]);
     my $prev = $=;
     $= = $_[1] if @_ > 1;
     $prev;
@@ -547,7 +536,7 @@ sub format_lines_per_page {
 
 sub format_lines_left {
     my $old;
-    $old = new SelectSaver qualify($_[0], caller) if ref($_[0]);
+    $old = SelectSaver->new(qualify($_[0], caller)) if ref($_[0]);
     my $prev = $-;
     $- = $_[1] if @_ > 1;
     $prev;
@@ -555,7 +544,7 @@ sub format_lines_left {
 
 sub format_name {
     my $old;
-    $old = new SelectSaver qualify($_[0], caller) if ref($_[0]);
+    $old = SelectSaver->new(qualify($_[0], caller)) if ref($_[0]);
     my $prev = $~;
     $~ = qualify($_[1], caller) if @_ > 1;
     $prev;
@@ -563,7 +552,7 @@ sub format_name {
 
 sub format_top_name {
     my $old;
-    $old = new SelectSaver qualify($_[0], caller) if ref($_[0]);
+    $old = SelectSaver->new(qualify($_[0], caller)) if ref($_[0]);
     my $prev = $^;
     $^ = qualify($_[1], caller) if @_ > 1;
     $prev;
@@ -622,7 +611,7 @@ sub ioctl {
 # a sub called constant to determine if a constant existed -- GMB
 #
 # The SEEK_* and _IO?BF constants were the only constants at that time
-# any new code should just chech defined(&CONSTANT_NAME)
+# any new code should just check defined(&CONSTANT_NAME)
 
 sub constant {
     no strict 'refs';
@@ -637,7 +626,7 @@ sub constant {
 sub printflush {
     my $io = shift;
     my $old;
-    $old = new SelectSaver qualify($io, caller) if ref($io);
+    $old = SelectSaver->new(qualify($io, caller)) if ref($io);
     local $| = 1;
     if(ref($io)) {
         print $io @_;
@@ -645,6 +634,19 @@ sub printflush {
     else {
 	print @_;
     }
+}
+
+################################################
+## Binmode
+##
+
+sub binmode {
+    ( @_ == 1 or @_ == 2 ) or croak 'usage $fh->binmode([LAYER])';
+
+    my($fh, $layer) = @_;
+
+    return binmode $$fh unless $layer;
+    return binmode $$fh, $layer;
 }
 
 1;

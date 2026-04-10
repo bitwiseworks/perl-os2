@@ -1,9 +1,13 @@
 #!/usr/bin/perl
+
+use strict;
+use warnings;
+
 #
 # Regular read-write tests with caching disabled
 # (Same as 01_gen.t)
 #
-my $file = "tf$$.txt";
+my $file = "tf25-$$.txt";
 
 print "1..68\n";
 
@@ -11,6 +15,7 @@ my $N = 1;
 use Tie::File;
 print "ok $N\n"; $N++;
 
+my @a;
 my $o = tie @a, 'Tie::File', $file, autochomp => 0, autodefer => 0, memory => 0;
 print $o ? "ok $N\n" : "not ok $N\n";
 $N++;
@@ -91,7 +96,7 @@ sub check_contents {
   my $x = join $:, @c, '';
   local *FH = $o->{fh};
   seek FH, 0, SEEK_SET;
-#  my $open = open FH, "< $file";
+#  my $open = open FH, '<', $file;
   my $a;
   { local $/; $a = <FH> }
   $a = "" unless defined $a;

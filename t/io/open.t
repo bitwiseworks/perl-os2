@@ -2,15 +2,25 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
     require './test.pl';
+    set_up_inc('../lib');
 }
 
 $|  = 1;
 use warnings;
 use Config;
 
-plan tests => 119;
+plan tests => 186 + 6*3 + 6*2;
+
+sub ok_cloexec {
+    SKIP: {
+	skip "no fcntl", 1 unless $Config{d_fcntl};
+	my $fd = fileno($_[0]);
+	fresh_perl_is(qq(
+	    print open(F, "+<&=$fd") ? 1 : 0, "\\n";
+	), "0\n", {}, "not inherited across exec");
+    }
+}
 
 my $Perl = which_perl();
 
@@ -20,6 +30,7 @@ my $afile = tempfile();
 
     $! = 0;  # the -f above will set $! if $afile doesn't exist.
     ok( open(my $f,"+>$afile"),  'open(my $f, "+>...")' );
+    ok_cloexec($f);
 
     binmode $f;
     ok( -f $afile,              '       its a file');
@@ -40,6 +51,7 @@ my $afile = tempfile();
 
 {
     ok( open(my $f,'>', $afile),        "open(my \$f, '>', $afile)" );
+    ok_cloexec($f);
     ok( (print $f "a row\n"),           '       print');
     ok( close($f),                      '       close' );
     ok( -s $afile < 10,                 '       -s' );
@@ -47,6 +59,7 @@ my $afile = tempfile();
 
 {
     ok( open(my $f,'>>', $afile),       "open(my \$f, '>>', $afile)" );
+    ok_cloexec($f);
     ok( (print $f "a row\n"),           '       print' );
     ok( close($f),                      '       close' );
     ok( -s $afile > 10,                 '       -s'    );
@@ -54,6 +67,7 @@ my $afile = tempfile();
 
 {
     ok( open(my $f, '<', $afile),       "open(my \$f, '<', $afile)" );
+    ok_cloexec($f);
     my @rows = <$f>;
     is( scalar @rows, 2,                '       readline, list context' );
     is( $rows[0], "a row\n",            '       first line read' );
@@ -65,6 +79,7 @@ my $afile = tempfile();
     ok( -s $afile < 20,                 '-s' );
 
     ok( open(my $f, '+<', $afile),      'open +<' );
+    ok_cloexec($f);
     my @rows = <$f>;
     is( scalar @rows, 2,                '       readline, list context' );
     ok( seek($f, 0, 1),                 '       seek cur' );
@@ -79,6 +94,7 @@ my $afile = tempfile();
     $Perl -e "print qq(a row\\n); print qq(another row\\n)"
 EOC
 
+    ok_cloexec($f);
     my @rows = <$f>;
     is( scalar @rows, 2,                '       readline, list context' );
     ok( close($f),                      '       close' );
@@ -88,6 +104,7 @@ EOC
     $Perl -pe "s/^not //"
 EOC
 
+    ok_cloexec($f);
     my @rows = <$f>;
     my $test = curr_test;
     print $f "not ok $test - piped in\n";
@@ -120,6 +137,7 @@ like( $@, qr/Bad filehandle:\s+some_glob/,          '       right error' );
     unlink($afile) if -f $afile;
 
     ok( open(local $f,"+>$afile"),       'open local $f, "+>", ...' );
+    ok_cloexec($f);
     binmode $f;
 
     ok( -f $afile,                      '       -f' );
@@ -140,6 +158,7 @@ like( $@, qr/Bad filehandle:\s+some_glob/,          '       right error' );
 
 {
     ok( open(local $f,'>', $afile),     'open local $f, ">", ...' );
+    ok_cloexec($f);
     ok( (print $f "a row\n"),           '       print');
     ok( close($f),                      '       close');
     ok( -s $afile < 10,                 '       -s' );
@@ -147,6 +166,7 @@ like( $@, qr/Bad filehandle:\s+some_glob/,          '       right error' );
 
 {
     ok( open(local $f,'>>', $afile),    'open local $f, ">>", ...' );
+    ok_cloexec($f);
     ok( (print $f "a row\n"),           '       print');
     ok( close($f),                      '       close');
     ok( -s $afile > 10,                 '       -s' );
@@ -154,6 +174,7 @@ like( $@, qr/Bad filehandle:\s+some_glob/,          '       right error' );
 
 {
     ok( open(local $f, '<', $afile),    'open local $f, "<", ...' );
+    ok_cloexec($f);
     my @rows = <$f>;
     is( scalar @rows, 2,                '       readline list context' );
     ok( close($f),                      '       close' );
@@ -163,6 +184,7 @@ ok( -s $afile < 20,                     '       -s' );
 
 {
     ok( open(local $f, '+<', $afile),  'open local $f, "+<", ...' );
+    ok_cloexec($f);
     my @rows = <$f>;
     is( scalar @rows, 2,                '       readline list context' );
     ok( seek($f, 0, 1),                 '       seek cur' );
@@ -177,6 +199,7 @@ ok( -s $afile < 20,                     '       -s' );
     ok( open(local $f, '-|', <<EOC),  'open local $f, "-|", ...' );
     $Perl -e "print qq(a row\\n); print qq(another row\\n)"
 EOC
+    ok_cloexec($f);
     my @rows = <$f>;
 
     is( scalar @rows, 2,                '       readline list context' );
@@ -188,6 +211,7 @@ EOC
     $Perl -pe "s/^not //"
 EOC
 
+    ok_cloexec($f);
     my @rows = <$f>;
     my $test = curr_test;
     print $f "not ok $test - piping\n";
@@ -209,12 +233,14 @@ like( $@, qr/Bad filehandle:\s+$afile/,          '       right error' );
     local *F;
     for (1..2) {
 	ok( open(F, qq{$Perl -le "print 'ok'"|}), 'open to pipe' );
+	ok_cloexec(\*F);
 	is(scalar <F>, "ok\n",  '       readline');
 	ok( close F,            '       close' );
     }
 
     for (1..2) {
 	ok( open(F, "-|", qq{$Perl -le "print 'ok'"}), 'open -|');
+	ok_cloexec(\*F);
 	is( scalar <F>, "ok\n", '       readline');
 	ok( close F,            '       close' );
     }
@@ -224,15 +250,37 @@ like( $@, qr/Bad filehandle:\s+$afile/,          '       right error' );
 # other dupping techniques
 {
     ok( open(my $stdout, ">&", \*STDOUT),       'dup \*STDOUT into lexical fh');
+    ok_cloexec($stdout);
     ok( open(STDOUT,     ">&", $stdout),        'restore dupped STDOUT from lexical fh');
 
     {
-	use strict; # the below should not warn
-	ok( open(my $stdout, ">&", STDOUT),         'dup STDOUT into lexical fh');
+	use strict; # the below should not die
+	for my $dupmode (qw( >& >>& <& +>& +>>& +<& )) {
+	    my $stdout;
+	    ok( eval("open(\$stdout, '$dupmode', STDOUT)"), "dup STDOUT into lexical fh with '$dupmode'" );
+	    is $@, "", "no errors for using '$dupmode' with bareword",
+	    ok_cloexec($stdout);
+	}
+
+	# sanity check
+	for my $xmode (qw( > >> < +> +>> +< )) {
+	    is(
+	        eval("open(my \$fh, '$xmode', STDOUT) unless \$xmode"),
+	        undef,
+	        "open with bareword filename fails to compile with '$xmode'"
+	    );
+	    like $@, qr/^Bareword "STDOUT" not allowed while "strict subs" in use /;
+        }
     }
 
     # used to try to open a file [perl #17830]
     ok( open(my $stdin,  "<&", fileno STDIN),   'dup fileno(STDIN) into lexical fh') or _diag $!;
+    ok_cloexec($stdin);
+
+    fileno(STDIN) =~ /(.)/;
+    ok open($stdin, "<&", $1), 'open ... "<&", $magical_fileno',
+	||  _diag $!;
+    ok_cloexec($stdin);
 }
 
 SKIP: {
@@ -262,22 +310,31 @@ SKIP: {
     }
 
     open($fh0[0], "TEST");
+    ok_cloexec($fh0[0]);
     gimme($fh0[0]);
     like($@, qr/<\$fh0\[...\]> line 1\./, "autoviv fh package aelem");
 
     open($fh1{k}, "TEST");
+    ok_cloexec($fh1{h});
     gimme($fh1{k});
-    like($@, qr/<\$fh1{...}> line 1\./, "autoviv fh package helem");
+    like($@, qr/<\$fh1\{...}> line 1\./, "autoviv fh package helem");
 
     my @fh2;
     open($fh2[0], "TEST");
+    ok_cloexec($fh2[0]);
     gimme($fh2[0]);
     like($@, qr/<\$fh2\[...\]> line 1\./, "autoviv fh lexical aelem");
 
     my %fh3;
     open($fh3{k}, "TEST");
+    ok_cloexec($fh3{h});
     gimme($fh3{k});
-    like($@, qr/<\$fh3{...}> line 1\./, "autoviv fh lexical helem");
+    like($@, qr/<\$fh3\{...}> line 1\./, "autoviv fh lexical helem");
+
+    local $/ = *F;  # used to cause an assertion failure
+    gimme($fh3{k});
+    like($@, qr/<\$fh3\{...}> chunk 2\./,
+	'<...> line 1 when $/ is set to a glob');
 }
     
 SKIP: {
@@ -358,7 +415,6 @@ fresh_perl_is(
 
 # [perl #77684] Opening a reference to a glob copy.
 SKIP: {
-    skip_if_miniperl("no dynamic loading on miniperl, so can't load PerlIO::scalar", 1);
     my $var = *STDOUT;
     open my $fh, ">", \$var;
     print $fh "hello";
@@ -376,4 +432,143 @@ SKIP: {
     open my $fh, ">", \$var;
     ok( eval { $fh->autoflush(1); 1 }, '$fh->autoflush(1) lives' );
     ok( $INC{'IO/File.pm'}, "IO::File now loaded" );
+}
+
+sub _117941 { package _117941; open my $a, "TEST" }
+delete $::{"_117941::"};
+_117941();
+pass("no crash when open autovivifies glob in freed package");
+
+# [perl #117265] check for embedded nul in pathnames, allow ending \0 though
+{
+    my $WARN;
+    local $SIG{__WARN__} = sub { $WARN = shift };
+    my $temp = tempfile();
+    my $temp_match = quotemeta $temp;
+
+    # create the file, so we can check nothing actually touched it
+    open my $temp_fh, ">", $temp;
+    close $temp_fh;
+    ok(utime(time()-10, time(), $temp), "set mtime to a known value");
+    ok(chmod(0666, $temp), "set mode to a known value");
+    my ($final_mode, $final_mtime) = (stat $temp)[2, 9];
+
+    my $fn = "$temp\0.invalid";
+    my $fno = bless \(my $fn2 = "$temp\0.overload"), "OverloadTest";
+    is(open(I, $fn), undef, "open with nul in pathnames since 5.18 [perl #117265]");
+    like($WARN, qr/^Invalid \\0 character in pathname for open: $temp_match\\0\.invalid/,
+         "warn on embedded nul"); $WARN = '';
+    is(open(I, $fno), undef, "open with nul in pathnames since 5.18 [perl #117265] (overload)");
+    like($WARN, qr/^Invalid \\0 character in pathname for open: $temp_match\\0\.overload/,
+         "warn on embedded nul"); $WARN = '';
+
+    is(chmod(0444, $fn), 0, "chmod fails with \\0 in name");
+    like($WARN, qr/^Invalid \\0 character in pathname for chmod: $temp_match\\0\.invalid/,
+         "also on chmod"); $WARN = '';
+
+    is(chmod(0444, $fno), 0, "chmod fails with \\0 in name (overload)");
+    like($WARN, qr/^Invalid \\0 character in pathname for chmod: $temp_match\\0\.overload/,
+         "also on chmod"); $WARN = '';
+
+    is (glob($fn), undef, "glob fails with \\0 in name");
+    like($WARN, qr/^Invalid \\0 character in pattern for glob: $temp_match\\0\.invalid/,
+         "also on glob"); $WARN = '';
+
+    is (glob($fno), undef, "glob fails with \\0 in name (overload)");
+    like($WARN, qr/^Invalid \\0 character in pattern for glob: $temp_match\\0\.overload/,
+         "also on glob"); $WARN = '';
+
+    {
+        no warnings 'syscalls';
+        $WARN = '';
+        is(open(I, $fn), undef, "open with nul with no warnings syscalls");
+        is($WARN, '', "ignore warning on embedded nul with no warnings syscalls");
+    }
+
+    SKIP: {
+        if (is_miniperl && !eval 'require Errno') {
+            skip "Errno not built yet", 8;
+        }
+        require Errno;
+        Errno->import('ENOENT');
+        # check handling of multiple arguments, which the original patch
+        # mis-handled
+        $! = 0;
+        is (unlink($fn, $fn), 0, "check multiple arguments to unlink");
+        is($!+0, &ENOENT, "check errno");
+        $! = 0;
+        is (chmod(0644, $fn, $fn), 0, "check multiple arguments to chmod");
+        is($!+0, &ENOENT, "check errno");
+        $! = 0;
+        is (utime(time, time, $fn, $fn), 0, "check multiple arguments to utime");
+        is($!+0, &ENOENT, "check errno");
+        SKIP: {
+            skip "no chown", 2 unless $Config{d_chown};
+            $! = 0;
+            is(chown(-1, -1, $fn, $fn), 0, "check multiple arguments to chown");
+            is($!+0, &ENOENT, "check errno");
+        }
+    }
+
+    is (unlink($fn), 0, "unlink fails with \\0 in name");
+    like($WARN, qr/^Invalid \\0 character in pathname for unlink: $temp_match\\0\.invalid/,
+         "also on unlink"); $WARN = '';
+
+    is (unlink($fno), 0, "unlink fails with \\0 in name (overload)");
+    like($WARN, qr/^Invalid \\0 character in pathname for unlink: $temp_match\\0\.overload/,
+         "also on unlink"); $WARN = '';
+
+    ok(-f $temp, "nothing removed the temp file");
+    is((stat $temp)[2], $final_mode, "nothing changed its mode");
+    is((stat $temp)[9], $final_mtime, "nothing changes its mtime");
+}
+
+# [perl #125115] Dup to closed filehandle creates file named GLOB(0x...)
+{
+    ok(open(my $fh, "<", "TEST"), "open a handle");
+    ok(close $fh, "and close it again");
+    ok(!open(my $fh2,  ">&", $fh), "should fail to dup the closed handle");
+    # clean up if we failed
+    unlink "$fh";
+}
+
+{
+    package OverloadTest;
+    use overload '""' => sub { ${$_[0]} };
+}
+
+# [perl #115814] open(${\$x}, ...) creates spurious reference to handle in stash
+SKIP: {
+    # The bug doesn't depend on perlio, but perlio provides this nice
+    # way of discerning when a handle actually closes.
+    my($a, $b, $s, $t);
+    $s = "";
+    open($a, ">:scalar:perlio", \$s) or die;
+    print {$a} "abc";
+    is $s, "", "buffering delays writing to scalar (simple open)";
+    $a = undef;
+    is $s, "abc", "buffered write happens on dropping handle ref (simple open)";
+    $t = "";
+    open(${\$b}, ">:scalar:perlio", \$t) or die;
+    print {$b} "xyz";
+    is $t, "", "buffering delays writing to scalar (complex open)";
+    $b = undef;
+    is $t, "xyz", "buffered write happens on dropping handle ref (complex open)";
+    is scalar(grep { /\A_GEN_/ } keys %::), 0, "no gensym appeared in stash";
+}
+
+# [perl #16113] returning handle in localised glob
+{
+    my $tfile = tempfile();
+    open(my $twrite, ">", $tfile) or die $!;
+    print {$twrite} "foo\nbar\n" or die $!;
+    close $twrite or die $!;
+    $twrite = undef;
+    my $tread = do {
+	local *F;
+	open(F, "<", $tfile) or die $!;
+	*F;
+    };
+    is scalar(<$tread>), "foo\n", "IO handle returned in localised glob";
+    close $tread;
 }

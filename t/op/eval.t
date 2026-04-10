@@ -2,11 +2,11 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
     require './test.pl';
+    set_up_inc('../lib');
 }
 
-plan(tests => 126);
+plan(tests => 172);
 
 eval 'pass();';
 
@@ -221,7 +221,7 @@ is(do {
 }
 
 # Check that eval catches bad goto calls
-#   (BUG ID 20010305.003)
+#   (BUG ID 20010305.003 (#5963))
 {
     eval {
 	eval { goto foo; };
@@ -248,7 +248,7 @@ is(do {
 {
     $@ = 5;
     eval q{};
-    cmp_ok(length $@, '==', 0, '[ID 20020623.002] eval "" doesn\'t clear $@');
+    cmp_ok(length $@, '==', 0, '[ID 20020623.002 (#9721)] eval "" doesn\'t clear $@');
 }
 
 # DAPM Nov-2002. Perl should now capture the full lexical context during
@@ -377,6 +377,70 @@ our $x = 1;
     is(DB::db4(),  3);
     is(DB::db5(),  3);
     is(db6(),      4);
+
+    # [GH #19370]
+    local $TODO = "outside not available when needed";
+    my sub d6 {
+        DB::db3();
+    }
+    is(d6(), 3);
+    my $y;
+    my $d7 = sub {
+        $y;
+        DB::db3();
+    };
+    is($d7->(), 3);
+}
+
+{
+    # github 22547
+    # these produce the expected results with 5.40.0
+    local $TODO = "eval from DB outside chain is broken";
+    fresh_perl_is(<<'CODE', "1.1\n1.2\n2\n", {}, "lexical lookup from DB::");
+use builtin qw(ceil);
+use strict;
+
+package DB {
+  sub do_eval { eval shift or $@; }
+}
+
+{
+  my $xx = 1.2;
+  my sub f {
+    print DB::do_eval(shift), "\n";
+  }
+  f('1.1');
+  f('$xx');
+  f('ceil(1.1)');
+}
+CODE
+
+    # subtley different, one of the suggested solutions was to make
+    # CvOUTSIDE a weak reference, but in the case below $f exits before
+    # the eval is called, so the outside link from the closure it returns
+    # would break for a weak reference.
+    fresh_perl_is(<<'CODE', "1.1\n1.2\n2\n", {}, "lexical lookup from DB::");
+use strict;
+
+package DB {
+  sub do_eval { eval shift or $@; }
+}
+
+sub g {
+  my $yy;
+  my $f = sub {
+    $yy; # closure
+    use builtin qw(ceil);
+    our $xx = 1.2;
+    my $yy = shift;
+    return sub { print DB::do_eval($yy) || $@, "\n" };
+  };
+  return $f->(shift);
+}
+g('1.1')->();
+g('$xx')->();
+g('ceil(1.1)')->();
+CODE
 }
 
 # [perl #19022] used to end up with shared hash warnings
@@ -437,14 +501,14 @@ is($got, "ok\n", 'eval and last');
 
 {
     no warnings;
-    eval "/ /b;";
+    eval "&& $b;";
     like($@, qr/^syntax error/, 'eval syntax error, no warnings');
 }
 
 # a syntax error in an eval called magically (eg via tie or overload)
-# resulted in an assertion failure in S_docatch, since doeval had already
-# popped the EVAL context due to the failure, but S_docatch expected the
-# context to still be there.
+# resulted in an assertion failure in S_docatch, since doeval_compile had
+# already popped the EVAL context due to the failure, but S_docatch
+# expected the context to still be there.
 
 {
     my $ok  = 0;
@@ -496,7 +560,7 @@ END_EVAL_TEST
 
     is($tombstone, "Done\n", 'Program completed successfully');
 
-    $first =~ s/,pNOK//;
+    $first =~ s/p?[NI]OK,//g;
     s/ PV = 0x[0-9a-f]+/ PV = 0x/ foreach $first, $second;
     s/ LEN = [0-9]+/ LEN = / foreach $first, $second;
     # Dump may double newlines through pipes, though not files
@@ -514,16 +578,26 @@ END_EVAL_TEST
     my $t;
     my $s = "a";
     $s =~ s/a/$t = \%^H;  qq( qq() );/ee;
-    is(Internals::SvREFCNT(%$t), $count_expected, 'RT 63110');
+    refcount_is $t, $count_expected, 'RT 63110';
+}
+
+# make sure default arg eval only adds a hints hash once to entereval
+#
+{
+    local $_ = "21+12";
+    is(eval, 33, 'argless eval without hints');
+    use feature qw(:5.10);
+    local $_ = "42+24";
+    is(eval, 66, 'argless eval with hints');
 }
 
 {
     # test that the CV compiled for the eval is freed by checking that no additional 
     # reference to outside lexicals are made.
     my $x;
-    is(Internals::SvREFCNT($x), 1, "originally only 1 reference");
+    refcount_is \$x, 1+1, "originally only 1 reference"; # + 1 to account for the ref here
     eval '$x';
-    is(Internals::SvREFCNT($x), 1, "execution eval doesn't create new references");
+    refcount_is \$x, 1+1, "execution eval doesn't create new references"; # + 1 the same
 }
 
 fresh_perl_is(<<'EOP', "ok\n", undef, 'RT #70862');
@@ -588,7 +662,7 @@ EOP
 
 # [perl #70151]
 {
-    BEGIN { eval 'require re; import re "/x"' }
+    BEGIN { eval 'require re; re->import("/x")' }
     ok "ab" =~ /a b/, 'eval does not localise %^H at run time';
 }
 
@@ -608,4 +682,158 @@ pass("phew! dodged the assertion after a parsing (not lexing) error");
      ),
      qr/Unbalanced string table/,
     'Errors in finalize_optree do not leak string eval op tree';
+}
+
+# [perl #114658] Line numbers at end of string eval
+for("{;", "{") {
+    eval $_; is $@ =~ s/eval \d+/eval 1/rag, <<'EOE',
+Missing right curly or square bracket at (eval 1) line 1, at end of line
+syntax error at (eval 1) line 1, at EOF
+Execution of (eval 1) aborted due to compilation errors.
+EOE
+	qq'Right line number for eval "$_"';
+}
+
+{
+    my $w;
+    local $SIG{__WARN__} = sub { $w .= shift };
+
+    eval "\${\nfoobar\n} = 10; warn q{should be line 3}";
+    is(
+        $w =~ s/eval \d+/eval 1/ra,
+        "should be line 3 at (eval 1) line 3.\n",
+        'eval qq{\${\nfoo\n}; warn} updates the line number correctly'
+    );
+}
+
+sub _117941 { package _117941; eval '$a' }
+delete $::{"_117941::"};
+_117941();
+pass("eval in freed package does not crash");
+
+# eval is supposed normally to clear $@ on success
+
+{
+    $@ = 1;
+    eval q{$@ = 2};
+    ok(!$@, 'eval clearing $@');
+}
+
+# RT #127786
+# this used to give an assertion failure
+
+{
+    package DB {
+        sub f127786 { eval q/\$s/ }
+    }
+    my $s;
+    sub { $s; DB::f127786}->();
+    pass("RT #127786");
+}
+
+# Late calling of destructors overwriting $@.
+# When leaving an eval scope (either by falling off the end or dying),
+# we must ensure that any temps are freed before the end of the eval
+# leave: in particular before $@ is set (to either "" or the error),
+# because otherwise the tmps freeing may call a destructor which
+# will change $@ (e.g. due to a successful eval) *after* its been set.
+# Some extra nested scopes are included in the tests to ensure they don't
+# affect the tmps freeing.
+
+{
+    package TMPS;
+    sub DESTROY { eval { die "died in DESTROY"; } } # alters $@
+
+    eval { { 1; { 1; bless []; } } };
+    ::is ($@, "", "FREETMPS: normal try exit");
+
+    eval q{ { 1; { 1; bless []; } } };
+    ::is ($@, "", "FREETMPS: normal string eval exit");
+
+    eval { { 1; { 1; return bless []; } } };
+    ::is ($@, "", "FREETMPS: return try exit");
+
+    eval q{ { 1; { 1; return bless []; } } };
+    ::is ($@, "", "FREETMPS: return string eval exit");
+
+    eval { { 1; { 1; my $x = bless []; die $x = 0, "die in eval"; } } };
+    ::like ($@, qr/die in eval/, "FREETMPS: die try exit");
+
+    eval q{ { 1; { 1; my $x = bless []; die $x = 0, "die in eval"; } } };
+    ::like ($@, qr/die in eval/, "FREETMPS: die eval string exit");
+}
+
+{
+    local ${^MAX_NESTED_EVAL_BEGIN_BLOCKS}= 0;
+    my ($x, $ok);
+    $x = 0;
+    $ok= eval 'BEGIN { $x++ } 1';
+    ::ok(!$ok,'${^MAX_NESTED_EVAL_BEGIN_BLOCKS} = 0 blocks BEGIN blocks entirely');
+    ::like($@,qr/Too many nested BEGIN blocks, maximum of 0 allowed/,
+        'Blocked BEGIN results in expected error');
+    ::is($x,0,'BEGIN really did nothing');
+
+    ${^MAX_NESTED_EVAL_BEGIN_BLOCKS}= 2;
+    $ok= eval 'sub f { my $n= shift; eval q[BEGIN { $x++; f($n-1) if $n>0 } 1] or die $@ } f(3); 1';
+    ::ok(!$ok,'${^MAX_NESTED_EVAL_BEGIN_BLOCKS} = 2 blocked three nested BEGIN blocks');
+    ::like($@,qr/Too many nested BEGIN blocks, maximum of 2 allowed/,
+        'Blocked BEGIN results in expected error');
+    ::is($x,2,'BEGIN really did nothing');
+
+}
+
+{
+    # make sure that none of these segfault.
+    foreach my $line (
+        'eval "UNITCHECK { eval q(UNITCHECK { die; }); print q(A-) }";',
+        'eval "UNITCHECK { eval q(BEGIN     { die; }); print q(A-) }";',
+        'eval "BEGIN     { eval q(UNITCHECK { die; }); print q(A-) }";',
+        'CHECK     { eval "]" } print q"A-";',
+        'INIT      { eval "]" } print q"A-";',
+        'UNITCHECK { eval "]" } print q"A-";',
+        'BEGIN     { eval "]" } print q"A-";',
+        'INIT      { eval q(UNITCHECK { die; } print 0;); print q(A-); }',
+    ) {
+        fresh_perl_is($line . ' print "ok";', "A-ok", {}, "No segfault: $line");
+
+        # sort blocks are somewhat special and things that work in normal blocks
+        # can blow up in sort blocks, so test these constructs specially.
+        my $sort_line= 'my @x= sort { ' . $line . ' } 1,2;';
+        fresh_perl_is($sort_line . ' print "ok";', "A-ok", {},
+            "No segfault inside sort: $sort_line");
+    }
+}
+{
+    # test that all of these cases behave the same
+    for my $fragment ('bar', '1+;', '1+;' x 11, 's/', ']') {
+        fresh_perl_is(
+            # code:
+            'use strict; use warnings; $SIG{__DIE__} = sub { die "X" }; ' .
+            'eval { eval "'.$fragment.'"; print "after eval $@"; };' .
+            'if ($@) { print "outer eval $@" }',
+            # wanted:
+            "after eval X at - line 1.",
+            # opts:
+            {},
+            # name:
+            "test that nested eval '$fragment' calls sig die as expected"
+        );
+    }
+}
+
+# The first inner eval finds the $v and adds a fake entry to the
+# outer eval's pad. The second inner eval finds the fake $c entry,
+# but was incorrectly concluding that the outer eval was in fact a
+# non-live anon prototype and issuing the warning
+# 'Variable "$v" is not available'/
+
+{
+    use warnings;
+    my $w = 0;
+    local $SIG{__WARN__} = sub { $w++ };
+    sub {
+        my $v;
+        eval q( eval '$v'; eval '$v';);
+    }->();
+    is($w, 0, "nested eval and closure");
 }

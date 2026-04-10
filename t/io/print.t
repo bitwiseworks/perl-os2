@@ -2,15 +2,15 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
     require './test.pl';
+    set_up_inc('../lib');
     eval 'use Errno';
     die $@ if $@ and !is_miniperl();
 }
 
 use strict 'vars';
 
-print "1..23\n";
+print "1..24\n";
 
 my $foo = 'STDOUT';
 print $foo "ok 1\n";
@@ -71,3 +71,8 @@ if (!exists &Errno::EBADF) {
 my $n = "abc";
 printf "ok 22%n - not really a test; just printing\n", substr $n,1,1;
 print "not " x ($n ne "a5c") . "ok 23 - printf with %n (got $n)\n";
+
+# [perl #77094] printf with empty list
+() = ("not ");
+printf +();
+print "ok 24 - printf +() does not steal stack items\n";

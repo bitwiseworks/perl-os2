@@ -2,19 +2,21 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
     require './test.pl';
+    set_up_inc('../lib');
+    require './charset_tools.pl';
 }
 
-plan tests => 102;
+plan tests => 219;
 
 $FS = ':';
+our $IS_ASCII;
 
 $_ = 'a:b:c';
 
 ($a,$b,$c) = split($FS,$_);
 
-is(join(';',$a,$b,$c), 'a;b;c');
+is(join(';',$a,$b,$c), 'a;b;c', 'Split a simple string into scalars.');
 
 @ary = split(/:b:/);
 $cnt = split(/:b:/);
@@ -53,18 +55,33 @@ is($cnt, scalar(@ary));
 
 # Can we say how many fields to split to?
 $_ = join(':', split(' ','1 2 3 4 5 6', 3));
-is($_, '1:2:3 4 5 6');
+is($_, '1:2:3 4 5 6', "Split into a specified number of fields, defined by a literal");
 @ary = split(' ','1 2 3 4 5 6', 3);
 $cnt = split(' ','1 2 3 4 5 6', 3);
-is($cnt, scalar(@ary));
+is($cnt, scalar(@ary), "Check element count from previous test");
 
 # Can we do it as a variable?
 $x = 4;
 $_ = join(':', split(' ','1 2 3 4 5 6', $x));
-is($_, '1:2:3:4 5 6');
+is($_, '1:2:3:4 5 6', "Split into a specified number of fields, defined by a scalar variable");
 @ary = split(' ','1 2 3 4 5 6', $x);
 $cnt = split(' ','1 2 3 4 5 6', $x);
-is($cnt, scalar(@ary));
+is($cnt, scalar(@ary), "Check element count from previous test");
+
+# Can we do it with the empty pattern?
+$_ = join(':', split(//, '123', -1));
+is($_, '1:2:3:', "Split with empty pattern and LIMIT == -1");
+$_ = join(':', split(//, '123', 0));
+is($_, '1:2:3', "Split with empty pattern and LIMIT == 0");
+$_ = join(':', split(//, '123', 2));
+is($_, '1:23', "Split into specified number of fields with empty pattern");
+$_ = join(':', split(//, '123', 6));
+is($_, '1:2:3:', "Split with empty pattern and LIMIT > length");
+for (-1..5) {
+    @ary = split(//, '123', $_);
+    $cnt = split(//, '123', $_);
+    is($cnt, scalar(@ary), "Check empty pattern element count with LIMIT == $_");
+}
 
 # Does the 999 suppress null field chopping?
 $_ = join(':', split(/:/,'1:2:3:4:5:6:::', 999));
@@ -76,7 +93,7 @@ is($cnt, scalar(@ary));
 # Splitting without pattern
 $_ = "1 2 3 4";
 $_ = join(':', split);
-is($_ , '1:2:3:4');
+is($_ , '1:2:3:4', "Split and join without specifying a split pattern");
 
 # Does assignment to a list imply split to one more field than that?
 $foo = runperl( switches => ['-Dt'], stderr => 1, prog => '($a,$b)=split;' );
@@ -85,7 +102,7 @@ ok($foo =~ /DEBUGGING/ || $foo =~ /const\n?\Q(IV(3))\E/);
 # Can we say how many fields to split to when assigning to a list?
 ($a,$b) = split(' ','1 2 3 4 5 6', 2);
 $_ = join(':',$a,$b);
-is($_, '1:2 3 4 5 6');
+is($_, '1:2 3 4 5 6', "Storing split output into list of scalars");
 
 # do subpatterns generate additional fields (without trailing nulls)?
 $_ = join '|', split(/,|(-)/, "1-10,20,,,");
@@ -180,7 +197,10 @@ is($cnt, scalar(@ary));
 
 # /^/ treated as /^/m
 $_ = join ':', split /^/, "ab\ncd\nef\n";
-is($_, "ab\n:cd\n:ef\n");
+is($_, "ab\n:cd\n:ef\n","check that split /^/ is treated as split /^/m");
+
+$_ = join ':', split /\A/, "ab\ncd\nef\n";
+is($_, "ab\ncd\nef\n","check that split /\A/ is NOT treated as split /^/m");
 
 # see if @a = @b = split(...) optimization works
 @list1 = @list2 = split ('p',"a p b c p");
@@ -203,8 +223,8 @@ $cnt =           split //, v1.20.300.4000.50000.4000.300.20.1;
 is("@ary", "1 20 300 4000 50000 4000 300 20 1");
 is($cnt, scalar(@ary));
 
-@ary = split(/\x{FE}/, "\x{FF}\x{FE}\x{FD}"); # bug id 20010105.016
-$cnt = split(/\x{FE}/, "\x{FF}\x{FE}\x{FD}"); # bug id 20010105.016
+@ary = split(/\x{FE}/, "\x{FF}\x{FE}\x{FD}"); # bug id 20010105.016 (#5088)
+$cnt = split(/\x{FE}/, "\x{FF}\x{FE}\x{FD}"); # bug id 20010105.016 (#5088)
 ok(@ary == 2 &&
    $ary[0] eq "\xFF"   && $ary[1] eq "\xFD" &&
    $ary[0] eq "\x{FF}" && $ary[1] eq "\x{FD}");
@@ -240,7 +260,7 @@ is($cnt, scalar(@ary));
 }
 
 {
-    # bug id 20000427.003 
+    # bug id 20000427.003 (#3173)
 
     use warnings;
     use strict;
@@ -261,15 +281,11 @@ is($cnt, scalar(@ary));
 {
     my $s = "\x20\x40\x{80}\x{100}\x{80}\x40\x20";
 
-  SKIP: {
-    if (ord('A') == 193) {
-	skip("EBCDIC", 1);
-    } else {
-	# bug id 20000426.003
+  {
+	# bug id 20000426.003 (#3166)
 
 	my ($a, $b, $c) = split(/\x40/, $s);
 	ok($a eq "\x20" && $b eq "\x{80}\x{100}\x{80}" && $c eq $a);
-    }
   }
 
     my ($a, $b) = split(/\x{100}/, $s);
@@ -278,13 +294,9 @@ is($cnt, scalar(@ary));
     my ($a, $b) = split(/\x{80}\x{100}\x{80}/, $s);
     ok($a eq "\x20\x40" && $b eq "\x40\x20");
 
-  SKIP: {
-    if (ord('A') == 193) {
-	skip("EBCDIC", 1);
-    }  else {
+  {
 	my ($a, $b) = split(/\x40\x{80}/, $s);
 	ok($a eq "\x20" && $b eq "\x{100}\x{80}\x40\x20");
-    }
   }
 
     my ($a, $b, $c) = split(/[\x40\x{80}]+/, $s);
@@ -292,7 +304,7 @@ is($cnt, scalar(@ary));
 }
 
 {
-    # 20001205.014
+    # 20001205.014 (#4844)
 
     my $a = "ABC\x{263A}";
 
@@ -371,6 +383,21 @@ is($cnt, scalar(@ary));
 }
 
 {
+    # LATIN SMALL LETTER A WITH DIAERESIS, CYRILLIC SMALL LETTER I
+    for my $pattern ("\N{U+E4}", "\x{0437}") {
+        utf8::upgrade $pattern;
+        my @res;
+        for my $str ("a${pattern}b", "axb", "a${pattern}b") {
+            @split = split /$pattern/, $str;
+            push @res, scalar(@split);
+        }
+        is($res[0], 2);
+        is($res[1], 1);
+        is($res[2], 2, '#123469 - split with utf8 pattern after handling non-utf8 EXPR');
+    }
+}
+
+{
     is (\@a, \@{"a"}, '@a must be global for following test');
     $p="";
     $n = @a = split /,/,$p;
@@ -416,4 +443,328 @@ is($cnt, scalar(@ary));
     scalar(our @PATH = split /::/, "Font::GlyphNames");
            # 'my' doesn't trigger the bug
     is "@PATH", "Font GlyphNames", "hybrid scalar-and-array context";
+}
+
+{
+    my @results;
+    my $expr= "foo  bar";
+    my $cond;
+
+    @results= split(0||" ", $expr);
+    is @results, 2, 'split(0||" ") is treated like split(" ")'; #'
+
+    $cond= 0;
+    @results= split $cond ? " " : qr/ /, $expr;
+    is @results, 3, 'split($cond ? " " : qr/ /, $expr) works as expected (like qr/ /)';
+    $cond= 1;
+    @results= split $cond ? " " : qr/ /, $expr;
+    is @results, 2, 'split($cond ? " " : qr/ /, $expr) works as expected (like " ")';
+
+    $expr = ' a b c ';
+    @results = split /\s/, $expr;
+    is @results, 4,
+        "split on regex of single space metacharacter: captured 4 elements";
+    is $results[0], '',
+        "split on regex of single space metacharacter: first element is empty string";
+
+    @results = split / /, $expr;
+    is @results, 4,
+        "split on regex of single whitespace: captured 4 elements";
+    is $results[0], '',
+        "split on regex of single whitespace: first element is empty string";
+
+    @results = split " ", $expr;
+    is @results, 3,
+        "split on string of single whitespace: captured 3 elements";
+    is $results[0], 'a',
+        "split on string of single whitespace: first element is non-empty";
+
+    $expr = " a \tb c ";
+    @results = split " ", $expr;
+    is @results, 3,
+        "split on string of single whitespace: captured 3 elements";
+    is $results[0], 'a',
+        "split on string of single whitespace: first element is non-empty; multiple contiguous space characters";
+
+    my @seq;
+    for my $cond (0,1,0,1,0) {
+        $expr = "  foo  ";
+        @results = split $cond ? qr/ / : " ", $expr;
+        push @seq, scalar(@results) . ":" . $results[-1];
+    }
+    is join(" ", @seq), "1:foo 3:foo 1:foo 3:foo 1:foo",
+        qq{split(\$cond ? qr/ / : " ", "$exp") behaves as expected over repeated similar patterns};
+}
+
+SKIP: {
+    # RT #130907: unicode_strings feature doesn't work with split ' '
+
+    my ($sp) = grep /\s/u, map chr, reverse 128 .. 255 # prefer \xA0 over \x85
+        or skip 'no unicode whitespace found in high-8-bit range', 9;
+
+    for (["$sp$sp. /", "leading unicode whitespace"],
+         [".$sp$sp/",  "unicode whitespace separator"],
+         [". /$sp$sp", "trailing unicode whitespace"]) {
+        my ($str, $desc) = @$_;
+        use feature "unicode_strings";
+        my @got = split " ", $str;
+        is @got, 2, "whitespace split: $desc: field count";
+        is $got[0], '.', "whitespace split: $desc: field 0";
+        is $got[1], '/', "whitespace split: $desc: field 1";
+    }
+}
+
+{
+    # 'RT #116086: split "\x20" does not work as documented';
+    my @results;
+    my $expr;
+    $expr = ' a b c ';
+    @results = split uni_to_native("\x20"), $expr;
+    is @results, 3,
+        "RT #116086: split on string of single hex-20: captured 3 elements";
+    is $results[0], 'a',
+        "RT #116086: split on string of single hex-20: first element is non-empty";
+
+    $expr = " a \tb c ";
+    @results = split uni_to_native("\x20"), $expr;
+    is @results, 3,
+        "RT #116086: split on string of single hex-20: captured 3 elements";
+    is $results[0], 'a',
+        "RT #116086: split on string of single hex-20: first element is non-empty; multiple contiguous space characters";
+}
+
+# Nasty interaction between split and use constant
+use constant nought => 0;
+($a,$b,$c) = split //, $foo, nought;
+is nought, 0, 'split does not mangle 0 constants';
+
+*aaa = *bbb;
+$aaa[1] = "foobarbaz";
+$aaa[1] .= "";
+@aaa = split //, $bbb[1];
+is "@aaa", "f o o b a r b a z",
+   'split-to-array does not free its own argument';
+
+() = @a = split //, "abc";
+is "@a", "a b c", '() = split-to-array';
+
+(@a = split //, "abc") = 1..10;
+is "@a", '1 2 3', 'assignment to split-to-array (pmtarget/package array)';
+{
+  my @a;
+  (@a = split //, "abc") = 1..10;
+  is "@a", '1 2 3', 'assignment to split-to-array (targ/lexical)';
+}
+(@{\@a} = split //, "abc") = 1..10;
+is "@a", '1 2 3', 'assignment to split-to-array (stacked)';
+
+# check that re-evals work
+
+{
+    my $c = 0;
+    @a = split /-(?{ $c++ })/, "a-b-c";
+    is "@a", "a b c", "compile-time re-eval";
+    is $c, 2, "compile-time re-eval count";
+
+    my $sep = '-';
+    $c = 0;
+    @a = split /$sep(?{ $c++ })/, "a-b-c";
+    is "@a", "a b c", "run-time re-eval";
+    is $c, 2, "run-time re-eval count";
+}
+
+# check that my/local @array = split works
+
+{
+    my $s = "a:b:c";
+
+    local @a = qw(x y z);
+    {
+        local @a = split /:/, $s;
+        is "@a", "a b c", "local split inside";
+    }
+    is "@a", "x y z", "local split outside";
+
+    my @b = qw(x y z);
+    {
+        my @b = split /:/, $s;
+        is "@b", "a b c", "my split inside";
+    }
+    is "@b", "x y z", "my split outside";
+}
+
+# check that the (@a = split) optimisation works in scalar/list context
+
+{
+    my $s = "a:b:c:d:e";
+    my @outer;
+    my $outer;
+    my @lex;
+    local our @pkg;
+
+    $outer = (@lex = split /:/, $s);
+    is "@lex",   "a b c d e", "array split: scalar cx lex: inner";
+    is $outer,   5,           "array split: scalar cx lex: outer";
+
+    @outer = (@lex = split /:/, $s);
+    is "@lex",   "a b c d e", "array split: list cx lex: inner";
+    is "@outer", "a b c d e", "array split: list cx lex: outer";
+
+    $outer = (@pkg = split /:/, $s);
+    is "@pkg",   "a b c d e", "array split: scalar cx pkg inner";
+    is $outer,   5,           "array split: scalar cx pkg outer";
+
+    @outer = (@pkg = split /:/, $s);
+    is "@pkg",   "a b c d e", "array split: list cx pkg inner";
+    is "@outer", "a b c d e", "array split: list cx pkg outer";
+
+    $outer = (my @a1 = split /:/, $s);
+    is "@a1",    "a b c d e", "array split: scalar cx my lex: inner";
+    is $outer,   5,           "array split: scalar cx my lex: outer";
+
+    @outer = (my @a2 = split /:/, $s);
+    is "@a2",    "a b c d e", "array split: list cx my lex: inner";
+    is "@outer", "a b c d e", "array split: list cx my lex: outer";
+
+    $outer = (local @pkg = split /:/, $s);
+    is "@pkg",   "a b c d e", "array split: scalar cx local pkg inner";
+    is $outer,   5,           "array split: scalar cx local pkg outer";
+
+    @outer = (local @pkg = split /:/, $s);
+    is "@pkg",   "a b c d e", "array split: list cx local pkg inner";
+    is "@outer", "a b c d e", "array split: list cx local pkg outer";
+
+    $outer = (@{\@lex} = split /:/, $s);
+    is "@lex",   "a b c d e", "array split: scalar cx lexref inner";
+    is $outer,   5,           "array split: scalar cx lexref outer";
+
+    @outer = (@{\@pkg} = split /:/, $s);
+    is "@pkg",   "a b c d e", "array split: list cx pkgref inner";
+    is "@outer", "a b c d e", "array split: list cx pkgref outer";
+
+
+}
+
+# splitting directly to an array wasn't filling unused AvARRAY slots with
+# NULL
+
+{
+    my @a;
+    @a = split(/-/,"-");
+    $a[1] = 'b';
+    ok eval { $a[0] = 'a'; 1; }, "array split filling AvARRAY: assign 0";
+    is "@a", "a b", "array split filling AvARRAY: result";
+}
+
+# splitting an empty utf8 string gave an assert failure
+{
+    my $s = "\x{100}";
+    chop $s;
+    my @a = split ' ', $s;
+    is (+@a, 0, "empty utf8 string");
+}
+
+# correct stack adjustments (gh#18232)
+{
+    sub foo { return @_ }
+    my @a = foo(1, scalar split " ", "a b");
+    is(join('', @a), "12", "Scalar split to a sub parameter");
+}
+
+{
+    sub foo { return @_ }
+    my @a = foo(1, scalar(@x = split " ", "a b"));
+    is(join('', @a), "12", "Split to @x then use scalar result as a sub parameter");
+}
+
+fresh_perl_is(<<'CODE', '', {}, "scalar split stack overflow");
+map{int"";split//.0>60for"0000000000000000"}split// for"00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"
+CODE
+
+# RT #132334: /o modifier no longer has side effects on split
+{
+    my @records = (
+        { separator => '0', effective => '',  text => 'ab' },
+        { separator => ';', effective => ';', text => 'a;b' },
+    );
+
+    for (@records) {
+        my ($separator, $effective, $text) = @$_{qw(separator effective text)};
+        $separator =~ s/0//o;
+        is($separator,$effective,"Going to split '$text' with '$separator'");
+        my @result = split($separator,$text);
+        ok(eq_array(\@result,['a','b']), "Resulting in ('a','b')");
+    }
+}
+
+# check that the (@ary = split) optimisation survives @ary being modified
+
+fresh_perl_is('my @ary; @ary = split(/\w(?{ @ary[1000] = 1 })/, "abc");',
+        '',{},'(@ary = split ...) survives @ary being Renew()ed');
+fresh_perl_is('my @ary; @ary = split(/\w(?{ undef @ary })/, "abc");',
+        '',{},'(@ary = split ...) survives an (undef @ary)');
+
+# check the (@ary = split) optimisation survives stack-not-refcounted bugs
+fresh_perl_is('our @ary; @ary = split(/\w(?{ *ary = 0 })/, "abc");',
+        '',{},'(@ary = split ...) survives @ary destruction via typeglob');
+fresh_perl_is('my $ary = []; @$ary = split(/\w(?{ $ary = [] })/, "abc");',
+        '',{},'(@ary = split ...) survives @ary destruction via reassignment');
+
+# gh18515: check that we spot and flag specific regexps for special treatment
+SKIP: {
+	skip_if_miniperl("special-case patterns: need dynamic loading", 4);
+	for ([ q{" "}, 'WHITE' ],
+		[ q{/\\s+/}, 'WHITE' ],
+		[ q{/^/}, 'START_ONLY' ],
+		[ q{//}, 'NULL' ],
+	) {
+		my($pattern, $flag) = @$_;
+		my $prog = "split $pattern";
+		my $expect = qr{^r->extflags:.*\b$flag\b}ms;
+		fresh_perl_like($prog, $expect, {
+			switches => [ '-Mre=Debug,COMPILE', '-c' ],
+		}, "special-case pattern for $prog");
+	}
+}
+
+# gh18032: check that `split " "` does not get converted to `split ""`
+SKIP: {
+    my @skipwhite = ( 'split " "',
+                       ($::IS_ASCII) ? 'split "\x20"' : 'split "\x40"',
+                      'split "\N{SPACE}"',
+                      'split "$e$sp$e"',
+                      'split'
+                    );
+    my @noskipwhite= (
+        'split / /', 'split m/ /', 'split qr/ /',
+        'split /$e$sp$e/', 'split m/$e$sp$e/', 'split qr/$e$sp$e/'
+    );
+    skip_if_miniperl("special-case patterns: need dynamic loading",
+        2*(@skipwhite+@noskipwhite));
+
+    my $modifiers = "x"; # the original bug report used /aansx
+
+    for my $prog ( @skipwhite ) {
+        fresh_perl_like("use re qw(/$modifiers); \$sp=qq( ); \$e=qq(); $prog;",
+            qr{^r->extflags:.*\bSKIPWHITE\b\s\n?\bWHITE\b}ms,
+            {switches => [ '-Mre=Debug,COMPILE' ]},
+            "$prog sets SKIPWHITE|WHITE under `use re qw(/$modifiers)`");
+
+        fresh_perl_like("use re qw(/$modifiers); \$sp=qq( ); \$e=qq();"
+                       ."\$_=qq( 1  1 ); \@c=$prog; print 0+\@c, qq(<\@c>)",
+            qr{^2<1 1>}m,
+            {},
+            "$prog matches as expected `use re qw(/$modifiers)`");
+    }
+    for my $prog ( @noskipwhite) {
+        fresh_perl_like("use re qw(/$modifiers); \$sp=qq( ); \$e=qq(); $prog;",
+            qr{^r->extflags:.*\bNULL\b}ms,
+            {switches => [ '-Mre=Debug,COMPILE' ]},
+            "$prog does not set SKIPWHITE|WHITE under `use re qw(/$modifiers)`");
+        fresh_perl_like("use re qw(/$modifiers); \$sp=qq( ); \$e=qq();"
+                       ."\$_=qq( 1  1 ); \@c=$prog; print 0+\@c, qq(<\@c>)",
+            qr{^6<  1     1  >}ms,
+            {},
+            "$prog matches expected under `use re qw(/$modifiers)`");
+    }
 }

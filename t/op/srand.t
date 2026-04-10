@@ -2,15 +2,15 @@
 
 BEGIN {
     chdir "t" if -d "t";
-    @INC = qw(. ../lib);
+    require "./test.pl";
+    set_up_inc( qw(. ../lib) );
 }
 
 # Test srand.
 
 use strict;
 
-require "test.pl";
-plan(tests => 9);
+plan(tests => 10);
 
 # Generate a load of random numbers.
 # int() avoids possible floating point error.
@@ -52,9 +52,12 @@ ok( !eq_array(\@first_run, \@second_run),
 }
 
 # This test checks whether Perl called srand for you.
-@first_run  = `$^X -le "print int rand 100 for 1..100"`;
-sleep(1); # in case our srand() is too time-dependent
-@second_run = `$^X -le "print int rand 100 for 1..100"`;
+{
+    local $ENV{PERL_RAND_SEED};
+    @first_run  = `$^X -le "print int rand 100 for 1..100"`;
+    sleep(1); # in case our srand() is too time-dependent
+    @second_run = `$^X -le "print int rand 100 for 1..100"`;
+}
 
 ok( !eq_array(\@first_run, \@second_run), 'srand() called automatically');
 
@@ -78,4 +81,13 @@ cmp_ok( $seed, '==', 0, "numeric 0 return value for srand(0)");
     }
     is( $b, 0, "Quacks like a zero");
     is( "@warnings", "", "Does not warn");
+}
+
+# [perl #40605]
+{
+    use warnings;
+    my $w = '';
+    local $SIG{__WARN__} = sub { $w .= $_[0] };
+    srand(2**100);
+    like($w, qr/^Integer overflow in srand at /, "got a warning");
 }

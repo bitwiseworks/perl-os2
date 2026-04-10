@@ -1,4 +1,4 @@
-use Test::More tests => 11;
+use Test::More tests => 13;
 
 BEGIN { use_ok('XS::APItest') };
 
@@ -21,12 +21,13 @@ print_int(3);
 print_long(4);
 print_float(4);
 print_long_double() if $ldok;  # val=7 hardwired
+print_long_doubleL() if $ldok;  # val=7 hardwired
 
 print_flush();
 
 # Now redirect STDOUT and read from the file
 ok open(STDOUT, ">&", $oldout), "restore STDOUT";
-ok open(my $foo, "<foo.out"), "open foo.out";
+ok open(my $foo, '<', 'foo.out'), "open foo.out";
 #print "# Test output by reading from file\n";
 # now test the output
 my @output = map { chomp; $_ } <$foo>;
@@ -39,7 +40,20 @@ is($output[2], "4", "print_long");
 is($output[3], "4.000", "print_float");
 
 SKIP: {
-   skip "No long doubles", 1 unless $ldok;
+   skip "No long doubles", 2 unless $ldok;
    is($output[4], "7.000", "print_long_double");
+   is($output[5], "7.000", "print_long_doubleL");
 }
 
+{
+    # GH #17338
+    # This is unlikely to fail here since int and long are the
+    # same size on our usual platforms, but it's less likely to
+    # be ignored than the warning that's the real diagnostic
+    # for this bug.
+    my $uv_max = ~0;
+    my $iv_max = $uv_max >> 1;
+    my $max_out = "iv $iv_max uv $uv_max";
+    is(test_MAX_types(), $max_out,
+       "check types for IV_MAX and UV_MAX match IVdf/UVuf");
+}

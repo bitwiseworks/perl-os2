@@ -1,18 +1,17 @@
 package TAP::Parser::SourceHandler::Perl;
 
 use strict;
+use warnings;
 use Config;
-use vars qw($VERSION @ISA);
 
 use constant IS_WIN32 => ( $^O =~ /^(MS)?Win32$/ );
 use constant IS_VMS => ( $^O eq 'VMS' );
 
-use TAP::Parser::SourceHandler::Executable ();
 use TAP::Parser::IteratorFactory           ();
 use TAP::Parser::Iterator::Process         ();
-use TAP::Parser::Utils qw( split_shell );
+use Text::ParseWords qw(shellwords);
 
-@ISA = 'TAP::Parser::SourceHandler::Executable';
+use base 'TAP::Parser::SourceHandler::Executable';
 
 TAP::Parser::IteratorFactory->register_handler(__PACKAGE__);
 
@@ -22,11 +21,11 @@ TAP::Parser::SourceHandler::Perl - Stream TAP from a Perl executable
 
 =head1 VERSION
 
-Version 3.23
+Version 3.50
 
 =cut
 
-$VERSION = '3.23';
+our $VERSION = '3.50';
 
 =head1 SYNOPSIS
 
@@ -63,7 +62,7 @@ won't need to use this module directly.
 Only votes if $source looks like a file.  Casts the following votes:
 
   0.9  if it has a shebang ala "#!...perl"
-  0.75 if it has any shebang
+  0.3  if it has any shebang
   0.8  if it's a .t file
   0.9  if it's a .pl file
   0.75 if it's in a 't' directory
@@ -78,8 +77,11 @@ sub can_handle {
     return 0 unless $meta->{is_file};
     my $file = $meta->{file};
 
-    if ( my $shebang = $file->{shebang} ) {
+    my $shebang = $file->{shebang} || '';
+
+    if ( $shebang =~ /^#!/ ) {
         return 0.9 if $shebang =~ /^#!.*\bperl/;
+
         # We favour Perl as the interpreter for any shebang to preserve
         # previous semantics: we used to execute everything via Perl and
         # relied on it to pass the shebang off to the appropriate
@@ -90,7 +92,8 @@ sub can_handle {
     return 0.8 if $file->{lc_ext} eq '.t';    # vote higher than Executable
     return 0.9 if $file->{lc_ext} eq '.pl';
 
-    return 0.75 if $file->{dir} =~ /^t\b/;    # vote higher than Executable
+    my @dirs = File::Spec->splitdir($file->{dir});
+    return 0.75 if scalar(@dirs) && $dirs[0] eq 't';    # vote higher than Executable
 
     # backwards compat, always vote:
     return 0.25;
@@ -151,18 +154,27 @@ sub make_iterator {
     $class->_run( $source, $libs, $switches );
 }
 
+
+sub _has_taint_switch {
+    my( $class, $switches ) = @_;
+
+    my $has_taint = grep { $_ eq "-T" || $_ eq "-t" } @{$switches};
+    return $has_taint ? 1 : 0;
+}
+
 sub _mangle_switches {
     my ( $class, $libs, $switches ) = @_;
 
     # Taint mode ignores environment variables so we must retranslate
     # PERL5LIB as -I switches and place PERL5OPT on the command line
     # in order that it be seen.
-    if ( grep { $_ eq "-T" || $_ eq "-t" } @{$switches} ) {
+    if ( $class->_has_taint_switch($switches) ) {
+        my @perl5lib = defined $ENV{PERL5LIB} ? split /$Config{path_sep}/, $ENV{PERL5LIB} : ();
         return (
             $libs,
             [   @{$switches},
-                $class->_libs2switches($libs),
-                split_shell( $ENV{PERL5OPT} )
+                $class->_libs2switches([@$libs, @perl5lib]),
+                defined $ENV{PERL5OPT} ? shellwords( $ENV{PERL5OPT} ) : ()
             ],
         );
     }
@@ -199,10 +211,10 @@ sub _filter_libs {
 }
 
 sub _iterator_hooks {
-    my ( $class, $source, $libs ) = @_;
+    my ( $class, $source, $libs, $switches ) = @_;
 
     my $setup = sub {
-        if ( @{$libs} ) {
+        if ( @{$libs} and !$class->_has_taint_switch($switches) ) {
             $ENV{PERL5LIB} = join(
                 $Config{path_sep}, grep {defined} @{$libs},
                 $ENV{PERL5LIB}
@@ -210,8 +222,8 @@ sub _iterator_hooks {
         }
     };
 
-    # Cargo culted from comments seen elsewhere about VMS / environment
-    # variables. I don't know if this is actually necessary.
+    # VMS environment variables aren't guaranteed to reset at the end of
+    # the process, so we need to put PERL5LIB back.
     my $previous = $ENV{PERL5LIB};
     my $teardown = sub {
         if ( defined $previous ) {
@@ -231,7 +243,7 @@ sub _run {
     my @command = $class->_get_command_for_switches( $source, $switches )
       or $class->_croak("No command found!");
 
-    my ( $setup, $teardown ) = $class->_iterator_hooks( $source, $libs );
+    my ( $setup, $teardown ) = $class->_iterator_hooks( $source, $libs, $switches );
 
     return $class->_create_iterator( $source, \@command, $setup, $teardown );
 }
@@ -315,7 +327,7 @@ Gets the version of Perl currently running the test suite.
 sub get_perl {
     my $class = shift;
     return $ENV{HARNESS_PERL} if defined $ENV{HARNESS_PERL};
-    return Win32::GetShortPathName($^X) if IS_WIN32;
+    return qq["$^X"] if IS_WIN32 && ( $^X =~ /[^\w\.\/\\]/ );
     return $^X;
 }
 
@@ -332,11 +344,10 @@ Please see L<TAP::Parser/SUBCLASSING> for a subclassing overview.
   package MyPerlSourceHandler;
 
   use strict;
-  use vars '@ISA';
 
   use TAP::Parser::SourceHandler::Perl;
 
-  @ISA = qw( TAP::Parser::SourceHandler::Perl );
+  use base 'TAP::Parser::SourceHandler::Perl';
 
   # use the version of perl from the shebang line in the test file
   sub get_perl {

@@ -11,14 +11,14 @@
 use strict;
 use Devel::Tokenizer::C 0.05;
 
-require 'regen/regen_lib.pl';
+require './regen/regen_lib.pl';
 
 my $h = open_new('keywords.h', '>',
-		 { by => 'regen/keywords.pl', from => 'its data',
-		   file => 'keywords.h', style => '*',
-		   copyright => [1994 .. 1997, 1999 .. 2002, 2005 .. 2007]});
+                 { by => 'regen/keywords.pl', from => 'its data',
+                   file => 'keywords.h', style => '*',
+                   copyright => [1994 .. 1997, 1999 .. 2002, 2005 .. 2007]});
 my $c = open_new('keywords.c', '>',
-		 { by => 'regen/keywords.pl', from => 'its data', style => '*'});
+                 { by => 'regen/keywords.pl', from => 'its data', style => '*'});
 
 my %by_strength;
 
@@ -34,31 +34,39 @@ while (<DATA>) {
 }
 
 # If this hash changes, make sure the equivalent hash in
-# dist/B-Deparse/Deparse.pm is also updated.
+# lib/B/Deparse.pm (%feature_keywords) is also updated.
 my %feature_kw = (
-	given   => 'switch',
-	when    => 'switch',
-	default => 'switch',
-	# continue is already a keyword
-	break   => 'switch',
-
-	say     => 'say',
-
-	state	=> 'state',
-
-	evalbytes=>'evalbytes',
-
-	__SUB__ => '__SUB__',
-
-	fc      => 'fc',
-	);
+    # keyword => feature name
+    state     => 'state',
+    say       => 'say',
+    given     => 'switch',
+    when      => 'switch',
+    default   => 'switch',
+    # continue is already a keyword
+    break     => 'switch',
+    evalbytes => 'evalbytes',
+    __SUB__   => '__SUB__',
+    fc        => 'fc',
+    isa       => 'isa',
+    try       => 'try',
+    catch     => 'try',
+    finally   => 'try',
+    defer     => 'defer',
+    class     => 'class',
+    field     => 'class',
+    method    => 'class',
+    ADJUST    => 'class',
+    __CLASS__ => 'class',
+    any       => 'keyword_any',
+    all       => 'keyword_all',
+);
 
 my %pos = map { ($_ => 1) } @{$by_strength{'+'}};
 
 my $t = Devel::Tokenizer::C->new(TokenFunc     => \&perl_keyword,
-				 TokenString   => 'name',
-				 StringLength  => 'len',
-				 MergeSwitches => 1,
+                                 TokenString   => 'name',
+                                 StringLength  => 'len',
+                                 MergeSwitches => 1,
                                 );
 
 $t->add_tokens(@{$by_strength{'+'}}, @{$by_strength{'-'}}, 'elseif');
@@ -75,8 +83,6 @@ print $c <<"END";
 I32
 Perl_keyword (pTHX_ const char *name, I32 len, bool all_keywords)
 {
-  dVAR;
-
   PERL_ARGS_ASSERT_KEYWORD;
 
 $switch
@@ -92,7 +98,7 @@ sub perl_keyword
 
   if ($k eq 'elseif') {
     return <<END;
-Perl_ck_warner_d(aTHX_ packWARN(WARN_SYNTAX), "elseif should be elsif");
+ck_warner_d(packWARN(WARN_SYNTAX), "elseif should be elsif");
 END
   }
   elsif (my $feature = $feature_kw{$k}) {
@@ -118,13 +124,14 @@ __END__
 -__FILE__
 -__LINE__
 -__PACKAGE__
+-__CLASS__
 +__DATA__
 +__END__
 -__SUB__
++ADJUST
 +AUTOLOAD
 +BEGIN
 +UNITCHECK
--CORE
 +DESTROY
 +END
 +INIT
@@ -132,13 +139,16 @@ __END__
 -abs
 -accept
 -alarm
+-all
 -and
+-any
 -atan2
 -bind
 -binmode
 -bless
 -break
 -caller
++catch
 -chdir
 -chmod
 -chomp
@@ -146,6 +156,7 @@ __END__
 -chown
 -chr
 -chroot
+-class
 -close
 -closedir
 -cmp
@@ -156,6 +167,7 @@ __END__
 -dbmclose
 -dbmopen
 +default
++defer
 +defined
 +delete
 -die
@@ -180,7 +192,9 @@ __END__
 -exp
 -fc
 -fcntl
+-field
 -fileno
++finally
 -flock
 +for
 +foreach
@@ -225,6 +239,7 @@ __END__
 -index
 -int
 -ioctl
+-isa
 -join
 -keys
 -kill
@@ -243,6 +258,7 @@ __END__
 -lt
 +m
 +map
+-method
 -mkdir
 -msgctl
 -msgget
@@ -345,6 +361,7 @@ __END__
 -time
 -times
 +tr
++try
 -truncate
 -uc
 -ucfirst

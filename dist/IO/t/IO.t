@@ -49,6 +49,7 @@ local $SIG{__WARN__} = sub { $warn = "@_" } ;
 
 {
     local $^W = 0;
+    no if $^V >= 5.17.4, warnings => "deprecated";
     IO->import();
     is( $warn, '', "... import default, should not warn");
     $warn = '' ;
@@ -92,7 +93,7 @@ my $fakemod = File::Spec->catfile( $fakedir, 'fakemod.pm' );
 my $flag;
 if ( -d $fakedir or mkpath( $fakedir ))
 {
-	if (open( OUT, ">$fakemod"))
+	if (open( OUT, '>', $fakemod ))
 	{
 		(my $package = <<'		END_HERE') =~ tr/\t//d;
 		package IO::fakemod;

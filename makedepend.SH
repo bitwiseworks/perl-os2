@@ -36,10 +36,10 @@ fi
 
 mkdir .depending
 
-# This script should be called with 
+# This script should be called with
 #     sh ./makedepend MAKE=$(MAKE)
-case "$1" in 
-	MAKE=*) eval $1 ;;
+case "$1" in
+	MAKE=*) eval $1; shift ;;
 esac
 
 export PATH || (echo "OOPS, this isn't sh.  Desperation time.  I will feed myself to sh."; sh \$0; kill \$\$)
@@ -112,104 +112,21 @@ $test -d UU || mkdir UU
 
 $MAKE clist || ($echo "Searching for .c files..."; \
 	$echo *.c | $tr ' ' $trnl | $egrep -v '\*' >.clist)
-for file in `$cat .clist`; do
-# for file in `cat /dev/null`; do
-    case "$osname" in
-    uwin)     uwinfix="-e s,\\\\\\\\,/,g -e s,\\([a-zA-Z]\\):/,/\\1/,g" ;;
-    os2)      uwinfix="-e s,\\\\\\\\,/,g" ;;
-    cygwin)   uwinfix="-e s,\\\\\\\\,/,g" ;;
-    posix-bc) uwinfix="-e s/\\*POSIX(\\(.*\\))/\\1/" ;;
-    vos)      uwinfix="-e s/\#/\\\#/" ;;
-    *)        uwinfix="" ;;
-    esac
-    case "$file" in
-    *.c) filebase=`basename $file .c` ;;
-    *.y) filebase=`basename $file .y` ;;
-    esac
-    case "$file" in
-    */*) finc="-I`echo $file | sed 's#/[^/]*$##'`" ;;
-    *)   finc= ;;
-    esac
-    $echo "Finding dependencies for $filebase$_o."
-    ( $echo "#line 1 \"$file\""; \
-      $sed -n <$file \
-	-e "/^${filebase}_init(/q" \
-	-e '/^#line/d' \
-	-e '/^#/{' \
-	-e 's|/\*.*$||' \
-	-e 's|\\$||' \
-	-e p \
-	-e '}' ) >UU/$file.c
 
-    if [ "$osname" = os390 -a "$file" = perly.c ]; then
-        $echo '#endif' >>UU/$file.c
-    fi
+clist=`$cat .clist | $sed -e 's,$,.depends,'`
 
-    if [ "$osname" = os390 ]; then
-        $cppstdin $finc -I. $cppflags $cppminus <UU/$file.c |
-        $sed \
-    	    -e '/^#.*<stdin>/d' \
-	    -e '/^#.*"-"/d' \
-	    -e '/^#.*git_version\.h/d' \
-	    -e 's#\.[0-9][0-9]*\.c#'"$file.c#" \
-	    -e 's/^[	 ]*#[	 ]*line/#/' \
-	    -e '/^# *[0-9][0-9]* *[".\/]/!d' \
-	    -e 's/^.*"\(.*\)".*$/'$filebase'\$(OBJ_EXT): \1/' \
-	    -e 's/^# *[0-9][0-9]* \(.*\)$/'$filebase'\$(OBJ_EXT): \1/' \
-	    -e 's|: \./|: |' \
-	    -e 's|\.c\.c|.c|' $uwinfix | \
-        $uniq | $sort | $uniq >> .deptmp
-    else
-        $cppstdin $finc -I. $cppflags $cppminus <UU/$file.c >.cout 2>.cerr
-        $sed \
-	    -e '1d' \
-	    -e '/^#.*<stdin>/d' \
-            -e '/^#.*<builtin>/d' \
-            -e '/^#.*<built-in>/d' \
-            -e '/^#.*<command line>/d' \
-            -e '/^#.*<command-line>/d' \
-	    -e '/^#.*"-"/d' \
-	    -e '/^#.*"\/.*\/"/d' \
-	    -e '/: file path prefix .* never used$/d' \
-	    -e '/^#.*git_version\.h/d' \
-	    -e 's#\.[0-9][0-9]*\.c#'"$file.c#" \
-	    -e 's/^[	 ]*#[	 ]*line/#/' \
-	    -e '/^# *[0-9][0-9]* *[".\/]/!d' \
-	    -e 's/^.*"\(.*\)".*$/'$filebase'\$(OBJ_EXT): \1/' \
-	    -e 's/^# *[0-9][0-9]* \(.*\)$/'$filebase'\$(OBJ_EXT): \1/' \
-	    -e 's|: \./|: |' \
-           -e 's|\.c\.c|.c|' $uwinfix .cout .cerr| \
-        $uniq | $sort | $uniq >> .deptmp
-    fi
-    echo "$filebase\$(OBJ_EXT): cflags" >> .deptmp
-done
+# Now, create a Makefile from .clist and run that in parallel
+# Makefiles creating more Makefiles
+# A Makefile exists to beget more Makefiles. Perl is
+# just a vehicle.
+rm -f $clist
+$MAKE $clist
+$cat $clist >.deptmp
+rm -f $clist
 
 $sed <$mf >$mf.new -e '1,/^# AUTOMATICALLY/!d'
 
-$MAKE shlist || ($echo "Searching for .SH files..."; \
-	$echo *.SH | $tr ' ' $trnl | $egrep -v '\*' >.shlist)
-
-# Now extract the dependencies on makedepend.SH and Makefile.SH
-# (they should reside in the main Makefile):
-rm -f .shlist.old
-mv .shlist .shlist.old
-$egrep -v '^makedepend\.SH' <.shlist.old >.shlist
-rm -f .shlist.old
-mv .shlist .shlist.old
-$egrep -v '^Makefile\.SH' <.shlist.old >.shlist
-rm -f .shlist.old
-mv .shlist .shlist.old
-$egrep -v '^perl_exp\.SH' <.shlist.old >.shlist
-rm -f .shlist.old
-mv .shlist .shlist.old
-$egrep -v '^config_h\.SH' <.shlist.old >.shlist
-rm .shlist.old
-
 if $test -s .deptmp; then
-    for file in `cat .shlist`; do
-	$echo `$expr X$file : 'X\(.*\).SH'`: $file $TOP/config.sh \; \
-	    $sh $file >> .deptmp
-    done
     $echo "Updating $mf..."
     $echo "# If this runs make out of memory, delete /usr/include lines." \
 	>> $mf.new
@@ -217,9 +134,12 @@ if $test -s .deptmp; then
         $sed 's|\.incl\.c|.h|' .deptmp >.deptmp.vos
         mv -f .deptmp.vos .deptmp
     fi
-    $sed 's|^\(.*\$(OBJ_EXT):\) *\(.*/.*\.c\) *$|\1 \2; '"$defrule \2|" .deptmp \
-       >>$mf.new
+    $sed -e 's|^\(.*\$(OBJ_EXT):\) *\(.*/.*\.c\) *$|\1 \2; '"$defrule \2|" \
+       -e 'h; s/mini\(perlmain\)/\1/p; g' \
+       .deptmp >>$mf.new
 else
+    $echo "Should not get here"
+    exit 1
     $MAKE hlist || ($echo "Searching for .h files..."; \
 	$echo *.h | $tr ' ' $trnl | $egrep -v '\*' >.hlist)
     $echo "You don't seem to have a proper C preprocessor.  Using grep instead."
@@ -237,10 +157,6 @@ else
        $sed -f .hsed >> $mf.new
     <.deptmp $sed -n 's|h:#include "\(.*\)".*$|h: \1|p' | \
        $sed -f .hsed >> $mf.new
-    for file in `$cat .shlist`; do
-	$echo `$expr X$file : 'X\(.*\).SH'`: $file $TOP/config.sh \; \
-	    $sh $file >> $mf.new
-    done
 fi
 $rm -f $mf.old
 $cp $mf $mf.old
@@ -248,15 +164,9 @@ $rm -f $mf
 $cp $mf.new $mf
 $rm $mf.new
 $echo "# WARNING: Put nothing here or make depend will gobble it up!" >> $mf
-$rm -rf .deptmp UU .shlist .clist .hlist .hsed .cout .cerr
+$rm -rf .deptmp UU .clist .hlist .hsed .cout .cerr
 rmdir .depending
 
 !NO!SUBS!
 $eunicefix makedepend
 chmod +x makedepend
-case `pwd` in
-*SH)
-    $rm -f ../makedepend
-    ln makedepend ../makedepend
-    ;;
-esac

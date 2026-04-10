@@ -34,26 +34,31 @@ to the test script.
 use parent qw/ Exporter /;
 require XSLoader;
 
-use vars qw/ $VERSION @EXPORT /;
+our $VERSION = '0.20';
 
-$VERSION = '0.08';
-
-@EXPORT = (qw/
+our @EXPORT = (qw/
 	   T_SV
+           T_SV_output
 	   T_SVREF
 	   T_SVREF_REFCOUNT_FIXED
+           T_SVREF_REFCOUNT_FIXED_output
 	   T_AVREF
 	   T_AVREF_REFCOUNT_FIXED
+           T_AVREF_REFCOUNT_FIXED_output
 	   T_HVREF
 	   T_HVREF_REFCOUNT_FIXED
+	   T_HVREF_REFCOUNT_FIXED_output
 	   T_CVREF
 	   T_CVREF_REFCOUNT_FIXED
+	   T_CVREF_REFCOUNT_FIXED_output
 	   T_SYSRET_fail T_SYSRET_pass
 	   T_UV
 	   T_IV
 	   T_INT
            T_ENUM
            T_BOOL
+           T_BOOL_2
+           T_BOOL_OUT
            T_U_INT
            T_SHORT
            T_U_SHORT
@@ -64,7 +69,7 @@ $VERSION = '0.08';
            T_FLOAT
            T_NV
 	   T_DOUBLE
-	   T_PV
+	   T_PV T_PV_null
 	   T_PTR_IN T_PTR_OUT
 	   T_PTRREF_IN T_PTRREF_OUT
 	   T_REF_IV_REF
@@ -74,7 +79,7 @@ $VERSION = '0.08';
 	   T_OPAQUEPTR_IN T_OPAQUEPTR_OUT T_OPAQUEPTR_OUT_short
            T_OPAQUEPTR_IN_struct T_OPAQUEPTR_OUT_struct
 	   T_ARRAY
-	   T_STDIO_open T_STDIO_close T_STDIO_print
+	   T_STDIO_open T_STDIO_open_ret_in_arg T_STDIO_close T_STDIO_print
            T_PACKED_in T_PACKED_out
            T_PACKEDARRAY_in T_PACKEDARRAY_out
            T_INOUT T_IN T_OUT

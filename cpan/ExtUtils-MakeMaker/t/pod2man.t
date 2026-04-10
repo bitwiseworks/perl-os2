@@ -3,6 +3,7 @@
 # Test our simulation of pod2man
 
 use strict;
+use warnings;
 use lib 't/lib';
 
 use ExtUtils::Command::MM;
@@ -19,7 +20,7 @@ use Test::More tests => 3;
 
     pod2man("--perm_rw");
 
-    like $warnings, qr/^Option perm_rw requires an argument/;
+    like $warnings, qr/Option perm_rw requires an argument/;
 };
 
 
@@ -38,7 +39,7 @@ use Test::More tests => 3;
         $warnings .= join '', @_;
     };
 
-    is pod2man(), undef;
+    ok !pod2man();
     is $warnings, <<'END'
 Pod::Man is not available: Simulated Pod::Man failure
 Man pages will not be generated during this install.

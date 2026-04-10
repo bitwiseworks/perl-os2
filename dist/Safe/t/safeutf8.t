@@ -1,18 +1,14 @@
 #!perl -w
-$|=1;
-BEGIN {
-    require Config; import Config;
-    if ($Config{'extensions'} !~ /\bOpcode\b/ && $Config{'osname'} ne 'VMS') {
-        print "1..0\n";
-        exit 0;
-    }
-}
-
-use Test::More tests => 7;
+use Config;
+use Test::More
+    $Config{'extensions'} =~ /\bOpcode\b/ || $Config{'osname'} eq 'VMS'
+        ? (tests => 7)
+        : (skip_all => "no Opcode extension and we're not on VMS");
 
 use Safe 1.00;
 use Opcode qw(full_opset);
 
+$| = 1;
 pass;
 
 my $safe = Safe->new('PLPerl');
@@ -21,13 +17,14 @@ $safe->deny_only();
 # Expression that triggers require utf8 and call to SWASHNEW.
 # Fails with "Undefined subroutine PLPerl::utf8::SWASHNEW called"
 # if SWASHNEW is not shared, else returns true if unicode logic is working.
-my $trigger = q{ my $a = pack('U',0xC4); my $b = chr 0xE4; utf8::upgrade $b; $a =~ /$b/i };
+# (For early Perls we don't take into account EBCDIC, so will fail there
+my $trigger = q{ my $a = pack('U',0xB6); $a =~ tr/\x{1234}//rd };
 
 ok $safe->reval( $trigger ), 'trigger expression should return true';
 is $@, '', 'trigger expression should not die';
 
 # return a closure
-my $sub = $safe->reval(q{sub { warn pack('U',0xC4) }});
+my $sub = $safe->reval(q{sub { warn pack('U',0xB6) }});
 
 # define code outside Safe that'll be triggered from inside
 my @warns;

@@ -1,6 +1,7 @@
 #!/usr/bin/perl -w
 
 use strict;
+use warnings;
 
 BEGIN {
     use lib 't/lib';
@@ -748,7 +749,7 @@ END_TAP
 
     # now too high a version
     $tap = <<'END_TAP';
-TAP version 14
+TAP version 42
 1..2
 ok 1 - input file opened
 ok 2 - Gandalf wins
@@ -763,7 +764,7 @@ END_TAP
     is @errors, 1, 'test too high version number';
 
     like pop @errors,
-      qr/TAP specified version 14 but we don't know about versions later than 13/,
+      qr/TAP specified version 42 but we don't know about versions later than 14/,
       '... and trapped expected version error';
 }
 
@@ -802,9 +803,8 @@ END_TAP
     package TAP::Parser::Iterator::Dies;
 
     use strict;
-    use vars qw(@ISA);
 
-    @ISA = qw(TAP::Parser::Iterator);
+    use base qw(TAP::Parser::Iterator);
 
     sub next_raw {
         die 'this is the dying iterator';
@@ -898,9 +898,8 @@ END_TAP
     # coverage testing of TAP::Parser::_next_state
 
     package TAP::Parser::WithBrokenState;
-    use vars qw(@ISA);
 
-    @ISA = qw( TAP::Parser );
+    use base qw( TAP::Parser );
 
     sub _make_state_table {
         return { INIT => { plan => { goto => 'FOO' } } };
@@ -936,9 +935,8 @@ END_TAP
     # coverage testing of TAP::Parser::_iter
 
     package TAP::Parser::WithBrokenIter;
-    use vars qw(@ISA);
 
-    @ISA = qw( TAP::Parser );
+    use base qw( TAP::Parser );
 
     sub _iter {return}
 

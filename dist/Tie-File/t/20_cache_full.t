@@ -1,9 +1,13 @@
 #!/usr/bin/perl
+
+use strict;
+use warnings;
+
 #
 # Tests for various caching errors
 #
 
-my $file = "tf$$.txt";
+my $file = "tf20-$$.txt";
 $: = Tie::File::_default_recsep();
 my $data = join $:, "record0" .. "record9", "";
 my $V = $ENV{INTEGRITY};        # Verbose integrity checking?
@@ -14,7 +18,7 @@ my $N = 1;
 use Tie::File;
 print "ok $N\n"; $N++;
 
-open F, "> $file" or die $!;
+open F, '>', $file or die $!;
 binmode F;
 print F $data;
 close F;
@@ -22,6 +26,7 @@ close F;
 # Limit cache size to 30 bytes 
 my $MAX = 30;
 #  -- that's enough space for 3 records, but not 4, on both \n and \r\n systems
+my @a;
 my $o = tie @a, 'Tie::File', $file, memory => $MAX, autodefer => 0;
 print $o ? "ok $N\n" : "not ok $N\n";
 $N++;
@@ -192,7 +197,7 @@ check();
 
 sub init_file {
   my $data = shift;
-  open F, "> $file" or die $!;
+  open F, '>', $file or die $!;
   binmode F;
   print F $data;
   close F;

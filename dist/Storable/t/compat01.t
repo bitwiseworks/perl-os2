@@ -1,22 +1,16 @@
 #!perl -w
 
-BEGIN {
-    unshift @INC, 't';
-    unshift @INC, 't/compat' if $] < 5.006002;
-    require Config; import Config;
-    if ($ENV{PERL_CORE} and $Config{'extensions'} !~ /\bStorable\b/) {
-        print "1..0 # Skip: Storable was not built\n";
-        exit 0;
-    }
+use strict;
+use warnings;
 
-    use Config;
+use Config;
+BEGIN {
     if ($Config{byteorder} ne "1234") {
-	print "1..0 # Skip: Test only works for 32 bit little-ending machines\n";
-	exit 0;
+        print "1..0 # Skip: Test only works for 32 bit little-ending machines\n";
+        exit 0;
     }
 }
 
-use strict;
 use Storable qw(retrieve);
 use Test::More;
 
@@ -33,7 +27,7 @@ my $testno;
 for my $dump (@dumps) {
     $testno++;
 
-    open(FH, ">$file") || die "Can't create $file: $!";
+    open(FH, '>', $file) || die "Can't create $file: $!";
     binmode(FH);
     print FH $dump;
     close(FH) || die "Can't write $file: $!";

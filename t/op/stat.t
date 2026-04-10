@@ -2,10 +2,12 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
     require './test.pl';	# for which_perl() etc
+    set_up_inc('../lib');
 }
 
+use strict;
+use warnings;
 use Config;
 
 my ($Null, $Curdir);
@@ -19,30 +21,39 @@ if(eval {require File::Spec; 1}) {
     diag("\ncontinuing, assuming '.' for current directory. Some tests will be skipped.");
 }
 
+if ($^O eq 'MSWin32') {
+    # under minitest, buildcustomize sets this to 1, which means
+    # nlinks isn't populated properly, allow nlinks tests to pass
+    ${^WIN32_SLOPPY_STAT} = 0;
+}
 
-plan tests => 113;
+my $Errno_loaded = eval { require Errno };
+
+plan tests => 111;
 
 my $Perl = which_perl();
 
-$Is_Amiga   = $^O eq 'amigaos';
-$Is_Cygwin  = $^O eq 'cygwin';
-$Is_Darwin  = $^O eq 'darwin';
-$Is_Dos     = $^O eq 'dos';
-$Is_MPE     = $^O eq 'mpeix';
-$Is_MSWin32 = $^O eq 'MSWin32';
-$Is_NetWare = $^O eq 'NetWare';
-$Is_OS2     = $^O eq 'os2';
-$Is_Solaris = $^O eq 'solaris';
-$Is_VMS     = $^O eq 'VMS';
-$Is_DGUX    = $^O eq 'dgux';
-$Is_MPRAS   = $^O =~ /svr4/ && -f '/etc/.relid';
-$Is_Rhapsody= $^O eq 'rhapsody';
+$ENV{LC_ALL}   = 'C';		# Forge English error messages.
+$ENV{LANGUAGE} = 'C';		# Ditto in GNU.
 
-$Is_Dosish  = $Is_Dos || $Is_OS2 || $Is_MSWin32 || $Is_NetWare;
+my $Is_Amiga   = $^O eq 'amigaos';
+my $Is_Cygwin  = $^O eq 'cygwin';
+my $Is_Darwin  = $^O eq 'darwin';
+my $Is_MSWin32 = $^O eq 'MSWin32';
+my $Is_OS2     = $^O eq 'os2';
+my $Is_Solaris = $^O eq 'solaris';
+my $Is_VMS     = $^O eq 'VMS';
+my $Is_MPRAS   = $^O =~ /svr4/ && -f '/etc/.relid';
+my $Is_Android = $^O =~ /android/;
+my $Is_Dfly    = $^O eq 'dragonfly';
 
-$Is_UFS     = $Is_Darwin && (() = `df -t ufs . 2>/dev/null`) == 2;
+my $Is_Dosish  = $Is_OS2 || $Is_MSWin32;
 
-if ($Is_Cygwin) {
+my $ufs_no_ctime = ($Is_Dfly || $Is_Darwin) && (() = `df -t ufs . 2>/dev/null`) == 2;
+
+my $Is_linux_container = is_linux_container();
+
+if ($Is_Cygwin && !is_miniperl) {
   require Win32;
   Win32->import;
 }
@@ -76,7 +87,7 @@ SKIP: {
 
 SKIP: {
   skip "mtime and ctime not reliable", 2
-    if $Is_MSWin32 or $Is_NetWare or $Is_Cygwin or $Is_Dos or $Is_Darwin;
+    if $Is_MSWin32 or $Is_Cygwin or $Is_Darwin;
 
   ok( $mtime,           'mtime' );
   is( $mtime, $ctime,   'mtime == ctime' );
@@ -92,8 +103,17 @@ close(FOO);
 
 sleep 2;
 
+my $has_link = 1;
+my $inaccurate_atime = 0;
+if (defined &Win32::IsWinNT && Win32::IsWinNT()) {
+    if (Win32::FsType() ne 'NTFS') {
+        $has_link            = 0;
+	$inaccurate_atime    = 1;
+    }
+}
 
 SKIP: {
+    skip "No link on this filesystem", 6 unless $has_link;
     unlink $tmpfile_link;
     my $lnk_result = eval { link $tmpfile, $tmpfile_link };
     skip "link() unimplemented", 6 if $@ =~ /unimplemented/;
@@ -124,20 +144,23 @@ SKIP: {
                                      if $Is_Amiga;
         # Win32 could pass $mtime test but as FAT and NTFS have
         # no ctime concept $ctime is ALWAYS == $mtime
-        # expect netware to be the same ...
         skip "No ctime concept on this OS", 2
-                                     if $Is_MSWin32 || 
-                                        ($Is_Darwin && $Is_UFS);
-
-        if( !ok($mtime, 'hard link mtime') ||
+                                     if $Is_MSWin32 || $ufs_no_ctime;
+        my $ok_mtime = ok($mtime, 'hard link mtime');
+        local our $TODO;
+        # https://bugs.dragonflybsd.org/issues/3251
+        # this might be hammer/hammer2 specific
+        $TODO = "DragonFly BSD doesn't touch ctime on link()/chmod"
+            if $^O eq "dragonfly" && $Config{myuname} =~ /5\.8/;
+        if(!$ok_mtime ||
             !isnt($mtime, $ctime, 'hard link ctime != mtime') ) {
             print STDERR <<DIAG;
 # Check if you are on a tmpfs of some sort.  Building in /tmp sometimes
 # has this problem.  Building on the ClearCase VOBS filesystem may also
 # cause this failure.
 #
-# Darwin's UFS doesn't have a ctime concept, and thus is expected to fail
-# this test.
+# Some UFS implementations don't have a ctime concept, and thus are
+# expected to fail this test.
 DIAG
         }
     }
@@ -177,13 +200,9 @@ SKIP: {
         my $olduid = $>;
         eval { $> = 1; };
         skip "Can't test -r or -w meaningfully if you're superuser", 2
-          if ($Is_Cygwin ? Win32::IsAdminUser : $> == 0);
+          if ($Is_Cygwin ? _ingroup(544, 1) : $> == 0);
 
-        SKIP: {
-            skip "Can't test -r meaningfully?", 1 if $Is_Dos;
             ok(!-r $tmpfile,    "   -r");
-        }
-
         ok(!-w $tmpfile,    "   -w");
 
         # switch uid back (may not be implemented)
@@ -217,7 +236,10 @@ ok(! -f '.',          '!-f cwd' );
 SKIP: {
     unlink($tmpfile_link);
     my $symlink_rslt = eval { symlink $tmpfile, $tmpfile_link };
+    my $error = 0 + $!;
     skip "symlink not implemented", 3 if $@ =~ /unimplemented/;
+    skip "symlink not available or we can't check", 3
+        if $^O eq "MSWin32" && (!$Errno_loaded || $error == &Errno::ENOSYS || $error == &Errno::EPERM);
 
     is( $@, '',     'symlink() implemented' );
     ok( $symlink_rslt,      'symlink() ok' );
@@ -233,7 +255,7 @@ ok(! -e $tmpfile_link,  '   -e on unlinked file');
 
 SKIP: {
     skip "No character, socket or block special files", 6
-      if $Is_MSWin32 || $Is_NetWare || $Is_Dos;
+      if $Is_MSWin32;
     skip "/dev isn't available to test against", 6
       unless -d '/dev' && -r '/dev' && -x '/dev';
     skip "Skipping: unexpected ls output in MP-RAS", 6
@@ -249,7 +271,8 @@ SKIP: {
     skip "ls command not available to Perl in OpenVMS right now.", 6
       if $Is_VMS;
 
-    my $LS  = $Config{d_readlink} ? "ls -lL" : "ls -l";
+    delete $ENV{CLICOLOR_FORCE};
+    my $LS  = $Config{d_readlink} && !$Is_Android ? "ls -lL" : "ls -l";
     my $CMD = "$LS /dev 2>/dev/null";
     my $DEV = qx($CMD);
 
@@ -279,6 +302,11 @@ SKIP: {
     $DEV =~ s{^.+?\s\..+?$}{}m;
     @DEV =  grep { ! m{^\..+$} } @DEV;
 
+    # sometimes files cannot be stat'd on cygwin, making inspecting pointless
+    # remove them from both @DEV and $DEV
+    @DEV = grep $DEV =~ s/^.\?{9}.*\s$_(?: -> .*)?$//m ? () : $_, @DEV
+      if $Is_Cygwin;
+
     # Irix ls -l marks sockets with 'S' while 's' is a 'XENIX semaphore'.
     if ($^O eq 'irix') {
         $DEV =~ s{^S(.+?)}{s$1}mg;
@@ -289,16 +317,14 @@ SKIP: {
 	my @c2 = eval qq[grep { $_[1] "/dev/\$_" } \@DEV];
 	my $c1 = scalar @c1;
 	my $c2 = scalar @c2;
-	is($c1, $c2, "ls and $_[1] agreeing on /dev ($c1 $c2)");
+	diag "= before", $DEV, "-", @DEV, "= after", @c1, "-", @c2, "="
+	  unless is($c1, $c2, "ls and $_[1] agreeing on /dev ($c1 $c2)");
     };
 
-SKIP: {
-    skip("DG/UX ls -L broken", 3) if $Is_DGUX;
-
+{
     $try->('b', '-b');
     $try->('c', '-c');
     $try->('s', '-S');
-
 }
 
 ok(! -b $Curdir,    '!-b cwd');
@@ -340,11 +366,12 @@ SKIP: {
 # can be set to skip the tests that need a tty.
 SKIP: {
     skip "These tests require a TTY", 4 if $ENV{PERL_SKIP_TTY_TEST};
+    skip "Skipping TTY tests on linux containers", 4 if $Is_linux_container;
 
-    my $TTY = $Is_Rhapsody ? "/dev/ttyp0" : "/dev/tty";
+    my $TTY = "/dev/tty";
 
     SKIP: {
-        skip "Test uses unixisms", 2 if $Is_MSWin32 || $Is_NetWare;
+        skip "Test uses unixisms", 2 if $Is_MSWin32;
         skip "No TTY to test -t with", 2 unless -e $TTY;
 
         open(TTY, $TTY) ||
@@ -356,7 +383,7 @@ SKIP: {
     ok(! -t TTY,    '!-t on closed TTY filehandle');
 
     {
-        local $TODO = 'STDIN not a tty when output is to pipe' if $Is_VMS;
+        local our $TODO = 'STDIN not a tty when output is to pipe' if $Is_VMS;
         ok(-t,          '-t on STDIN');
     }
 }
@@ -375,12 +402,7 @@ SKIP: {
 my $statfile = './op/stat.t';
 ok(  -T $statfile,    '-T');
 ok(! -B $statfile,    '!-B');
-
-SKIP: {
-     skip("DG/UX", 1) if $Is_DGUX;
 ok(-B $Perl,      '-B');
-}
-
 ok(! -T $Perl,    '!-T');
 
 open(FOO,$statfile);
@@ -433,7 +455,7 @@ ok(-f(),    '     -f() "');
 
 unlink $tmpfile or print "# unlink failed: $!\n";
 
-# bug id 20011101.069
+# bug id 20011101.069 (#7861)
 my @r = \stat($Curdir);
 is(scalar @r, 13,   'stat returns full 13 elements');
 
@@ -467,21 +489,30 @@ like $@, qr/^The stat preceding lstat\(\) wasn't an lstat at /,
 'stat $ioref resets stat type';
 
 {
-    my @statbuf = stat STDOUT;
+    open(FOO, ">$tmpfile") || DIE("Can't open temp test file: $!");
+    my @statbuf = stat FOO;
     stat "test.pl";
-    my @lstatbuf = lstat *STDOUT{IO};
+    no warnings 'io';
+    my @lstatbuf = lstat *FOO{IO};
     is "@lstatbuf", "@statbuf", 'lstat $ioref reverts to regular fstat';
+    close(FOO);
+    unlink $tmpfile or print "# unlink failed: $!\n";
 }
   
 SKIP: {
-    skip "No lstat", 2 unless $Config{d_lstat};
+    skip "No lstat", 2 unless $Config{d_lstat} && $Config{d_symlink};
 
-    # bug id 20020124.004
-    # If we have d_lstat, we should have symlink()
+    # bug id 20020124.004 (#8334)
     my $linkname = 'stat-' . rand =~ y/.//dr;
     my $target = $Perl;
     $target =~ s/;\d+\z// if $Is_VMS; # symlinks don't like version numbers
-    symlink $target, $linkname or die "# Can't symlink $0: $!";
+    unless (symlink $target, $linkname) {
+        if ($^O eq "MSWin32") {
+            # likely we don't have permission
+            skip "symlink failed: $!", 2;
+        }
+        die "# Can't symlink $0: $!";
+    }
     lstat $linkname;
     -T _;
     eval { lstat _ };
@@ -507,13 +538,20 @@ SKIP: {
     my @b = (-M _, -A _, -C _);
     print "# -MAC=(@b)\n";
     ok( (-M _) < 0, 'negative -M works');
-    ok( (-A _) < 0, 'negative -A works');
+  SKIP:
+    {
+        skip "Access timestamps inaccurate", 1 if $inaccurate_atime;
+        ok( (-A _) < 0, 'negative -A works');
+    }
     ok( (-C _) < 0, 'negative -C works');
     ok(unlink($f), 'unlink tmp file');
 }
 
 # [perl #4253]
+SKIP:
 {
+    skip "AFS", 3 # github 22067
+      if $Config{afs} eq "true" && ($Curdir eq '.' || $Curdir =~ /^\Q$Config{afsroot}/);
     ok(open(F, ">", $tmpfile), 'can create temp file');
     close F;
     chmod 0077, $tmpfile;
@@ -523,9 +561,13 @@ SKIP: {
     my $s2 = -s _;
     is($s1, $s2, q(-T _ doesn't break the statbuffer));
     SKIP: {
+	my $root_uid = $Is_Cygwin ? 18 : 0;
 	skip "No lstat", 1 unless $Config{d_lstat};
-	skip "uid=0", 1 unless $<&&$>;
-	skip "Readable by group/other means readable by me", 1 if $^O eq 'VMS';
+	skip "uid=0", 1 if $< == $root_uid or $> == $root_uid;
+	skip "Can't check if admin user in miniperl", 1
+	  if $^O =~ /^(cygwin|MSWin32|msys)$/ && is_miniperl();
+	skip "Readable by group/other means readable by me on $^O", 1 if $^O eq 'VMS'
+          or ($^O =~ /^(cygwin|MSWin32|msys)$/ and Win32::IsAdminUser());
 	lstat($tmpfile);
 	-T _;
 	ok(eval { lstat _ },
@@ -535,25 +577,12 @@ SKIP: {
 }
 
 SKIP: {
-    skip "No dirfd()", 9 unless $Config{d_dirfd} || $Config{d_dir_dd_fd};
+    skip "No dirfd()", 4 unless $Config{d_dirfd} || $Config{d_dir_dd_fd};
     ok(opendir(DIR, "."), 'Can open "." dir') || diag "Can't open '.':  $!";
     ok(stat(DIR), "stat() on dirhandle works"); 
     ok(-d -r _ , "chained -x's on dirhandle"); 
     ok(-d DIR, "-d on a dirhandle works");
-
-    # And now for the ambiguous bareword case
-    {
-	no warnings 'deprecated';
-	ok(open(DIR, "TEST"), 'Can open "TEST" dir')
-	    || diag "Can't open 'TEST':  $!";
-    }
-    my $size = (stat(DIR))[7];
-    ok(defined $size, "stat() on bareword works");
-    is($size, -s "TEST", "size returned by stat of bareword is for the file");
-    ok(-f _, "ambiguous bareword uses file handle, not dir handle");
-    ok(-f DIR);
     closedir DIR or die $!;
-    close DIR or die $!;
 }
 
 {
@@ -568,32 +597,17 @@ SKIP: {
     #PVIO's hold dirhandle information, so let's test them too.
 
     SKIP: {
-        skip "No dirfd()", 9 unless $Config{d_dirfd} || $Config{d_dir_dd_fd};
+        skip "No dirfd()", 4 unless $Config{d_dirfd} || $Config{d_dir_dd_fd};
         ok(opendir(DIR, "."), 'Can open "." dir') || diag "Can't open '.':  $!";
         ok(stat(*DIR{IO}), "stat() on *DIR{IO} works");
 	ok(-d _ , "The special file handle _ is set correctly"); 
         ok(-d -r *DIR{IO} , "chained -x's on *DIR{IO}");
-
-	# And now for the ambiguous bareword case
-	{
-	    no warnings 'deprecated';
-	    ok(open(DIR, "TEST"), 'Can open "TEST" dir')
-		|| diag "Can't open 'TEST':  $!";
-	}
-	my $size = (stat(*DIR{IO}))[7];
-	ok(defined $size, "stat() on *THINGY{IO} works");
-	is($size, -s "TEST",
-	   "size returned by stat of *THINGY{IO} is for the file");
-	ok(-f _, "ambiguous *THINGY{IO} uses file handle, not dir handle");
-	ok(-f *DIR{IO});
 	closedir DIR or die $!;
-	close DIR or die $!;
     }
 }
 
 # [perl #71002]
 {
-    local $^W = 1;
     my $w;
     local $SIG{__WARN__} = sub { warn shift; ++$w };
     stat 'prepeinamehyparcheiarcheiometoonomaavto';
@@ -601,7 +615,84 @@ SKIP: {
     is $w, undef, 'no unopened warning from stat _';
 }
 
+{
+    # [perl #123816]
+    # Inappropriate stacking of l?stat with filetests should either work or
+    # give a syntax error, they shouldn't crash.
+    eval { stat -t };
+    ok(1, 'can "stat -t" without crashing');
+	eval { lstat -t };
+    ok(1, 'can "lstat -t" without crashing');
+}
+
+# [perl #126064] stat stat stack busting
+is join("-", 1,2,3,(stat stat stat),4,5,6), "1-2-3-4-5-6",
+  'stat inside stat gets scalar context';
+
+# [perl #126162] stat an array should not work
+# skip if -e '2'.
+SKIP:
+{
+    skip "There is a file named '2', which invalidates this test", 2 if -e '2';
+
+    my @statarg = ($statfile, $statfile);
+    no warnings 'syntax';
+    ok !stat(@statarg),
+    'stat on an array of valid paths should warn and should not return any data';
+    my $error = 0+$!;
+    skip "Errno not available", 1
+      unless $Errno_loaded;
+    is $error, &Errno::ENOENT,
+      'stat on an array of valid paths should return ENOENT';
+}
+
+# [perl #131895] stat() doesn't fail on filenames containing \0 / NUL
+{
+    no warnings 'syscalls';
+    ok !stat("TEST\0-"), 'stat on filename with \0';
+}
+SKIP: {
+    my $link = "stat_t_$$\_TEST.symlink";
+    my $can_symlink = eval { symlink "TEST", $link };
+    skip "cannot symlink", 1 unless $can_symlink;
+    no warnings 'syscalls';
+    ok !lstat("$link\0-"), 'lstat on filename with \0';
+    unlink $link;
+}
+
+ SKIP:
+{
+    # test needs a FreeBSD /usr/bin/stat
+    # /tmp is typically tmpfs on a new FreeBSD
+    $^O eq "freebsd"
+        or skip "only checking freebsd for now", 1;
+    -x "/usr/bin/stat"
+        or skip "no /usr/bin/stat", 1;
+    my @s = stat "/tmp";
+    @s or skip "No /tmp found", 1;
+    my $test = `/usr/bin/stat -f '%d %i' /tmp`;
+    $test && $test =~ /^-?\d+ -?\d+/
+        or skip "stat didn't return an expected result";
+    chomp $test;
+    is("$s[0] $s[1]", $test,
+       "perl stat didn't match system stat utility");
+}
+
 END {
     chmod 0666, $tmpfile;
     unlink_all $tmpfile;
+}
+
+sub _ingroup {
+    my ($gid, $eff)   = @_;
+
+    $^O eq "VMS"    and return $_[0] == $);
+
+    my ($egid, @supp) = split " ", $);
+    my ($rgid)        = split " ", $(;
+
+    $gid == ($eff ? $egid : $rgid)  and return 1;
+    grep $gid == $_, @supp          and return 1;
+
+    return "";
 }

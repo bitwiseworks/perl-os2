@@ -40,13 +40,13 @@ while (<$fh>) {
 }
 close $fh;
 
-plan(tests => scalar @op + 2);
+plan(tests => scalar @op + 3);
 
 sub testop {
     my ($op, $opname, $code) = @_;
     pass("$op : skipped") and return if $code =~ /^SKIP/;
     pass("$op : skipped") and return if $code =~ m://|~~: && $] < 5.010;
-    my $c = new Safe;
+    my $c = Safe->new;
     $c->deny_only($op);
     $c->reval($code);
     like($@, qr/'\Q$opname\E' trapped by operation mask/, $op);
@@ -56,7 +56,7 @@ foreach (@op) {
     if ($_->[2]) {
 	testop @$_;
     } else {
-	local our $TODO = "No test yet for $_->[1]";
+	local our $TODO = "No test yet for $_->[0] ($_->[1])";
 	fail();
     }
 }
@@ -81,6 +81,16 @@ foreach (@op) {
 	),
 	qr/Unbalanced/,
 	'No Unbalanced warnings when disallowing ops';
+    unlike
+	runperl(
+	    switches => [ '-MSafe', '-w' ],
+	    prog     => 'Safe->new->reval('
+			. 'q(BEGIN{$^H{foo}=bar};use strict), 0'
+			.')',
+	    stderr   => 1,
+	),
+	qr/Unbalanced/,
+	'No Unbalanced warnings when disallowing ops with %^H set';
 }
 
 # things that begin with SKIP are skipped, for various reasons (notably
@@ -101,7 +111,6 @@ padsv		SKIP my $x
 padav		SKIP my @x
 padhv		SKIP my %x
 padany		SKIP (not implemented)
-pushre		SKIP split /foo/
 rv2gv		*x
 rv2sv		$x
 av2arylen	$#x
@@ -225,6 +234,8 @@ exists		exists $h{Key}
 rv2hv		%h
 helem		$h{kEy}
 hslice		@h{kEy}
+multiconcat	SKIP (set by optimizer)
+multideref	SKIP (set by optimizer)
 unpack		unpack
 pack		pack
 split		split /foo/
@@ -276,7 +287,7 @@ return		return
 last		last
 next		next
 redo		redo THIS
-dump		dump
+dump		CORE::dump
 goto		goto THERE
 exit		exit 0
 open		open FOO
@@ -436,14 +447,13 @@ egrent		endgrent
 getlogin	getlogin
 syscall		syscall
 lock		SKIP
-threadsv	SKIP
 setstate	SKIP
 method_named	$x->y()
 dor		$x // $y
 dorassign	$x //= $y
 once		SKIP {use feature 'state'; state $foo = 42;}
 say		SKIP {use feature 'say'; say "foo";}
-smartmatch	$x ~~ $y
+smartmatch	no warnings 'deprecated'; $x ~~ $y
 aeach		SKIP each @t
 akeys		SKIP keys @t
 avalues		SKIP values @t

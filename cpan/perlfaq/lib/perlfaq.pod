@@ -1,6 +1,10 @@
 =head1 NAME
 
-perlfaq - frequently asked questions about Perl
+perlfaq - Frequently asked questions about Perl
+
+=head1 VERSION
+
+version 5.20250619
 
 =head1 DESCRIPTION
 
@@ -11,7 +15,7 @@ into nine major sections outlined in this document.
 =head2 Where to find the perlfaq
 
 The perlfaq is an evolving document.  Read the latest version at
-L<http://learn.perl.org/faq/>.  It is also included in the standard Perl
+L<https://perldoc.perl.org/perlfaq>.  It is also included in the standard Perl
 distribution.
 
 =head2 How to use the perlfaq
@@ -31,9 +35,8 @@ Review L<https://github.com/perl-doc-cats/perlfaq/wiki>.  If you don't find
 your suggestion create an issue or pull request against
 L<https://github.com/perl-doc-cats/perlfaq>.
 
-Once approved, changes are merged into L<https://github.com/tpf/perlfaq>, the
-repository which drives L<http://learn.perl.org/faq/>, and they are
-distributed with the next Perl 5 release.
+Once approved, changes will be distributed with the next Perl release and
+subsequently appear at L<https://perldoc.perl.org/perlfaq>.
 
 =head2 What if my question isn't answered in the FAQ?
 
@@ -85,15 +88,15 @@ Which version of Perl should I use?
 
 =item *
 
-What are Perl 4, Perl 5, or Perl 6?
-
-=item *
-
-What is Perl 6?
+What is Raku (Perl 6)?
 
 =item *
 
 How stable is Perl?
+
+=item *
+
+How often are new versions of Perl released?
 
 =item *
 
@@ -468,6 +471,10 @@ How can I expand variables in text strings?
 
 =item *
 
+Does Perl have anything like Ruby's #{} or Python's f string?
+
+=item *
+
 What's wrong with always quoting "$vars"?
 
 =item *
@@ -689,15 +696,15 @@ How can I use a filehandle indirectly?
 
 =item *
 
+How can I open a filehandle to a string?
+
+=item *
+
 How can I set up a footer format to be used with write()?
 
 =item *
 
 How can I write() into a string?
-
-=item *
-
-How can I open a filehandle to a string?
 
 =item *
 
@@ -709,7 +716,7 @@ How can I translate tildes (~) in a filename?
 
 =item *
 
-How come when I open a file read-write it wipes it out?
+When I open a file read-write, why does it wipe it out?
 
 =item *
 
@@ -717,7 +724,7 @@ Why do I sometimes get an "Argument list too long" when I use E<lt>*E<gt>?
 
 =item *
 
-How can I open a file with a leading "E<gt>" or trailing blanks?
+How can I open a file named with a leading "E<gt>" or trailing blanks?
 
 =item *
 
@@ -1049,6 +1056,10 @@ How can I use a variable as a variable name?
 
 What does "bad interpreter" mean?
 
+=item *
+
+Do I need to recompile XS modules when there is a change in the C library?
+
 =back
 
 
@@ -1064,7 +1075,7 @@ How do I find out which operating system I'm running under?
 
 =item *
 
-How come exec() doesn't return?
+Why does exec() not return?
 
 =item *
 
@@ -1256,6 +1267,10 @@ How do I add a directory to my include path (@INC) at runtime?
 
 =item *
 
+Where are modules installed?
+
+=item *
+
 What is socket.ph and where do I get it?
 
 =back
@@ -1358,14 +1373,14 @@ How can I do RPC in Perl?
 =head1 CREDITS
 
 Tom Christiansen wrote the original perlfaq then expanded it with the
-help of Nat Torkington. brian d foy substantialy edited and expanded
+help of Nat Torkington. brian d foy substantially edited and expanded
 the perlfaq. perlfaq-workers and others have also supplied feedback,
 patches and corrections over the years.
 
 =head1 AUTHOR AND COPYRIGHT
 
 Tom Christiansen wrote the original version of this document.
-brian d foy C<< <bdfoy@cpan.org> >> wrote this version. See the
+brian d foy C<< <briandfoy@pobox.com> >> wrote this version. See the
 individual perlfaq documents for additional copyright information.
 
 This document is available under the same terms as Perl itself. Code

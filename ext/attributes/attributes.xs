@@ -15,6 +15,8 @@
  *     [p.597 of _The Lord of the Rings_, III/xi: "The Palantír"]
  */
 
+#define PERL_EXT
+
 #define PERL_NO_GET_CONTEXT
 
 #include "EXTERN.h"
@@ -28,7 +30,6 @@
 static int
 modify_SV_attributes(pTHX_ SV *sv, SV **retlist, SV **attrlist, int numattrs)
 {
-    dVAR;
     SV *attr;
     int nret;
 
@@ -44,14 +45,28 @@ modify_SV_attributes(pTHX_ SV *sv, SV **retlist, SV **attrlist, int numattrs)
 	switch (SvTYPE(sv)) {
 	case SVt_PVCV:
 	    switch ((int)len) {
+	    case 5:
+		if (memEQs(name, 5, "const")) {
+		    if (negated)
+			CvANONCONST_off(sv);
+		    else {
+			const bool warn = (!CvANON(sv) || CvCLONED(sv))
+				       && !CvANONCONST(sv);
+			CvANONCONST_on(sv);
+			if (warn)
+			    break;
+		    }
+		    continue;
+		}
+		break;
 	    case 6:
 		switch (name[3]) {
 		case 'l':
-		    if (memEQ(name, "lvalue", 6)) {
+		    if (memEQs(name, 6, "lvalue")) {
 			bool warn =
 			    !CvISXSUB(MUTABLE_CV(sv))
 			 && CvROOT(MUTABLE_CV(sv))
-			 && !CvLVALUE(MUTABLE_CV(sv)) != negated;
+			 && cBOOL(CvLVALUE(MUTABLE_CV(sv))) == negated;
 			if (negated)
 			    CvFLAGS(MUTABLE_CV(sv)) &= ~CVf_LVALUE;
 			else
@@ -61,20 +76,44 @@ modify_SV_attributes(pTHX_ SV *sv, SV **retlist, SV **attrlist, int numattrs)
 		    }
 		    break;
 		case 'h':
-		    if (memEQ(name, "method", 6)) {
+		    if (memEQs(name, 6, "method")) {
 			if (negated)
-			    CvFLAGS(MUTABLE_CV(sv)) &= ~CVf_METHOD;
+			    CvFLAGS(MUTABLE_CV(sv)) &= ~CVf_NOWARN_AMBIGUOUS;
 			else
-			    CvFLAGS(MUTABLE_CV(sv)) |= CVf_METHOD;
+			    CvFLAGS(MUTABLE_CV(sv)) |= CVf_NOWARN_AMBIGUOUS;
 			continue;
 		    }
 		    break;
 		}
 		break;
+	    default:
+		if (memBEGINPs(name, len, "prototype(")) {
+                    const STRLEN proto_len = sizeof("prototype(") - 1;
+		    SV * proto = newSVpvn(name + proto_len, len - proto_len - 1);
+		    HEK *const hek = CvNAME_HEK((CV *)sv);
+		    SV *subname;
+		    if (name[len-1] != ')')
+			Perl_croak(aTHX_ "Unterminated attribute parameter in attribute list");
+		    if (hek)
+			subname = newSVhek_mortal(hek);
+		    else
+			subname=(SV *)CvGV((const CV *)sv);
+		    if (ckWARN(WARN_ILLEGALPROTO))
+			Perl_validate_proto(aTHX_ subname, proto, TRUE, 0);
+		    Perl_cv_ckproto_len_flags(aTHX_ (const CV *)sv,
+		                                    (const GV *)subname,
+		                                    name+10,
+		                                    len-11,
+		                                    SvUTF8(attr));
+		    sv_setpvn(MUTABLE_SV(sv), name+10, len-11);
+		    if (SvUTF8(attr)) SvUTF8_on(MUTABLE_SV(sv));
+		    continue;
+		}
+		break;
 	    }
 	    break;
 	default:
-	    if (memEQs(name, 6, "shared")) {
+	    if (memEQs(name, len, "shared")) {
 			if (negated)
 			    Perl_croak(aTHX_ "A variable may not be unshared");
 			SvSHARE(sv);
@@ -134,7 +173,7 @@ usage:
 	cvflags = CvFLAGS((const CV *)sv);
 	if (cvflags & CVf_LVALUE)
 	    XPUSHs(newSVpvs_flags("lvalue", SVs_TEMP));
-	if (cvflags & CVf_METHOD)
+	if (cvflags & CVf_NOWARN_AMBIGUOUS)
 	    XPUSHs(newSVpvs_flags("method", SVs_TEMP));
 	break;
     default:
@@ -165,7 +204,7 @@ usage:
 	Perl_sv_sethek(aTHX_ TARG, HvNAME_HEK(SvSTASH(sv)));
 #if 0	/* this was probably a bad idea */
     else if (SvPADMY(sv))
-	sv_setsv(TARG, &PL_sv_no);	/* unblessed lexical */
+	sv_setbool(TARG, FALSE);	/* unblessed lexical */
 #endif
     else {
 	const HV *stash = NULL;
@@ -213,11 +252,5 @@ usage:
 
     XSRETURN(1);
 /*
- * Local variables:
- * c-indentation-style: bsd
- * c-basic-offset: 4
- * indent-tabs-mode: t
- * End:
- *
- * ex: set ts=8 sts=4 sw=4 noet:
+ * ex: set ts=8 sts=4 sw=4 et:
  */

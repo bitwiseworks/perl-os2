@@ -1,5 +1,8 @@
 #!/usr/bin/perl -w
 
+use strict;
+use warnings;
+
 BEGIN {
     unshift @INC, 't/lib';
 }
@@ -8,10 +11,11 @@ chdir 't';
 
 use Config;
 use MakeMaker::Test::Utils;
-use Test::More tests => 16;
+use Test::More tests => 17;
 use File::Spec;
 
 my $TB = Test::More->builder;
+my $perl = which_perl;
 
 BEGIN { use_ok('ExtUtils::MM') }
 
@@ -23,7 +27,7 @@ isa_ok($mm, 'ExtUtils::MM_Any');
 sub try_oneliner {
     my($code, $switches, $expect, $name) = @_;
     my $cmd = $mm->oneliner($code, $switches);
-    $cmd =~ s{\$\(ABSPERLRUN\)}{$^X};
+    $cmd =~ s{\$\(ABSPERLRUN\)}{$perl};
 
     # VMS likes to put newlines at the end of commands if there isn't
     # one already.
@@ -55,6 +59,7 @@ try_oneliner(q{print q[ "&<>^|@() !"&<>^|@() !" ]}, [],  q{ "&<>^|@() !"&<>^|@()
 try_oneliner(q{print q[ "C:\TEST A\" ]}, [],  q{ "C:\TEST A\" },  'example 8.4' );
 try_oneliner(q{print q[ "C:\TEST %&^ A\" ]}, [],  q{ "C:\TEST %&^ A\" },  'example 8.5' );
 
-# XXX gotta rethink the newline test.  The Makefile does newline
-# escaping, then the shell.
-
+try_oneliner(<<CODE, [],    "foobar",                   'newlines' );
+print "foo";
+print "bar";
+CODE

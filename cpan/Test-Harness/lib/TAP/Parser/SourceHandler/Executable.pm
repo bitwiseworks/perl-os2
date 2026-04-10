@@ -1,13 +1,14 @@
 package TAP::Parser::SourceHandler::Executable;
 
 use strict;
-use vars qw($VERSION @ISA);
+use warnings;
 
-use TAP::Parser::SourceHandler     ();
+use File::Spec;
+
 use TAP::Parser::IteratorFactory   ();
 use TAP::Parser::Iterator::Process ();
 
-@ISA = qw(TAP::Parser::SourceHandler);
+use base 'TAP::Parser::SourceHandler';
 
 TAP::Parser::IteratorFactory->register_handler(__PACKAGE__);
 
@@ -17,11 +18,11 @@ TAP::Parser::SourceHandler::Executable - Stream output from an executable TAP so
 
 =head1 VERSION
 
-Version 3.23
+Version 3.50
 
 =cut
 
-$VERSION = '3.23';
+our $VERSION = '3.50';
 
 =head1 SYNOPSIS
 
@@ -108,7 +109,8 @@ sub make_iterator {
         @command = @{ $source->raw->{exec} || [] };
     }
     elsif ( $meta->{is_scalar} ) {
-        @command = ${ $source->raw };
+        @command = File::Spec->rel2abs( ${ $source->raw } )
+          if ${ $source->raw };
     }
     elsif ( $meta->{is_array} ) {
         @command = @{ $source->raw };
@@ -156,12 +158,11 @@ Please see L<TAP::Parser/SUBCLASSING> for a subclassing overview.
   package MyRubySourceHandler;
 
   use strict;
-  use vars '@ISA';
 
   use Carp qw( croak );
   use TAP::Parser::SourceHandler::Executable;
 
-  @ISA = qw( TAP::Parser::SourceHandler::Executable );
+  use base 'TAP::Parser::SourceHandler::Executable';
 
   # expect $handler->(['mytest.rb', 'cmdline', 'args']);
   sub make_iterator {

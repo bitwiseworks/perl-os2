@@ -1,8 +1,9 @@
 use strict;
+use warnings;
+
 use ExtUtils::MakeMaker;
 
 my $is_mswin    = $^O eq 'MSWin32';
-my $is_netware  = $^O eq 'NetWare';
 my $is_vms      = $^O eq 'VMS';
 
 WriteMakefile(
@@ -14,7 +15,8 @@ WriteMakefile(
     VERSION_FROM => 'DynaLoader_pm.PL',
     PL_FILES	=> {'DynaLoader_pm.PL'=>'DynaLoader.pm'},
     PM		=> {'DynaLoader.pm' => '$(INST_LIBDIR)/DynaLoader.pm'},
-    depend      => {'DynaLoader$(OBJ_EXT)' => 'dlutils.c'},
+    depend      => {	'DynaLoader$(OBJ_EXT)' => 'dlutils.c',
+			'DynaLoader.c' => 'DynaLoader.xs'},
     clean	=> {FILES => 'DynaLoader.c DynaLoader.xs DynaLoader.pm'},
 );
 
@@ -30,7 +32,7 @@ sub MY::cflags {
 sub MY::postamble {
     my $test_xs;
 
-    if ($is_mswin || $is_netware || $is_vms) {
+    if ($is_mswin || $is_vms) {
 	$test_xs = '';
     } else {
 	$test_xs = <<'EOT';
@@ -53,7 +55,7 @@ DynaLoader.xs: $(DLSRC)
 
 sub MY::static {
     my $object;
-    if ($is_mswin || $is_netware) {
+    if ($is_mswin) {
 	$object = '$(PERL_SRC)\\$(OBJECT)';
     } elsif ($is_vms) {
 	$object = '$(PERL_SRC)$(OBJECT)';

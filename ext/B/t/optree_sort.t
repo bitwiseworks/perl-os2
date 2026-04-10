@@ -7,13 +7,8 @@ BEGIN {
         print "1..0 # Skip -- Perl configured without B module\n";
         exit 0;
     }
-    if (!$Config::Config{useperlio}) {
-        print "1..0 # Skip -- need perlio to walk the optree\n";
-        exit 0;
-    }
 }
 use OptreeCheck;
-use Config;
 plan tests => 21;
 
 pass("SORT OPTIMIZATION");
@@ -46,7 +41,7 @@ checkOptree ( name => 'sort @a',
 	      bcopts => '-exec',
 	      strip_open_hints => 1,
 	      expect => <<'EOT_EOT', expect_nt => <<'EONT_EONT');
-1  <0> enter 
+1  <0> enter v
 2  <;> nextstate(main 1 -e:1) v:>,<,%,{
 3  <0> pushmark s
 4  <#> gv[*a] s
@@ -54,7 +49,7 @@ checkOptree ( name => 'sort @a',
 6  <@> sort vK
 7  <@> leave[1 ref] vKP/REFC
 EOT_EOT
-# 1  <0> enter 
+# 1  <0> enter v
 # 2  <;> nextstate(main 1 -e:1) v:>,<,%,{
 # 3  <0> pushmark s
 # 4  <$> gv(*a) s
@@ -77,7 +72,7 @@ checkOptree ( name	=> 'sub {@a = sort @a}',
 7  <0> pushmark s
 8  <#> gv[*a] s
 9  <1> rv2av[t2] lKRM*/1
-a  <2> aassign[t5] KS/COMMON
+a  <2> aassign[t5] KS/COM_AGG
 b  <1> leavesub[1 ref] K/REFC,1
 EOT_EOT
 # 1  <;> nextstate(main 65 optree.t:311) v:>,<,%
@@ -89,7 +84,7 @@ EOT_EOT
 # 7  <0> pushmark s
 # 8  <$> gv(*a) s
 # 9  <1> rv2av[t1] lKRM*/1
-# a  <2> aassign[t3] KS/COMMON
+# a  <2> aassign[t3] KS/COM_AGG
 # b  <1> leavesub[1 ref] K/REFC,1
 EONT_EONT
 
@@ -98,7 +93,7 @@ checkOptree ( name	=> '@a = sort @a',
 	      bcopts	=> '-exec',
 	      strip_open_hints => 1,
 	      expect	=> <<'EOT_EOT', expect_nt => <<'EONT_EONT');
-1  <0> enter 
+1  <0> enter v
 2  <;> nextstate(main 1 -e:1) v:>,<,%,{
 3  <0> pushmark s
 4  <0> pushmark s
@@ -107,7 +102,7 @@ checkOptree ( name	=> '@a = sort @a',
 7  <@> sort lK/INPLACE
 8  <@> leave[1 ref] vKP/REFC
 EOT_EOT
-# 1  <0> enter 
+# 1  <0> enter v
 # 2  <;> nextstate(main 1 -e:1) v:>,<,%,{
 # 3  <0> pushmark s
 # 4  <0> pushmark s
@@ -155,7 +150,7 @@ checkOptree ( name	=> '@a = sort @a; reverse @a',
 	      bcopts	=> '-exec',
 	      strip_open_hints => 1,
 	      expect	=> <<'EOT_EOT', expect_nt => <<'EONT_EONT');
-1  <0> enter 
+1  <0> enter v
 2  <;> nextstate(main 1 -e:1) v:>,<,%,{
 3  <0> pushmark s
 4  <0> pushmark s
@@ -169,7 +164,7 @@ b  <1> rv2av[t7] lK/1
 c  <@> reverse[t8] vK/1
 d  <@> leave[1 ref] vKP/REFC
 EOT_EOT
-# 1  <0> enter 
+# 1  <0> enter v
 # 2  <;> nextstate(main 1 -e:1) v:>,<,%,{
 # 3  <0> pushmark s
 # 4  <0> pushmark s
@@ -198,7 +193,7 @@ checkOptree ( name	=> 'sub {my @a; @a = sort @a}',
 7  <@> sort lK
 8  <0> pushmark s
 9  <0> padav[@a:-437,-436] lRM*
-a  <2> aassign[t2] KS/COMMON
+a  <2> aassign[t2] KS/COM_AGG
 b  <1> leavesub[1 ref] K/REFC,1
 EOT_EOT
 # 1  <;> nextstate(main 427 optree_sort.t:172) v:>,<,%
@@ -209,8 +204,8 @@ EOT_EOT
 # 6  <0> padav[@a:427,428] l
 # 7  <@> sort lK
 # 8  <0> pushmark s
-# 9  <0> padav[@a:427,428] lRM*
-# a  <2> aassign[t2] KS/COMMON
+# 9  <0> padav[@a:-437,-436] lRM*
+# a  <2> aassign[t2] KS/COM_AGG
 # b  <1> leavesub[1 ref] K/REFC,1
 EONT_EONT
 
@@ -219,7 +214,7 @@ checkOptree ( name	=> 'my @a; @a = sort @a',
 	      bcopts	=> '-exec',
 	      strip_open_hints => 1,
 	      expect	=> <<'EOT_EOT', expect_nt => <<'EONT_EONT');
-1  <0> enter 
+1  <0> enter v
 2  <;> nextstate(main 1 -e:1) v:>,<,%,{
 3  <0> padav[@a:1,2] vM/LVINTRO
 4  <;> nextstate(main 2 -e:1) v:>,<,%,{
@@ -229,7 +224,7 @@ checkOptree ( name	=> 'my @a; @a = sort @a',
 8  <@> sort lK/INPLACE
 9  <@> leave[1 ref] vKP/REFC
 EOT_EOT
-# 1  <0> enter 
+# 1  <0> enter v
 # 2  <;> nextstate(main 1 -e:1) v:>,<,%,{
 # 3  <0> padav[@a:1,2] vM/LVINTRO
 # 4  <;> nextstate(main 2 -e:1) v:>,<,%,{

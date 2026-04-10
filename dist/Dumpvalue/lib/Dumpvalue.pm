@@ -1,8 +1,20 @@
 use 5.006_001;			# for (defined ref) and $#$v and our
 package Dumpvalue;
 use strict;
-our $VERSION = '1.17';
+use warnings;
+our $VERSION = '1.21';
 our(%address, $stab, @stab, %stab, %subs);
+
+sub ASCII { return ord('A') == 65; }
+
+# This module will give incorrect results for some inputs on EBCDIC platforms
+# before v5.8
+*to_native = ($] lt "5.008")
+             ? sub { return shift }
+             : sub { return utf8::unicode_to_native(shift) };
+
+my $APC = chr to_native(0x9F);
+my $backslash_c_question = (ASCII) ? '\177' : $APC;
 
 # documentation nits, handle complex data structures better by chromatic
 # translate control chars to ^X - Randal Schwartz
@@ -68,7 +80,7 @@ sub dumpValues {
   my $self = shift;
   local %address;
   local $^W=0;
-  (print "undef\n"), return unless defined $_[0];
+  (print "undef\n"), return if (@_ == 1 and not defined $_[0]);
   $self->unwrap(\@_,0);
 }
 
@@ -78,7 +90,8 @@ sub unctrl {
   local($_) = @_;
 
   return \$_ if ref \$_ eq "GLOB";
-  s/([\001-\037\177])/'^'.pack('c',ord($1)^64)/eg;
+  s/([\000-\037])/'^' . chr(to_native(ord($1)^64))/eg;
+  s/ $backslash_c_question /^?/xg;
   $_;
 }
 
@@ -89,15 +102,15 @@ sub stringify {
   my $tick = $self->{tick};
 
   return 'undef' unless defined $_ or not $self->{printUndef};
+  $_ = '' if not defined $_;
   return $_ . "" if ref \$_ eq 'GLOB';
   { no strict 'refs';
     $_ = &{'overload::StrVal'}($_)
       if $self->{bareStringify} and ref $_
 	and %overload:: and defined &{'overload::StrVal'};
   }
-
   if ($tick eq 'auto') {
-    if (/[\000-\011\013-\037\177]/) {
+    if (/[^[:^cntrl:]\n]/) {   # All ASCII controls but \n get '"'
       $tick = '"';
     } else {
       $tick = "'";
@@ -107,18 +120,31 @@ sub stringify {
     s/([\'\\])/\\$1/g;
   } elsif ($self->{unctrl} eq 'unctrl') {
     s/([\"\\])/\\$1/g ;
-    s/([\000-\037\177])/'^'.pack('c',ord($1)^64)/eg;
-    s/([\200-\377])/'\\0x'.sprintf('%2X',ord($1))/eg
+    $_ = &unctrl($_);
+    s/([[:^ascii:]])/'\\0x'.sprintf('%2X',ord($1))/eg
       if $self->{quoteHighBit};
   } elsif ($self->{unctrl} eq 'quote') {
     s/([\"\\\$\@])/\\$1/g if $tick eq '"';
-    s/\033/\\e/g;
-    s/([\000-\037\177])/'\\c'.chr(ord($1)^64)/eg;
+    s/\e/\\e/g;
+    s/([\000-\037$backslash_c_question])/'\\c'._escaped_ord($1)/eg;
   }
-  s/([\200-\377])/'\\'.sprintf('%3o',ord($1))/eg if $self->{quoteHighBit};
+  s/([[:^ascii:]])/'\\'.sprintf('%3o',ord($1))/eg if $self->{quoteHighBit};
   ($noticks || /^\d+(\.\d*)?\Z/)
     ? $_
       : $tick . $_ . $tick;
+}
+
+# Ensure a resulting \ is escaped to be \\
+sub _escaped_ord {
+    my $chr = shift;
+    if ($chr eq $backslash_c_question) {
+        $chr = '?';
+    }
+    else {
+        $chr = chr(to_native(ord($chr)^64));
+        $chr =~ s{\\}{\\\\}g;
+    }
+    return $chr;
 }
 
 sub DumpElem {
@@ -152,7 +178,7 @@ sub unwrap {
   my $self = shift;
   return if $DB::signal and $self->{stopDbSignal};
   my ($v) = shift ;
-  my ($s) = shift ;		# extra no of spaces
+  my ($s) = shift || 0;		# extra no of spaces
   my $sp;
   my (%v,@v,$address,$short,$fileno);
 
@@ -230,7 +256,7 @@ sub unwrap {
       if ($#$v >= 0) {
 	$short = $sp . "0..$#{$v}  " .
 	  join(" ", 
-	       map {exists $v->[$_] ? $self->stringify($v->[$_]) : "empty"} (0..$tArrayDepth)
+	       map {defined $v->[$_] ? $self->stringify($v->[$_]) : "empty"} (0..$tArrayDepth)
 	      ) . "$shortmore";
       } else {
 	$short = $sp . "empty array";
@@ -240,7 +266,7 @@ sub unwrap {
     for my $num (0 .. $tArrayDepth) {
       return if $DB::signal and $self->{stopDbSignal};
       print "$sp$num  ";
-      if (exists $v->[$num]) {
+      if (defined $v->[$num]) {
         $self->DumpElem($v->[$num], $s);
       } else {
 	print "empty slot\n";
@@ -366,6 +392,7 @@ sub CvGV_name {
 sub dumpsub {
   my $self = shift;
   my ($off,$sub) = @_;
+  $off ||= 0;
   my $ini = $sub;
   my $s;
   $sub = $1 if $sub =~ /^\{\*(.*)\}$/;
@@ -395,17 +422,17 @@ sub dumpvars {
   my $self = shift;
   my ($package,@vars) = @_;
   local(%address,$^W);
-  my ($key,$val);
   $package .= "::" unless $package =~ /::$/;
   *stab = *main::;
 
   while ($package =~ /(\w+?::)/g) {
-    *stab = $ {stab}{$1};
+    *stab = defined ${stab}{$1} ? ${stab}{$1} : '';
   }
   $self->{TotalStrings} = 0;
   $self->{Strings} = 0;
   $self->{CompleteTotal} = 0;
-  while (($key,$val) = each(%stab)) {
+  for my $k (keys %stab) {
+    my ($key,$val) = ($k, $stab{$k});
     return if $DB::signal and $self->{stopDbSignal};
     next if @vars && !grep( matchvar($key, $_), @vars );
     if ($self->{usageOnly}) {

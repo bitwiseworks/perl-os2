@@ -1,8 +1,8 @@
-# $Id: enc_eucjp.t,v 2.1 2006/05/03 18:24:10 dankogai Exp $
+# $Id: enc_eucjp.t,v 2.7 2023/11/10 01:10:50 dankogai Exp $
 # This is the twin of enc_utf8.t .
 
 BEGIN {
-    require Config; import Config;
+    require Config; Config->import();
     if ($Config{'extensions'} !~ /\bEncode\b/) {
       print "1..0 # Skip: Encode was not built\n";
       exit 0;
@@ -19,13 +19,22 @@ BEGIN {
     print "1..0 # Skip: Perl 5.8.1 or later required\n";
     exit 0;
     }
+    if ($] >= 5.025003 and !$Config{usecperl}){
+    print "1..0 # Skip: Perl <=5.25.2 or cperl required\n";
+    exit 0;
+    }
 }
 
+use Encode qw();
+$PerlIO::encoding::fallback |= Encode::ONLY_PRAGMA_WARNINGS;
+use warnings "utf8";
+
+no warnings "deprecated";
 use encoding 'euc-jp';
 
 my @c = (127, 128, 255, 256);
 
-print "1.." . (scalar @c + 1) . "\n";
+print "1.." . (scalar @c + 2) . "\n";
 
 my @f;
 
@@ -60,7 +69,19 @@ binmode(F, ":raw"); # Output raw bytes.
 print F chr(128); # Output illegal UTF-8.
 close F;
 open(F, $f) or die "$0: failed to open '$f' for reading: $!";
-binmode(F, ":encoding(utf-8)");
+binmode(F, ":encoding(UTF-8)");
+{
+    local $^W = 1;
+    local $SIG{__WARN__} = sub { $a = shift };
+    eval { <F> }; # This should get caught.
+}
+close F;
+print $a =~ qr{^UTF-8 "\\x80" does not map to Unicode} ?
+  "ok $t - illegal UTF-8 input\n" : "not ok $t - illegal UTF-8 input: a = " . unpack("H*", $a) . "\n";
+$t++;
+
+open(F, $f) or die "$0: failed to open '$f' for reading: $!";
+binmode(F, ":encoding(utf8)");
 {
     local $^W = 1;
     local $SIG{__WARN__} = sub { $a = shift };
@@ -69,6 +90,7 @@ binmode(F, ":encoding(utf-8)");
 close F;
 print $a =~ qr{^utf8 "\\x80" does not map to Unicode} ?
   "ok $t - illegal utf8 input\n" : "not ok $t - illegal utf8 input: a = " . unpack("H*", $a) . "\n";
+$t++;
 
 # On VMS temporary file names like "f0." may be more readable than "f0" since
 # "f0" could be a logical name pointing elsewhere.

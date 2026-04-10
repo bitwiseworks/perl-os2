@@ -157,7 +157,10 @@ use_ok( $FileClass );
 ### bug #43513: [PATCH] Accept wrong checksums from SunOS and HP-UX tar
 ### like GNU tar does. See here for details:
 ### http://www.gnu.org/software/tar/manual/tar.html#SEC139
-{   ok( 1,                      "Testing bug 43513" );
+SKIP: {
+    skip "File contains an alien character set", 5 if ord "A" != 65;
+
+    ok( 1,                      "Testing bug 43513" );
 
     my $src = File::Spec->catfile( qw[src header signed.tar] );
     my $tar = $Class->new;
@@ -194,3 +197,97 @@ use_ok( $FileClass );
                                 "       Expected error reported" );
 }
 
+### bug #78030
+### tests for symlinks with relative paths
+### seen on MSWin32
+if ($^O ne 'msys') # symlink tests fail on Windows/msys2
+{   ok( 1,                      "Testing bug 78030" );
+		my $archname = 'tmp-symlink.tar.gz';
+		{	#build archive
+			unlink $archname if -e $archname;
+			local $Archive::Tar::DO_NOT_USE_PREFIX = 1;
+			my $t=Archive::Tar->new;
+			my $f = $t->add_data( 'tmp/a/b/link.txt', '',
+				{
+					linkname => '../c/ori.txt',
+					type     => 2,
+				} );
+			#why doesn't it keep my wish?
+			$f->{name}   = 'tmp/a/b/link.txt';
+			$f->{prefix} = '';
+			$t->add_data( 'tmp/a/c/ori.txt', 'test case' );
+			$t->write( $archname, 1 );
+		}
+
+    { #use case 1 - in memory extraction
+			my $t=Archive::Tar->new;
+			$t->read( $archname );
+			my $r = eval{ $t->extract };
+			ok( $r && !$@,            "   In memory extraction/symlinks" );
+			ok((stat 'tmp/a/b/link.txt')[7] == 9,
+			                          "       Linked content" ) unless $r;
+			clean_78030();
+		}
+
+		{ #use case 2 - iter extraction
+		  #$DB::single = 2;
+			my $next=Archive::Tar->iter( $archname, 1 );
+			my $failed = 0;
+			#use Data::Dumper;
+			while(my $f = $next->() ){
+			#  print "\$f = ", Dumper( $f ), $/;
+				eval{ $f->extract } or $failed++;
+			}
+			ok( !$failed,             "   From disk extraction/symlinks" );
+			ok((stat 'tmp/a/b/link.txt')[7] == 9,
+			                          "       Linked content" ) unless $failed;
+		}
+
+    #remove tmp files
+		sub clean_78030{
+			unlink for ('tmp/a/c/ori.txt', 'tmp/a/b/link.txt');
+			rmdir for ('tmp/a/c', 'tmp/a/b', 'tmp/a', 'tmp');
+		}
+		clean_78030();
+		unlink $archname;
+}
+
+### bug 97748
+### retain leading '/' for absolute pathnames.
+{   ok( 1,                      "Testing bug 97748" );
+	my $path= '/absolute/path';
+	my $tar = $Class->new;
+	isa_ok( $tar, $Class,       "   Object" );
+	my $file;
+
+	ok( $file = $tar->add_data( $path, '' ),
+		"       Added $path" );
+
+	ok( $file->full_path eq $path,
+		"	Paths mismatch <" . $file->full_path . "> ne <$path>" );
+}
+
+### bug 103279
+### retain trailing whitespace on filename
+SKIP: {
+  ok( 1,                      "Testing bug 103279" );
+	my $tar = $Class->new;
+	isa_ok( $tar, $Class,       "   Object" );
+	ok( open my $fh, '>', 'white_space   ' );
+	ok( close $fh );
+	if (-e 'white_space' && $^O eq 'MSWin32') {
+		# Creating a file under Windows using a name with trailing whitespace
+		# sometimes results in the created filename being stripped of that
+		# whitespace. I.e. open './foo  ' -> creates './foo'.
+		# This is known to only happen with *some* versions of Perl for
+		# Windows, so we must test.
+		skip 'Windows tries to be clever', 1;
+	}
+	ok( $tar->add_files( 'white_space   ' ),
+				    "   Add file <white_space   > containing filename with trailing whitespace");
+	ok( unlink 'white_space   ' );
+	ok( $tar->extract(),        "	Extract filename with trailing whitespace" );
+	ok( ! -e 'white_space',     "	<white_space> should not exist" );
+	ok( -e 'white_space   ',    "	<white_space   > should exist" );
+	unlink foreach ('white_space   ', 'white_space');
+}

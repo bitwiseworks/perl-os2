@@ -1,10 +1,10 @@
 #!./perl -w
 
+use Config;
 BEGIN {
-    require Config; import Config;
     if (!$Config{'d_fork'}
        # open2/3 supported on win32
-       && $^O ne 'MSWin32' && $^O ne 'NetWare')
+       && $^O ne 'MSWin32')
     {
 	print "1..0\n";
 	exit 0;
@@ -14,15 +14,16 @@ BEGIN {
 }
 
 use strict;
-use Test::More tests => 37;
+use Test::More tests => 53;
 
 use IO::Handle;
 use IPC::Open3;
+use POSIX ":sys_wait_h";
 
 my $perl = $^X;
 
 sub cmd_line {
-	if ($^O eq 'MSWin32' || $^O eq 'NetWare') {
+	if ($^O eq 'MSWin32') {
 		my $cmd = shift;
 		$cmd =~ tr/\r\n//d;
 		$cmd =~ s/"/\\"/g;
@@ -87,6 +88,17 @@ close PIPE_WRITE;
 like(scalar <READ>, qr/\Adup writer\r?\n\z/);
 waitpid $pid, 0;
 
+{
+    is(pipe(my $PIPE_READ, my $PIPE_WRITE), 1);
+    $pid = open3 ['&', $PIPE_READ], my $READ, '',
+            $perl, '-e', cmd_line('print scalar <STDIN>');
+    close $PIPE_READ;
+    print $PIPE_WRITE "lex dup writer\n";
+    close $PIPE_WRITE;
+    like(scalar <$READ>, qr/\Alex dup writer\r?\n\z/);
+    waitpid $pid, 0;
+}
+
 my $TB = Test::Builder->new();
 my $test = $TB->current_test;
 # dup reader
@@ -95,6 +107,14 @@ $pid = open3 'WRITE', '>&STDOUT', 'ERROR',
 ++$test;
 print WRITE "ok $test\n";
 waitpid $pid, 0;
+
+{
+    $pid = open3 my $WRITE, ['&', *STDOUT], ['&', *STDERR],
+            $perl, '-e', cmd_line('print scalar <STDIN>');
+    ++$test;
+    print $WRITE "ok $test\n";
+    waitpid $pid, 0;
+}
 
 {
     package YAAH;
@@ -115,18 +135,32 @@ $pid = open3 'WRITE', 'READ', '>&STDOUT',
 print WRITE "ok $test\n";
 waitpid $pid, 0;
 
-foreach (['>&STDOUT', 'both named'],
-	 ['', 'error empty'],
-	) {
-    my ($err, $desc) = @$_;
-    $pid = open3 'WRITE', '>&STDOUT', $err, $perl, '-e', cmd_line(<<'EOF');
+{
+    $pid = open3 my $WRITE, my $READ, ['&', \*STDOUT],
+            $perl, '-e', cmd_line('print STDERR scalar <STDIN>');
+    ++$test;
+    print $WRITE "ok $test\n";
+    waitpid $pid, 0;
+}
+
+foreach my $spec (
+    ['>&STDOUT', 'string'],
+    [['&', \*STDOUT], 'arrayref'],
+) {
+    my ($dupout, $desc) = @$spec;
+    foreach ([$dupout, "both named ($desc)"],
+             ['', "error empty ($desc)"],
+            ) {
+        my ($err, $desc) = @$_;
+        $pid = open3 my $WRITE, $dupout, $err, $perl, '-e', cmd_line(<<'EOF');
     $| = 1;
     print STDOUT scalar <STDIN>;
     print STDERR scalar <STDIN>;
 EOF
-    printf WRITE "ok %d # dup reader and error together, $desc\n", ++$test
-	for 0, 1;
-    waitpid $pid, 0;
+        printf $WRITE "ok %d # dup reader and error together, $desc\n", ++$test
+            for 0, 1;
+        waitpid $pid, 0;
+    }
 }
 
 # command line in single parameter variant of open3
@@ -154,18 +188,62 @@ $TB->current_test($test);
     isnt($@, '',
 	 'open3 of a non existent program fails with an exception in the parent')
 	or do {waitpid $pid, 0};
+    SKIP: {
+	skip 'open3 returned, our responsibility to reap', 1 unless $@;
+	is(waitpid(-1, WNOHANG), -1, 'failed exec child is reaped');
+    }
 }
 
 $pid = eval { open3 'WRITE', '', 'ERROR', '/non/existent/program'; };
 like($@, qr/^open3: Modification of a read-only value attempted at /,
      'open3 faults read-only parameters correctly') or do {waitpid $pid, 0};
 
+package NoFetch;
+
+my $fetchcount = 1;
+
+sub TIESCALAR {
+  my $class = shift;
+  my $instance = shift || undef;
+  return bless \$instance => $class;
+}
+
+sub FETCH {
+    my $cmd; #dont let "@args = @DB::args;" in Carp::caller_info fire this die
+    #fetchcount may need to be increased to 2 if this code is being stepped with
+    #a perl debugger
+    if($fetchcount == 1 && (caller(1))[3] ne 'Carp::caller_info') {
+	#Carp croak reports the errors as being in IPC-Open3.t, so it is
+	#unacceptable for testing where the FETCH failure occured, we dont want
+	#it failing in a $foo = $_[0]; #later# system($foo), where the failure
+	#is supposed to be triggered in the inner most syscall, aka system()
+	my ($package, $filename, $line, $subroutine) = caller(2);
+
+	die("FETCH not allowed in ".((caller(1))[3])." in ".((caller(2))[3])."\n");
+    } else {
+	$fetchcount++;
+	return tie($cmd, 'NoFetch');
+    }
+}
+
+package main;
+
+{
+    my $cmd;
+    tie($cmd, 'NoFetch');
+
+    $pid = eval { open3 'WRITE', 'READ', 'ERROR', $cmd; };
+    like($@, qr/^(?:open3: IO::Pipe: Can't spawn-NOWAIT: FETCH not allowed in \(eval\) (?x:
+         )in IPC::Open3::spawn_with_handles|FETCH not allowed in \(eval\) in IPC::Open3::_open3)/,
+     'dieing inside Tied arg propagates correctly') or do {waitpid $pid, 0};
+}
+
 foreach my $handle (qw (DUMMY STDIN STDOUT STDERR)) {
     local $::{$handle};
     my $out = IO::Handle->new();
     my $pid = eval {
 	local $SIG{__WARN__} = sub {
-	    open my $fh, '>/dev/tty';
+	    open my $fh, '>', '/dev/tty';
 	    return if "@_" =~ m!^Use of uninitialized value \$fd.*IO/Handle\.pm!;
 	    print $fh "@_";
 	    die @_
@@ -181,4 +259,35 @@ foreach my $handle (qw (DUMMY STDIN STDOUT STDERR)) {
 	     "Expected output with localised $handle");
     }
     waitpid $pid, 0;
+}
+
+# Test that tied STDIN, STDOUT, and STDERR do not cause open3 any discomfort.
+# In particular, tied STDERR used to be able to prevent open3 from working
+# correctly.  RT #119843.
+SKIP: {
+    if (&IPC::Open3::DO_SPAWN) {
+      skip "Calling open3 with tied filehandles does not work here", 6
+    }
+
+    {	# This just throws things out
+	package My::Tied::FH;
+	sub TIEHANDLE { bless \my $self }
+	sub PRINT {}
+	# Note the absence of OPEN and FILENO
+    }
+    my $message = "japh\n";
+    foreach my $handle (*STDIN, *STDOUT, *STDERR) {
+	tie $handle, 'My::Tied::FH';
+	my ($in, $out);
+	my $pid = eval {
+	    open3 $in, $out, undef, $perl, '-ne', 'print';
+	};
+	is($@, '', "no errors calling open3 with tied $handle");
+	print $in $message;
+	close $in;
+	my $japh = <$out>;
+	waitpid $pid, 0;
+	is($japh, $message, "read input correctly");
+	untie $handle;
+    }
 }

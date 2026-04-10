@@ -13,27 +13,17 @@ BEGIN {
 $| = 1;
 use warnings;
 use strict;
-use Config;
 use B::Showlex ();
 
 plan tests => 15;
 
 my $verbose = @ARGV; # set if ANY ARGS
 
-my $a;
-my $Is_VMS = $^O eq 'VMS';
-
 my $path = join " ", map { qq["-I$_"] } @INC;
-$path = '"-I../lib" "-Iperl_root:[lib]"' if $Is_VMS;   # gets too long otherwise
-my $is_thread = $Config{use5005threads} && $Config{use5005threads} eq 'define';
 
-if ($is_thread) {
-    ok "# use5005threads: test skipped\n";
-} else {
-    $a = `$^X $path "-MO=Showlex" -e "my \@one" 2>&1`;
-    like ($a, qr/sv_undef.*PVNV.*\@one.*sv_undef.*AV/s,
-	  "canonical usage works");
-}
+my $o = `$^X $path "-MO=Showlex" -e "my \@one" 2>&1`;
+like ($o, qr/undef.*: \([^)]*\) \@one.*Nullsv.*AV/s,
+      "canonical usage works");
 
 # v1.01 tests
 
@@ -43,8 +33,8 @@ my ($out, $newlex);	# output, option-flag
 sub padrep {
     my ($varname,$newlex) = @_;
     return ($newlex)
-	? 'PVNV \(0x[0-9a-fA-F]+\) "\\'.$varname.'" = '
-	: "PVNV \\\(0x[0-9a-fA-F]+\\\) \\$varname\n";
+	? '\(0x[0-9a-fA-F]+\) "\\'.$varname.'" = '
+	: "\\\(0x[0-9a-fA-F]+\\\) \\$varname\n";
 }
 
 for $newlex ('', '-newlex') {
@@ -57,10 +47,6 @@ for $newlex ('', '-newlex') {
     like ($out, qr/2: $nb/ms, 'found $b in "my ($a,$b)"');
 
     print $out if $verbose;
-
-SKIP: {
-    skip "no perlio in this build", 5
-    unless $Config::Config{useperlio};
 
     our $buf = 'arb startval';
     my $ak = B::Showlex::walk_output (\$buf);
@@ -110,5 +96,4 @@ SKIP: {
     $walker = B::Concise::compile($asub, '-exec');
     $walker->();
 
-}
 }

@@ -13,8 +13,9 @@ static const struct mro_alg c3_alg =
 /*
 =for apidoc mro_get_linear_isa_c3
 
-Returns the C3 linearization of @ISA
-the given stash.  The return value is a read-only AV*.
+Returns the C3 linearization of C<@ISA>
+the given stash.  The return value is a read-only AV*
+whose values are string SVs giving class names.
 C<level> should be 0 (it is used internally in this
 function's recursion).
 
@@ -45,8 +46,9 @@ S_mro_get_linear_isa_c3(pTHX_ HV* stash, U32 level)
       Perl_croak(aTHX_ "Can't linearize anonymous symbol table");
 
     if (level > 100)
-        Perl_croak(aTHX_ "Recursive inheritance detected in package '%"SVf"'",
-		   SVfARG(sv_2mortal(newSVhek(stashhek))));
+        Perl_croak(aTHX_ "Recursive inheritance detected in package '%" HEKf
+                         "'",
+                          HEKfARG(stashhek));
 
     meta = HvMROMETA(stash);
 
@@ -62,32 +64,34 @@ S_mro_get_linear_isa_c3(pTHX_ HV* stash, U32 level)
 
     /* For a better idea how the rest of this works, see the much clearer
        pure perl version in Algorithm::C3 0.01:
-       http://search.cpan.org/src/STEVAN/Algorithm-C3-0.01/lib/Algorithm/C3.pm
-       (later versions go about it differently than this code for speed reasons)
+       https://fastapi.metacpan.org/source/STEVAN/Algorithm-C3-0.01/lib/Algorithm/C3.pm
+       (later versions of this module go about it differently than this code
+       for speed reasons)
     */
 
     if(isa && AvFILLp(isa) >= 0) {
         SV** seqs_ptr;
         I32 seqs_items;
         HV *tails;
-        AV *const seqs = MUTABLE_AV(sv_2mortal(MUTABLE_SV(newAV())));
+        AV *const seqs = newAV_mortal();
         I32* heads;
 
         /* This builds @seqs, which is an array of arrays.
            The members of @seqs are the MROs of
            the members of @ISA, followed by @ISA itself.
         */
-        I32 items = AvFILLp(isa) + 1;
+        SSize_t items = AvFILLp(isa) + 1;
         SV** isa_ptr = AvARRAY(isa);
         while(items--) {
-            SV* const isa_item = *isa_ptr++;
+            SV* const isa_item = *isa_ptr ? *isa_ptr : &PL_sv_undef;
             HV* const isa_item_stash = gv_stashsv(isa_item, 0);
+            isa_ptr++;
             if(!isa_item_stash) {
                 /* if no stash, make a temporary fake MRO
                    containing just itself */
-                AV* const isa_lin = newAV();
-                av_push(isa_lin, newSVsv(isa_item));
-                av_push(seqs, MUTABLE_SV(isa_lin));
+                AV* const isa_lin = newAV_alloc_xz(4);
+                av_push_simple(isa_lin, newSVsv(isa_item));
+                av_push_simple(seqs, MUTABLE_SV(isa_lin));
             }
             else {
                 /* recursion */
@@ -131,11 +135,11 @@ S_mro_get_linear_isa_c3(pTHX_ HV* stash, U32 level)
 
 		    goto done;
 		}
-                av_push(seqs, SvREFCNT_inc_simple_NN(MUTABLE_SV(isa_lin)));
+                av_push_simple(seqs, SvREFCNT_inc_simple_NN(MUTABLE_SV(isa_lin)));
             }
         }
-        av_push(seqs, SvREFCNT_inc_simple_NN(MUTABLE_SV(isa)));
-	tails = MUTABLE_HV(sv_2mortal(MUTABLE_SV(newHV())));
+        av_push_simple(seqs, SvREFCNT_inc_simple_NN(MUTABLE_SV(isa)));
+	tails = MUTABLE_HV(newSV_type_mortal(SVt_PVHV));
 
         /* This builds "heads", which as an array of integer array
            indices, one per seq, which point at the virtual "head"
@@ -160,24 +164,15 @@ S_mro_get_linear_isa_c3(pTHX_ HV* stash, U32 level)
 		     */
                     HE* const he = hv_fetch_ent(tails, seqitem, 1, 0);
                     if(he) {
-                        SV* const val = HeVAL(he);
-                        /* For 5.8.0 and later, sv_inc() with increment undef to
-			   an IV of 1, which is what we want for a newly created
-			   entry.  However, for 5.6.x it will become an NV of
-			   1.0, which confuses the SvIVX() checks above.  */
-			if(SvIOK(val)) {
-			    SvIV_set(val, SvIVX(val) + 1);
-			} else {
-			    sv_setiv(val, 1);
-			}
+                        sv_inc_nomg(HeVAL(he));
                     }
                 }
             }
         }
 
         /* Initialize retval to build the return value in */
-        retval = newAV();
-        av_push(retval, newSVhek(stashhek)); /* us first */
+        retval = newAV_alloc_xz(4);
+        av_push_simple(retval, newSVhek(stashhek)); /* us first */
 
         /* This loop won't terminate until we either finish building
            the MRO, or get an exception. */
@@ -209,7 +204,7 @@ S_mro_get_linear_isa_c3(pTHX_ HV* stash, U32 level)
                        && (SvIVX(val) > 0))
                            continue;
                     winner = newSVsv(cand);
-                    av_push(retval, winner);
+                    av_push_simple(retval, winner);
                     /* note however that even when we find a winner,
                        we continue looping over @seqs to do housekeeping */
                 }
@@ -251,31 +246,31 @@ S_mro_get_linear_isa_c3(pTHX_ HV* stash, U32 level)
                hierarchy is not C3-incompatible */
             if(!winner) {
                 SV *errmsg;
-                I32 i;
+                Size_t i;
 
                 errmsg = newSVpvf(
-                            "Inconsistent hierarchy during C3 merge of class '%"SVf"':\n\t"
+                           "Inconsistent hierarchy during C3 merge of class '%" HEKf "':\n\t"
                             "current merge results [\n",
-                                            SVfARG(sv_2mortal(newSVhek(stashhek))));
-                for (i = 0; i <= av_len(retval); i++) {
+                            HEKfARG(stashhek));
+                for (i = 0; i < av_count(retval); i++) {
                     SV **elem = av_fetch(retval, i, 0);
-                    sv_catpvf(errmsg, "\t\t%"SVf",\n", SVfARG(*elem));
+                    sv_catpvf(errmsg, "\t\t%" SVf ",\n", SVfARG(*elem));
                 }
-                sv_catpvf(errmsg, "\t]\n\tmerging failed on '%"SVf"'", SVfARG(cand));
+                sv_catpvf(errmsg, "\t]\n\tmerging failed on '%" SVf "'", SVfARG(cand));
 
                 /* we have to do some cleanup before we croak */
 
                 SvREFCNT_dec(retval);
                 Safefree(heads);
 
-                Perl_croak(aTHX_ "%"SVf, SVfARG(errmsg));
+                Perl_croak(aTHX_ "%" SVf, SVfARG(errmsg));
             }
         }
     }
     else { /* @ISA was undefined or empty */
         /* build a retval containing only ourselves */
-        retval = newAV();
-        av_push(retval, newSVhek(stashhek));
+        retval = newAV_alloc_xz(4);
+        av_push_simple(retval, newSVhek(stashhek));
     }
 
  done:
@@ -320,15 +315,15 @@ mro_get_linear_isa(...)
 
     if(!class_stash) {
         /* No stash exists yet, give them just the classname */
-        AV* isalin = newAV();
-        av_push(isalin, newSVsv(classname));
+        AV* isalin = newAV_alloc_xz(4);
+        av_push_simple(isalin, newSVsv(classname));
         ST(0) = sv_2mortal(newRV_noinc(MUTABLE_SV(isalin)));
         XSRETURN(1);
     }
     else if(items > 1) {
 	const struct mro_alg *const algo = Perl_mro_get_from_name(aTHX_ ST(1));
 	if (!algo)
-	    Perl_croak(aTHX_ "Invalid mro name: '%"SVf"'", ST(1));
+	    Perl_croak(aTHX_ "Invalid mro name: '%" SVf "'", ST(1));
 	RETVAL = algo->resolve(aTHX_ class_stash, 0);
     }
     else {
@@ -351,7 +346,7 @@ mro_set_mro(...)
 
     classname = ST(0);
     class_stash = gv_stashsv(classname, GV_ADD);
-    if(!class_stash) Perl_croak(aTHX_ "Cannot create class: '%"SVf"'!", SVfARG(classname));
+    if(!class_stash) Perl_croak(aTHX_ "Cannot create class: '%" SVf "'!", SVfARG(classname));
     meta = HvMROMETA(class_stash);
 
     Perl_mro_set_mro(aTHX_ meta, ST(1));
@@ -403,7 +398,7 @@ mro_get_isarev(...)
         HE* iter;
         hv_iterinit(isarev);
         while((iter = hv_iternext(isarev)))
-            av_push(ret_array, newSVsv(hv_iterkeysv(iter)));
+            av_push_simple(ret_array, newSVsv(hv_iterkeysv(iter)));
     }
     mXPUSHs(newRV_noinc(MUTABLE_SV(ret_array)));
 
@@ -429,8 +424,8 @@ mro_is_universal(...)
     he = hv_fetch_ent(PL_isarev, classname, 0, 0);
     isarev = he ? MUTABLE_HV(HeVAL(he)) : NULL;
 
-    if((classname_len == 9 && strEQ(classname_pv, "UNIVERSAL"))
-        || (isarev && hv_exists(isarev, "UNIVERSAL", 9)))
+    if((memEQs(classname_pv, classname_len, "UNIVERSAL"))
+        || (isarev && hv_existss(isarev, "UNIVERSAL")))
         XSRETURN_YES;
     else
         XSRETURN_NO;
@@ -470,13 +465,13 @@ mro__nextcan(...)
   PREINIT:
     SV* self = ST(0);
     const I32 throw_nomethod = SvIVX(ST(1));
-    register I32 cxix = cxstack_ix;
-    register const PERL_CONTEXT *ccstack = cxstack;
+    I32 cxix = cxstack_ix;
+    const PERL_CONTEXT *ccstack = cxstack;
     const PERL_SI *top_si = PL_curstackinfo;
     HV* selfstash;
     SV *stashname;
-    const char *fq_subname;
-    const char *subname;
+    const char *fq_subname = NULL;
+    const char *subname = NULL;
     bool subname_utf8 = 0;
     STRLEN stashname_len;
     STRLEN subname_len;
@@ -510,7 +505,6 @@ mro__nextcan(...)
         cxix = __dopoptosub_at(ccstack, cxix);
         for (;;) {
 	    GV* cvgv;
-	    STRLEN fq_subname_len;
 
             /* we may be in a higher stacklevel, so dig down deeper */
             while (cxix < 0) {
@@ -545,26 +539,21 @@ mro__nextcan(...)
             }
 
             /* we found a real sub here */
-            sv = sv_newmortal();
+            sv = newSV_type_mortal(SVt_PV);
 
             gv_efullname3(sv, cvgv, NULL);
 
 	    if(SvPOK(sv)) {
 		fq_subname = SvPVX(sv);
-		fq_subname_len = SvCUR(sv);
-
-                subname_utf8 = SvUTF8(sv) ? 1 : 0;
 		subname = strrchr(fq_subname, ':');
-	    } else {
-		subname = NULL;
-	    }
-
+            }
             if(!subname)
                 Perl_croak(aTHX_ "next::method/next::can/maybe::next::method cannot find enclosing method");
 
+            subname_utf8 = SvUTF8(sv) ? 1 : 0;
             subname++;
-            subname_len = fq_subname_len - (subname - fq_subname);
-            if(subname_len == 8 && strEQ(subname, "__ANON__")) {
+            subname_len = SvCUR(sv) - (subname - fq_subname);
+            if(memEQs(subname, subname_len, "__ANON__")) {
                 cxix = __dopoptosub_at(ccstack, cxix - 1);
                 continue;
             }
@@ -587,10 +576,11 @@ mro__nextcan(...)
 	    SV* const val = HeVAL(cache_entry);
 	    if(val == &PL_sv_undef) {
 		if(throw_nomethod)
-		    Perl_croak(aTHX_ "No next::method '%"SVf"' found for %"SVf,
+		    Perl_croak(aTHX_
+                       "No next::method '%" SVf "' found for %" HEKf,
                         SVfARG(newSVpvn_flags(subname, subname_len,
                                 SVs_TEMP | ( subname_utf8 ? SVf_UTF8 : 0 ) )),
-                        SVfARG(sv_2mortal(newSVhek( HvNAME_HEK(selfstash) ))));
+                        HEKfARG( HvNAME_HEK(selfstash) ));
                 XSRETURN_EMPTY;
 	    }
 	    mXPUSHs(newRV_inc(val));
@@ -634,9 +624,10 @@ mro__nextcan(...)
 
             if (!curstash) {
                 if (ckWARN(WARN_SYNTAX))
-                    Perl_warner(aTHX_ packWARN(WARN_SYNTAX), "Can't locate package %"SVf" for @%"SVf"::ISA",
+                    Perl_warner(aTHX_ packWARN(WARN_SYNTAX),
+                       "Can't locate package %" SVf " for @%" HEKf "::ISA",
                         (void*)linear_sv,
-                        SVfARG(sv_2mortal(newSVhek( HvNAME_HEK(selfstash) ))));
+                        HEKfARG( HvNAME_HEK(selfstash) ));
                 continue;
             }
 
@@ -667,10 +658,10 @@ mro__nextcan(...)
 
     (void)hv_store_ent(nmcache, sv, &PL_sv_undef, 0);
     if(throw_nomethod)
-        Perl_croak(aTHX_ "No next::method '%"SVf"' found for %"SVf,
+        Perl_croak(aTHX_ "No next::method '%" SVf "' found for %" HEKf,
                          SVfARG(newSVpvn_flags(subname, subname_len,
                                 SVs_TEMP | ( subname_utf8 ? SVf_UTF8 : 0 ) )),
-                        SVfARG(sv_2mortal(newSVhek( HvNAME_HEK(selfstash) ))));
+                        HEKfARG( HvNAME_HEK(selfstash) ));
     XSRETURN_EMPTY;
 
 BOOT:

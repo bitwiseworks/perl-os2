@@ -36,7 +36,6 @@
 static void
 XS_Fcntl_S_ISREG(pTHX_ CV* cv)
 {
-    dVAR;
     dXSARGS;
     dXSI32;
     /* Preserve the semantics of the perl code, which was:
@@ -118,9 +117,5 @@ BOOT:
 #ifdef S_IFWHT
         cv = newXS("Fcntl::S_ISWHT", XS_Fcntl_S_ISREG, file);
         XSANY.any_i32 = S_IFWHT;
-#endif
-#ifdef S_ENFMT
-        cv = newXS("Fcntl::S_ISENFMT", XS_Fcntl_S_ISREG, file);
-        XSANY.any_i32 = S_ENFMT;
 #endif
     }

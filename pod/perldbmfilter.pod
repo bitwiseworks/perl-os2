@@ -60,7 +60,7 @@ When each filter is called by Perl, a local copy of C<$_> will contain
 the key or value to be filtered. Filtering is achieved by modifying
 the contents of C<$_>. The return code from the filter is ignored.
 
-=head2 An Example: the NULL termination problem.
+=head2 An Example: the NULL termination problem
 
 DBM Filters are useful for a class of problems where you I<always>
 want to make the same transformation to all keys, all values or both.
@@ -84,8 +84,7 @@ the database and have them removed when you read from the database. As I'm
 sure you have already guessed, this is a problem that DBM Filters can
 fix very easily.
 
-    use strict;
-    use warnings;
+    use v5.36;
     use SDBM_File;
     use Fcntl;
 
@@ -104,7 +103,7 @@ fix very easily.
     $db->filter_store_value( sub { $_ .= "\0" } );
 
     $hash{"abc"} = "def";
-    my $a = $hash{"ABC"};
+    my $x = $hash{"ABC"};
     # ...
     undef $db;
     untie %hash;
@@ -117,7 +116,7 @@ self-explanatory. Both "fetch" filters remove the terminating NULL,
 and both "store" filters add a terminating NULL.
 
 
-=head2 Another Example: Key is a C int.
+=head2 Another Example: Key is a C int
 
 Here is another real-life example. By default, whenever Perl writes to
 a DBM database it always writes the key and value as strings. So when
@@ -132,16 +131,15 @@ when reading.
 
 Here is a DBM Filter that does it:
 
-    use strict;
-    use warnings;
+    use v5.36;
     use DB_File;
     my %hash;
     my $filename = "filt";
     unlink $filename;
 
 
-    my $db = tie %hash, 'DB_File', $filename, O_CREAT|O_RDWR, 0666, $DB_HASH 
-      or die "Cannot open $filename: $!\n";
+    my $db = tie %hash, 'DB_File', $filename, O_CREAT|O_RDWR, 0666,
+        $DB_HASH or die "Cannot open $filename: $!\n";
 
     $db->filter_fetch_key  ( sub { $_ = unpack("i", $_) } );
     $db->filter_store_key  ( sub { $_ = pack ("i", $_) } );

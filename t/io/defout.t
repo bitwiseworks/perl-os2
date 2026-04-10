@@ -7,12 +7,14 @@
 # it probably needs expanding at some point to cover other stuff.
 
 BEGIN {
-    chdir 't';
-    @INC = '../lib';
+    chdir 't' if -d 't';
     require './test.pl';
+    set_up_inc('../lib');
 }
 
-plan tests => 16;
+$|=0;   # test.pl makes it 1, and that conflicts with the below.
+
+plan tests => 22;
 
 
 my $stdout = *STDOUT;
@@ -45,6 +47,20 @@ $= = 1; pass '$= = 1';
 $- = 1; pass '$- = 1';
 $% = 1; pass '$% = 1';
 $| = 1; pass '$| = 1';
+
+# test a NULLed GV
+my $t = tempfile;
+open FOO, ">", $t or die;
+select(FOO);
+my $io = *FOO{IO};
+*FOO = 0;
+$^ = 1; pass 'empty GV: $^ = 1';
+$~ = 1; pass 'empty GV: $~ = 1';
+$= = 1; pass 'empty GV: $= = 1';
+$- = 1; pass 'empty GV: $- = 1';
+$% = 1; pass 'empty GV: $% = 1';
+$| = 1; pass 'empty GV: $| = 1';
+close $io;
 
 # Switch to STDERR for this test, so we do not lose our test output
 my $stderr = *STDERR;

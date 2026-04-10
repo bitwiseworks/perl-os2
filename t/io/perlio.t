@@ -1,12 +1,12 @@
 BEGIN {
 	chdir 't' if -d 't';
-	@INC = '../lib';
-	require Config; import Config;
-	require './test.pl';
+    require './test.pl';
+    set_up_inc('../lib');
+	require Config; Config->import;
 	skip_all_without_perlio();
 }
 
-plan tests => 45;
+plan tests => 48;
 
 use_ok('PerlIO');
 
@@ -97,12 +97,17 @@ ok(close($utffh));
 
       # hardcoded default temp path
       my $perlio_tmp_file_glob = '/tmp/PerlIO_??????';
+      my $filename;
 
-      ok( open(my $x,"+<",undef), 'TMPDIR honored by magic temp file via 3 arg open with undef - works if TMPDIR points to a non-existent dir');
+      SKIP: {
+        skip("No /tmp on this platform to fall back to absent TMPDIR",2)
+          unless (-e '/tmp');
+        ok( open(my $x,"+<",undef), 'TMPDIR honored by magic temp file via 3 arg open with undef - works if TMPDIR points to a non-existent dir');
 
-      my $filename = find_filename($x, $perlio_tmp_file_glob);
-      is($filename, undef, "No tmp files leaked");
-      unlink_all $filename if defined $filename;
+        $filename = find_filename($x, $perlio_tmp_file_glob);
+        is($filename, undef, "No tmp files leaked");
+        unlink_all $filename if defined $filename;
+      }
 
       mkdir $ENV{TMPDIR};
       ok(open(my $x,"+<",undef), 'TMPDIR honored by magic temp file via 3 arg open with undef - works if TMPDIR points to an existent dir');
@@ -110,6 +115,27 @@ ok(close($utffh));
       $filename = find_filename($x, $perlio_tmp_file_glob);
       is($filename, undef, "No tmp files leaked");
       unlink_all $filename if defined $filename;
+    }
+}
+
+# fileno() for directory handles, on supported platforms
+SKIP: {
+    opendir my $dh, "io"
+        or die "Huh? Can't open directory 'io' containing this file: $!\n";
+    local $! = 0;
+    my $fd = fileno $dh;
+    my $errno = 0 + $!;
+    closedir $dh
+        or die "Huh? Can't close freshly-opened directory handle: $!\n";
+    if ($Config{d_dirfd} || $Config{d_dir_dd_fd}) {
+        ok(defined $fd, "fileno(DIRHANDLE) is defined under dirfd()")
+            or skip("directory fd was undefined", 1);
+        like($fd, qr/\A\d+\z/a,
+             "fileno(DIRHANDLE) yields non-negative int under dirfd()");
+    }
+    else {
+        ok(!defined $fd, "fileno(DIRHANDLE) is undef when no dirfd()");
+        isnt($errno, 0, "fileno(DIRHANDLE) sets errno when no dirfd()");
     }
 }
 
@@ -129,11 +155,7 @@ sub find_filename {
 }
 
 # in-memory open
-SKIP: {
-    eval { require PerlIO::scalar };
-    unless (find PerlIO::Layer 'scalar') {
-	skip("PerlIO::scalar not found", 11);
-    }
+{
     my $var;
     ok( open(my $x,"+<",\$var), 'magic in-memory file via 3 arg open with \\$var');
     ok( defined fileno($x),     '       fileno' );
@@ -168,7 +190,7 @@ SKIP: {
     }
 
 
-    { local $TODO = 'fails well back into 5.8.x';
+    {
 
 	
       sub read_fh_and_return_final_rv {
@@ -206,14 +228,22 @@ SKIP: {
     fresh_perl_like(<<'EOP',
 unshift @INC, sub {
     return undef unless caller eq "main";
-    open my $fh, "<", \1;
+    open my $fh, "<:encoding(utf-8)", "MANIFEST";
     $fh;
 };
 require Symbol; # doesn't matter whether it exists or not
 EOP
 		    qr/\ARecursive call to Perl_load_module in PerlIO_find_layer at/s,
 		    {stderr => 1},
-		    'Mutal recursion between Perl_load_module and PerlIO_find_layer croaks');
+		    'Mutual recursion between Perl_load_module and PerlIO_find_layer croaks');
+}
+
+{
+    # RT #119287
+    $main::PerlIO_code_injection = 0;
+    local $SIG{__WARN__} = sub {};
+    PerlIO->import('via; $main::PerlIO_code_injection = 1');
+    ok !$main::PerlIO_code_injection, "Can't inject code via PerlIO->import";
 }
 
 END {

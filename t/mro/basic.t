@@ -1,9 +1,15 @@
 #!./perl
 
+BEGIN {
+    chdir 't' if -d 't';
+    require q(./test.pl);
+    set_up_inc('../lib');
+}
+
 use strict;
 use warnings;
 
-BEGIN { require q(./test.pl); } plan(tests => 52);
+plan(tests => 66);
 
 require mro;
 
@@ -327,4 +333,136 @@ is(eval { MRO_N->testfunc() }, 123);
     @Thwit::ISA = "Sile";
     undef %Thwit::;
     ok !Thrext->isa('Sile'), 'undef %package:: updates subclasses';
+}
+
+{
+    # Obliterating @ISA via glob assignment
+    # Broken in 5.14.0; fixed in 5.17.2
+    @Gwythaint::ISA = "Fantastic::Creature";
+    undef *This_glob_haD_better_not_exist; # paranoia; must have no array
+    *Gwythaint::ISA = *This_glob_haD_better_not_exist;
+    ok !Gwythaint->isa("Fantastic::Creature"),
+       'obliterating @ISA via glob assignment';
+}
+
+{
+    # Autovivifying @ISA via @{*ISA}
+    no warnings;
+    undef *fednu::ISA;
+    @{*fednu::ISA} = "pyfg";
+    ok +fednu->isa("pyfg"), 'autovivifying @ISA via *{@ISA}';
+}
+
+{
+    sub Detached::method;
+    my $h = delete $::{"Detached::"};
+    eval { local *Detached::method };
+    is $@, "", 'localising gv-with-cv belonging to detached package';
+}
+
+{
+    # *ISA localisation
+    @il::ISA = "ilsuper";
+    sub ilsuper::can { "puree" }
+    sub il::tomatoes;
+    {
+        local *il::ISA;
+        is +il->can("tomatoes"), \&il::tomatoes, 'local *ISA';
+    }
+    is "il"->can("tomatoes"), "puree", 'local *ISA unwinding';
+    {
+        local *il::ISA = [];
+        is +il->can("tomatoes"), \&il::tomatoes, 'local *ISA = []';
+    }
+    is "il"->can("tomatoes"), "puree", 'local *ISA=[] unwinding';
+}
+
+# Changes to UNIVERSAL::DESTROY should not leave stale DESTROY caches
+# (part of #114864)
+our $destroy_output;
+sub UNIVERSAL::DESTROY { $destroy_output = "old" }
+my $x = bless[];
+undef $x; # cache the DESTROY method
+undef *UNIVERSAL::DESTROY;
+*UNIVERSAL::DESTROY = sub { $destroy_output = "new" };
+$x = bless[];
+undef $x; # should use the new DESTROY
+is $destroy_output, "new",
+    'Changes to UNIVERSAL::DESTROY invalidate DESTROY caches';
+undef *UNIVERSAL::DESTROY;
+
+{
+    no warnings 'uninitialized';
+    $#_119433::ISA++;
+    pass "no crash when ISA contains nonexistent elements";
+}
+
+{ # 123788
+    fresh_perl_is(<<'PROG', "ok", {}, "don't crash when deleting ISA");
+$x = \@{q(Foo::ISA)};
+delete $Foo::{ISA};
+@$x = "Bar";
+print "ok\n";
+PROG
+
+    # when there are multiple references to an ISA array, the mg_obj
+    # turns into an AV of globs, which is a different code path
+    # this test only crashes on -DDEBUGGING builds
+    fresh_perl_is(<<'PROG', "ok", {}, "a case with multiple refs to ISA");
+@Foo::ISA = qw(Abc Def);
+$x = \@{q(Foo::ISA)};
+*Bar::ISA = $x;
+delete $Bar::{ISA};
+delete $Foo::{ISA};
+++$y;
+$x->[1] = "Ghi";
+@$x = "Bar";
+print "ok\n";
+PROG
+
+    # reverse order of delete to exercise removing from the other end
+    # of the array
+    # again, may only crash on -DDEBUGGING builds
+    fresh_perl_is(<<'PROG', "ok", {}, "a case with multiple refs to ISA");
+$x = \@{q(Foo::ISA)};
+*Bar::ISA = $x;
+delete $Foo::{ISA};
+delete $Bar::{ISA};
+++$y;
+@$x = "Bar";
+print "ok\n";
+PROG
+}
+
+{
+    # [perl #127351]
+    # *Foo::ISA = \@some_array
+    # didn't magicalize the elements of @some_array, causing two
+    # problems:
+
+    #  a) assignment to those elements didn't update the cache
+
+    fresh_perl_is(<<'PROG', "foo\nother", {}, "magical *ISA = arrayref elements");
+*My::Parent::foo = sub { "foo" };
+*My::OtherParent::foo = sub { "other" };
+my $x = [ "My::Parent" ];
+*Fake::ISA = $x;
+print Fake->foo, "\n";
+$x->[0] = "My::OtherParent";
+print Fake->foo, "\n";
+PROG
+
+    #  b) code that attempted to remove the magic when @some_array
+    #     was no longer an @ISA asserted/crashed
+
+    fresh_perl_is(<<'PROG', "foo", {}, "unmagicalize *ISA elements");
+{
+    local *My::Parent::foo = sub { "foo" };
+    my $x = [ "My::Parent" ];
+    *Fake::ISA = $x;
+    print Fake->foo, "\n";
+    my $s = \%Fake::;
+    delete $s->{ISA};
+}
+PROG
 }

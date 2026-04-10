@@ -1,10 +1,11 @@
 /* VMS::Stdio - VMS extensions to stdio routines 
  *
- * Version:  2.3
  * Author:   Charles Bailey  bailey@newman.upenn.edu
- * Revised:  14-Jun-2007
  *
  */
+
+/* We now depend on handy.h macros that are not public API. */
+#define PERL_EXT
 
 #include "EXTERN.h"
 #include "perl.h"
@@ -15,11 +16,9 @@
 #include <starlet.h>
 
 static bool
-constant(name, pval)
-char *name;
-IV *pval;
+constant(char *name, IV *pval)
 {
-    if (strnNE(name, "O_", 2)) return FALSE;
+    if (! strBEGINs(name, "O_")) return FALSE;
 
     if (strEQ(name, "O_APPEND"))
 #ifdef O_APPEND
@@ -138,7 +137,7 @@ binmode(fh)
 	   io = sv_2io(fh);
            fp = io ? IoOFP(io) : NULL;
 	   iotype = io ? IoTYPE(io) : '\0';
-	    if (fp == NULL || strchr(">was+-|",iotype) == NULL) {
+	    if (fp == NULL || memCHRs(">was+-|",iotype) == NULL) {
 	      set_errno(EBADF); set_vaxc_errno(SS$_IVCHAN); XSRETURN_UNDEF;
 	    }
            if (!PerlIO_getname(fp,filespec)) XSRETURN_UNDEF;
@@ -295,7 +294,7 @@ vmsopen(spec,...)
 	PROTOTYPE: @
 	CODE:
 	    char *args[8],mode[3] = {'r','\0','\0'}, type = '<';
-	    register int i, myargc;
+	    int i, myargc;
 	    FILE *fp;
             SV *fh;
            PerlIO *pio_fp;
@@ -433,7 +432,7 @@ writeof(mysv)
 	    struct dsc$descriptor devdsc = {0, DSC$K_DTYPE_T, DSC$K_CLASS_S, devnam};
 	    IO *io = sv_2io(mysv);
            PerlIO *fp = io ? IoOFP(io) : NULL;
-	    if (fp == NULL || strchr(">was+-|",IoTYPE(io)) == NULL) {
+	    if (fp == NULL || memCHRs(">was+-|",IoTYPE(io)) == NULL) {
 	      set_errno(EBADF); set_vaxc_errno(SS$_IVCHAN); XSRETURN_UNDEF;
 	    }
            if (PerlIO_getname(fp,devnam) == NULL) { ST(0) = &PL_sv_undef; XSRETURN(1); }

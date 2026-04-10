@@ -25,13 +25,22 @@ libswanted=`echo " $libswanted " | sed -e 's/ c / /g'`
 libswanted=`echo " $libswanted " | sed -e 's/ m / /g'`
 # - eliminate -lutil, symbols are all in libcygwin.a
 libswanted=`echo " $libswanted " | sed -e 's/ util / /g'`
+test -z "$ignore_versioned_solibs" && ignore_versioned_solibs='y'
+test -z "$usenm" && usenm='no'
+test -z "$libc" && libc='/usr/lib/libcygwin.a'
+test -z "$loclibpth" && loclibpth=' '
+test -z "$glibpth" && glibpth=' '
+test -z "$plibpth" && plibpth=' '
+test -z "$libpth" && libpth=' '
+PATH='.:/usr/bin/'
 # - add libgdbm_compat $libswanted
 libswanted="$libswanted gdbm_compat"
 test -z "$optimize" && optimize='-O3'
 man3ext='3pm'
 test -z "$use64bitint" && use64bitint='define'
 test -z "$useithreads" && useithreads='define'
-ccflags="$ccflags -DPERL_USE_SAFE_PUTENV -U__STRICT_ANSI__"
+test -z "$usemymalloc" && usemymalloc='undef'
+ccflags="$ccflags -D_GNU_SOURCE"
 # - otherwise i686-cygwin
 archname='cygwin'
 
@@ -62,12 +71,22 @@ case "$osvers" in
         d_inetpton='undef'
 esac
 
+case "$osvers" in
+    2.[0-4].*|1.*)
+        # newlib finitel is buggy before cygwin-2.5.0
+        d_finitel='undef'
+        ;;
+esac
+
 # compile Win32CORE "module" as static. try to avoid the space.
 if test -z "$static_ext"; then
   static_ext="Win32CORE"
 else
   static_ext="$static_ext Win32CORE"
 fi
+
+# configure should not check for xlocale.h if it gets the API from locale.h
+i_xlocale='undef'
 
 # Win9x problem with non-blocking read from a closed pipe
 d_eofnblk='define'
@@ -80,3 +99,12 @@ lddlflags="$lddlflags $ldflags"
 #ldflags="$ldflags -s"
 #ccdlflags="$ccdlflags -s"
 #lddlflags="$lddlflags -s"
+
+# Seems that exporting _Thread_local doesn't work on cygwin. This 6 year old
+# gcc bug suggests that maybe the problem really is binutils, but either way
+# it still doesn't work, despite our probes looking good:
+# https://gcc.gnu.org/bugzilla/show_bug.cgi?id=64697
+d_thread_local=undef
+
+# Broken: https://sourceware.org/pipermail/cygwin/2022-August/252043.html */
+d_newlocale=undef

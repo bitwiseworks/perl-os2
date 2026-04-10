@@ -7,15 +7,14 @@
 package IO::Socket::INET;
 
 use strict;
-our(@ISA, $VERSION);
 use IO::Socket;
 use Socket;
 use Carp;
 use Exporter;
 use Errno;
 
-@ISA = qw(IO::Socket);
-$VERSION = "1.33";
+our @ISA = qw(IO::Socket);
+our $VERSION = "1.55";
 
 my $EINVAL = exists(&Errno::EINVAL) ? Errno::EINVAL() : 1;
 
@@ -50,7 +49,7 @@ sub _get_proto_number {
     return undef unless defined $name;
     return $proto_number{$name} if exists $proto_number{$name};
 
-    my @proto = getprotobyname($name);
+    my @proto = eval { getprotobyname($name) };
     return undef unless @proto;
     _cache_proto(@proto);
 
@@ -62,7 +61,7 @@ sub _get_proto_name {
     return undef unless defined $num;
     return $proto_name{$num} if exists $proto_name{$num};
 
-    my @proto = getprotobynumber($num);
+    my @proto = eval { getprotobynumber($num) };
     return undef unless @proto;
     _cache_proto(@proto);
 
@@ -80,7 +79,7 @@ sub _sock_info {
   if(defined $proto  && $proto =~ /\D/) {
     my $num = _get_proto_number($proto);
     unless (defined $num) {
-      $@ = "Bad protocol '$proto'";
+      $IO::Socket::errstr = $@ = "Bad protocol '$proto'";
       return;
     }
     $proto = $num;
@@ -95,7 +94,7 @@ sub _sock_info {
 
     $port = $serv[2] || $defport || $pnum;
     unless (defined $port) {
-	$@ = "Bad service '$origport'";
+	$IO::Socket::errstr = $@ = "Bad service '$origport'";
 	return;
     }
 
@@ -114,7 +113,7 @@ sub _error {
     {
       local($!);
       my $title = ref($sock).": ";
-      $@ = join("", $_[0] =~ /^$title/ ? "" : $title, @_);
+      $IO::Socket::errstr = $@ = join("", $_[0] =~ /^$title/ ? "" : $title, @_);
       $sock->close()
 	if(defined fileno($sock));
     }
@@ -331,7 +330,7 @@ inherits all the methods defined by L<IO::Socket>.
 =item new ( [ARGS] )
 
 Creates an C<IO::Socket::INET> object, which is a reference to a
-newly created symbol (see the C<Symbol> package). C<new>
+newly created symbol (see the L<Symbol> package). C<new>
 optionally takes arguments, these arguments are in key-value pairs.
 
 In addition to the key-value pairs accepted by L<IO::Socket>,
@@ -358,7 +357,8 @@ C<IO::Socket::INET> provides.
 
 If C<Listen> is defined then a listen socket is created, else if the
 socket type, which is derived from the protocol, is SOCK_STREAM then
-connect() is called.
+connect() is called.  If the C<Listen> argument is given, but false,
+the queue size will be set to 5.
 
 Although it is not illegal, the use of C<MultiHomed> on a socket
 which is in non-blocking mode is of little use. This is because the
@@ -401,17 +401,22 @@ Examples:
    $sock = IO::Socket::INET->new(
                            PeerPort  => 9999,
                            PeerAddr  => inet_ntoa(INADDR_BROADCAST),
-                           Proto     => udp,    
+                           Proto     => 'udp',
                            LocalAddr => 'localhost',
                            Broadcast => 1 ) 
-                       or die "Can't bind : $@\n";
+                       or die "Can't bind : $IO::Socket::errstr\n";
 
- NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE
+If the constructor fails it will return C<undef> and set the
+C<$IO::Socket::errstr> package variable to contain an error message.
 
-As of VERSION 1.18 all IO::Socket objects have autoflush turned on
-by default. This was not the case with earlier releases.
+    $sock = IO::Socket::INET->new(...)
+        or die "Cannot create socket - $IO::Socket::errstr\n";
 
- NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE NOTE
+For legacy reasons the error message is also set into the global C<$@>
+variable, and you may still find older code which looks here instead.
+
+    $sock = IO::Socket::INET->new(...)
+        or die "Cannot create socket - $@\n";
 
 =back
 
@@ -455,7 +460,7 @@ L<Socket>, L<IO::Socket>
 =head1 AUTHOR
 
 Graham Barr. Currently maintained by the Perl Porters.  Please report all
-bugs to <perlbug@perl.org>.
+bugs at L<https://github.com/Perl/perl5/issues>.
 
 =head1 COPYRIGHT
 

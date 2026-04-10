@@ -1,25 +1,25 @@
 #!./perl
 #
-# This is a home for regular expression tests that don't fit into
+# This is a home for regular expression tests that do not fit into
 # the format supported by re/regexp.t.  If you want to add a test
 # that does fit that format, add it to re/re_tests, not here.
+
+BEGIN {
+    chdir 't' if -d 't';
+    require './test.pl';
+    set_up_inc(qw '../lib .');
+    require './charset_tools.pl';
+    skip_all_if_miniperl("miniperl can't load Tie::Hash::NamedCapture, need for %+ and %-");
+}
 
 use strict;
 use warnings;
 use 5.010;
-
+our ($REGMARK, $REGERROR);
 
 sub run_tests;
 
 $| = 1;
-
-
-BEGIN {
-    chdir 't' if -d 't';
-    @INC = ('../lib','.');
-    require './test.pl';
-    skip_all_if_miniperl("miniperl can't load Tie::Hash::NamedCapture, need for %+ and %-");
-}
 
 run_tests() unless caller;
 
@@ -27,53 +27,6 @@ run_tests() unless caller;
 # Tests start here.
 #
 sub run_tests {
-
-    {
-        my $message = '\C matches octet';
-        $_ = "a\x{100}b";
-        ok(/(.)(\C)(\C)(.)/, $message);
-        is($1, "a", $message);
-        if ($::IS_ASCII) {     # ASCII (or equivalent), should be UTF-8
-            is($2, "\xC4", $message);
-            is($3, "\x80", $message);
-        }
-        elsif ($::IS_EBCDIC) { # EBCDIC (or equivalent), should be UTF-EBCDIC
-            is($2, "\x8C", $message);
-            is($3, "\x41", $message);
-        }
-        else {
-            SKIP: {
-                ok 0, "Unexpected platform", "ord ('A') =" . ord 'A';
-                skip "Unexpected platform";
-            }
-        }
-        is($4, "b", $message);
-    }
-
-    {
-        my $message = '\C matches octet';
-        $_ = "\x{100}";
-        ok(/(\C)/g, $message);
-        if ($::IS_ASCII) {
-            is($1, "\xC4", $message);
-        }
-        elsif ($::IS_EBCDIC) {
-            is($1, "\x8C", $message);
-        }
-        else {
-            ok 0, "Unexpected platform", "ord ('A') = " . ord 'A';
-        }
-        ok(/(\C)/g, $message);
-        if ($::IS_ASCII) {
-            is($1, "\x80", $message);
-        }
-        elsif ($::IS_EBCDIC) {
-            is($1, "\x41", $message);
-        }
-        else {
-            ok 0, "Unexpected platform", "ord ('A') = " . ord 'A';
-        }
-    }
 
     {
         # Japhy -- added 03/03/2001
@@ -87,8 +40,9 @@ sub run_tests {
         # The trick is that in EBCDIC the explicit numeric range should
         # match (as also in non-EBCDIC) but the explicit alphabetic range
         # should not match.
-        ok "\x8e" =~ /[\x89-\x91]/, '"\x8e" =~ /[\x89-\x91]/';
-        ok "\xce" =~ /[\xc9-\xd1]/, '"\xce" =~ /[\xc9-\xd1]/';
+        like "\x8e", qr/[\x89-\x91]/, '"\x8e" =~ /[\x89-\x91]/';
+        like "\xce", qr/[\xc9-\xd1]/, '"\xce" =~ /[\xc9-\xd1]/';
+        like "\xd0", qr/[\xc9-\xd1]/, '"\xd0" =~ /[\xc9-\xd1]/';
 
         skip "Not an EBCDIC platform", 2 unless ord ('i') == 0x89 &&
                                                 ord ('J') == 0xd1;
@@ -99,22 +53,24 @@ sub run_tests {
         # the good of EBCDIC, so let's test these only there.
         unlike("\x8e", qr/[i-j]/, '"\x8e" !~ /[i-j]/');
         unlike("\xce", qr/[I-J]/, '"\xce" !~ /[I-J]/');
+        unlike("\xd0", qr/[I-J]/, '"\xd0" !~ /[I-J]/');
     }
 
     {
-        ok "\x{ab}"   =~ /\x{ab}/,   '"\x{ab}"   =~ /\x{ab}/  ';
-        ok "\x{abcd}" =~ /\x{abcd}/, '"\x{abcd}" =~ /\x{abcd}/';
+        like "\x{ab}", qr/\x{ab}/,   '"\x{ab}"   =~ /\x{ab}/  ';
+        like "\x{abcd}", qr/\x{abcd}/, '"\x{abcd}" =~ /\x{abcd}/';
     }
 
     {
-        my $message = 'bug id 20001008.001';
+        my $message = 'bug id 20001008.001 (#4407)';
 
-        my @x = ("stra\337e 138", "stra\337e 138");
+        my $strasse = "stra" . uni_to_native("\337") . "e";
+        my @x = ("$strasse 138", "$strasse 138");
         for (@x) {
             ok(s/(\d+)\s*([\w\-]+)/$1 . uc $2/e, $message);
             ok(my ($latin) = /^(.+)(?:\s+\d)/, $message);
-            is($latin, "stra\337e", $message);
-	    ok($latin =~ s/stra\337e/straße/, $message);
+            is($latin, $strasse, $message);
+	    ok($latin =~ s/$strasse/straße/, $message);
             #
             # Previous code follows, but outcommented - there were no tests.
             #
@@ -259,13 +215,16 @@ sub run_tests {
         ## Should probably put in tests for all the POSIX stuff,
         ## but not sure how to guarantee a specific locale......
 
-        skip "Not an ASCII platform", 2 unless $::IS_ASCII;
         my $message = 'Test [[:cntrl:]]';
         my $AllBytes = join "" => map {chr} 0 .. 255;
         (my $x = $AllBytes) =~ s/[[:cntrl:]]//g;
+        $x = join "", sort { $a cmp $b }
+                      map { chr utf8::native_to_unicode(ord $_) } split "", $x;
         is($x, join("", map {chr} 0x20 .. 0x7E, 0x80 .. 0xFF), $message);
 
         ($x = $AllBytes) =~ s/[^[:cntrl:]]//g;
+        $x = join "", sort { $a cmp $b }
+                       map { chr utf8::native_to_unicode(ord $_) } split "", $x;
         is($x, (join "", map {chr} 0x00 .. 0x1F, 0x7F), $message);
     }
 
@@ -278,127 +237,111 @@ sub run_tests {
     }
 
     {
-        my $message = '. matches \n with /s';
-        my $str1 = "foo\nbar";
-        my $str2 = "foo\n\x{100}bar";
-        my ($a, $b) = map {chr} $::IS_ASCII ? (0xc4, 0x80) : (0x8c, 0x41);
-        my @a;
-        @a = $str1 =~ /./g;   is(@a, 6, $message); is("@a", "f o o b a r", $message);
-        @a = $str1 =~ /./gs;  is(@a, 7, $message); is("@a", "f o o \n b a r", $message);
-        @a = $str1 =~ /\C/g;  is(@a, 7, $message); is("@a", "f o o \n b a r", $message);
-        @a = $str1 =~ /\C/gs; is(@a, 7, $message); is("@a", "f o o \n b a r", $message);
-        @a = $str2 =~ /./g;   is(@a, 7, $message); is("@a", "f o o \x{100} b a r", $message);
-        @a = $str2 =~ /./gs;  is(@a, 8, $message); is("@a", "f o o \n \x{100} b a r", $message);
-        @a = $str2 =~ /\C/g;  is(@a, 9, $message); is("@a", "f o o \n $a $b b a r", $message);
-        @a = $str2 =~ /\C/gs; is(@a, 9, $message); is("@a", "f o o \n $a $b b a r", $message);
-    }
-
-    {
         no warnings 'digit';
         # Check that \x## works. 5.6.1 and 5.005_03 fail some of these.
         my $x;
         $x = "\x4e" . "E";
-        ok ($x =~ /^\x4EE$/, "Check only 2 bytes of hex are matched.");
+        like ($x, qr/^\x4EE$/, "Check only 2 bytes of hex are matched.");
 
         $x = "\x4e" . "i";
-        ok ($x =~ /^\x4Ei$/, "Check that invalid hex digit stops it (2)");
+        like ($x, qr/^\x4Ei$/, "Check that invalid hex digit stops it (2)");
 
         $x = "\x4" . "j";
-        ok ($x =~ /^\x4j$/,  "Check that invalid hex digit stops it (1)");
+        like ($x, qr/^\x4j$/,  "Check that invalid hex digit stops it (1)");
 
         $x = "\x0" . "k";
-        ok ($x =~ /^\xk$/,   "Check that invalid hex digit stops it (0)");
+        like ($x, qr/^\xk$/,   "Check that invalid hex digit stops it (0)");
 
         $x = "\x0" . "x";
-        ok ($x =~ /^\xx$/, "\\xx isn't to be treated as \\0");
+        like ($x, qr/^\xx$/, "\\xx isn't to be treated as \\0");
 
         $x = "\x0" . "xa";
-        ok ($x =~ /^\xxa$/, "\\xxa isn't to be treated as \\xa");
+        like ($x, qr/^\xxa$/, "\\xxa isn't to be treated as \\xa");
 
         $x = "\x9" . "_b";
-        ok ($x =~ /^\x9_b$/, "\\x9_b isn't to be treated as \\x9b");
+        like ($x, qr/^\x9_b$/, "\\x9_b isn't to be treated as \\x9b");
 
         # and now again in [] ranges
 
         $x = "\x4e" . "E";
-        ok ($x =~ /^[\x4EE]{2}$/, "Check only 2 bytes of hex are matched.");
+        like ($x, qr/^[\x4EE]{2}$/, "Check only 2 bytes of hex are matched.");
 
         $x = "\x4e" . "i";
-        ok ($x =~ /^[\x4Ei]{2}$/, "Check that invalid hex digit stops it (2)");
+        like ($x, qr/^[\x4Ei]{2}$/, "Check that invalid hex digit stops it (2)");
 
         $x = "\x4" . "j";
-        ok ($x =~ /^[\x4j]{2}$/,  "Check that invalid hex digit stops it (1)");
+        like ($x, qr/^[\x4j]{2}$/,  "Check that invalid hex digit stops it (1)");
 
         $x = "\x0" . "k";
-        ok ($x =~ /^[\xk]{2}$/,   "Check that invalid hex digit stops it (0)");
+        like ($x, qr/^[\xk]{2}$/,   "Check that invalid hex digit stops it (0)");
 
         $x = "\x0" . "x";
-        ok ($x =~ /^[\xx]{2}$/, "\\xx isn't to be treated as \\0");
+        like ($x, qr/^[\xx]{2}$/, "\\xx isn't to be treated as \\0");
 
         $x = "\x0" . "xa";
-        ok ($x =~ /^[\xxa]{3}$/, "\\xxa isn't to be treated as \\xa");
+        like ($x, qr/^[\xxa]{3}$/, "\\xxa isn't to be treated as \\xa");
 
         $x = "\x9" . "_b";
-        ok ($x =~ /^[\x9_b]{3}$/, "\\x9_b isn't to be treated as \\x9b");
+        like ($x, qr/^[\x9_b]{3}$/, "\\x9_b isn't to be treated as \\x9b");
 
         # Check that \x{##} works. 5.6.1 fails quite a few of these.
 
         $x = "\x9b";
-        ok ($x =~ /^\x{9_b}$/, "\\x{9_b} is to be treated as \\x9b");
+        like ($x, qr/^\x{9_b}$/, "\\x{9_b} is to be treated as \\x9b");
 
         $x = "\x9b" . "y";
-        ok ($x =~ /^\x{9_b}y$/, "\\x{9_b} is to be treated as \\x9b (again)");
+        like ($x, qr/^\x{9_b}y$/, "\\x{9_b} is to be treated as \\x9b (again)");
 
         $x = "\x9b" . "y";
-        ok ($x =~ /^\x{9b_}y$/, "\\x{9b_} is to be treated as \\x9b");
+        like ($x, qr/^\x{9b_}y$/, "\\x{9b_} is to be treated as \\x9b");
 
         $x = "\x9b" . "y";
-        ok ($x =~ /^\x{9_bq}y$/, "\\x{9_bc} is to be treated as \\x9b");
+        like ($x, qr/^\x{9_bq}y$/, "\\x{9_bc} is to be treated as \\x9b");
 
         $x = "\x0" . "y";
-        ok ($x =~ /^\x{x9b}y$/, "\\x{x9b} is to be treated as \\x0");
+        like ($x, qr/^\x{x9b}y$/, "\\x{x9b} is to be treated as \\x0");
 
         $x = "\x0" . "y";
-        ok ($x =~ /^\x{0x9b}y$/, "\\x{0x9b} is to be treated as \\x0");
+        like ($x, qr/^\x{0x9b}y$/, "\\x{0x9b} is to be treated as \\x0");
 
         $x = "\x9b" . "y";
-        ok ($x =~ /^\x{09b}y$/, "\\x{09b} is to be treated as \\x9b");
+        like ($x, qr/^\x{09b}y$/, "\\x{09b} is to be treated as \\x9b");
 
         $x = "\x9b";
-        ok ($x =~ /^[\x{9_b}]$/, "\\x{9_b} is to be treated as \\x9b");
+        like ($x, qr/^[\x{9_b}]$/, "\\x{9_b} is to be treated as \\x9b");
 
         $x = "\x9b" . "y";
-        ok ($x =~ /^[\x{9_b}y]{2}$/,
+        like ($x, qr/^[\x{9_b}y]{2}$/,
                                  "\\x{9_b} is to be treated as \\x9b (again)");
 
         $x = "\x9b" . "y";
-        ok ($x =~ /^[\x{9b_}y]{2}$/, "\\x{9b_} is to be treated as \\x9b");
+        like ($x, qr/^[\x{9b_}y]{2}$/, "\\x{9b_} is to be treated as \\x9b");
 
         $x = "\x9b" . "y";
-        ok ($x =~ /^[\x{9_bq}y]{2}$/, "\\x{9_bc} is to be treated as \\x9b");
+        like ($x, qr/^[\x{9_bq}y]{2}$/, "\\x{9_bc} is to be treated as \\x9b");
 
         $x = "\x0" . "y";
-        ok ($x =~ /^[\x{x9b}y]{2}$/, "\\x{x9b} is to be treated as \\x0");
+        like ($x, qr/^[\x{x9b}y]{2}$/, "\\x{x9b} is to be treated as \\x0");
 
         $x = "\x0" . "y";
-        ok ($x =~ /^[\x{0x9b}y]{2}$/, "\\x{0x9b} is to be treated as \\x0");
+        like ($x, qr/^[\x{0x9b}y]{2}$/, "\\x{0x9b} is to be treated as \\x0");
 
         $x = "\x9b" . "y";
-        ok ($x =~ /^[\x{09b}y]{2}$/, "\\x{09b} is to be treated as \\x9b");
+        like ($x, qr/^[\x{09b}y]{2}$/, "\\x{09b} is to be treated as \\x9b");
 
     }
 
     {
         # High bit bug -- japhy
         my $x = "ab\200d";
-        ok $x =~ /.*?\200/, "High bit fine";
+        like $x, qr/.*?\200/, "High bit fine";
     }
 
     {
         # The basic character classes and Unicode
-        ok "\x{0100}" =~ /\w/, 'LATIN CAPITAL LETTER A WITH MACRON in /\w/';
-        ok "\x{0660}" =~ /\d/, 'ARABIC-INDIC DIGIT ZERO in /\d/';
-        ok "\x{1680}" =~ /\s/, 'OGHAM SPACE MARK in /\s/';
+        like "\x{0100}", qr/\w/, 'LATIN CAPITAL LETTER A WITH MACRON in /\w/';
+        like "\x{0660}", qr/\d/, 'ARABIC-INDIC DIGIT ZERO in /\d/';
+        like "\x{1680}", qr/\s/, 'OGHAM SPACE MARK in /\s/';
     }
 
     {
@@ -484,9 +427,6 @@ sub run_tests {
                                          =~ /^(\X)!/ &&
                $1 eq "\N{LATIN CAPITAL LETTER E}\N{COMBINING GRAVE ACCENT}", $message);
 
-        $message = '\C and \X';
-        like("!abc!", qr/a\Cc/, $message);
-        like("!abc!", qr/a\Xc/, $message);
     }
 
     {
@@ -542,10 +482,6 @@ sub run_tests {
             $& eq "Francais", $message);
         ok("Fran\N{LATIN SMALL LETTER C WITH CEDILLA}ais" =~ /Fran.ais/ &&
             $& eq "Fran\N{LATIN SMALL LETTER C WITH CEDILLA}ais", $message);
-        ok("Fran\N{LATIN SMALL LETTER C}ais" =~ /Fran\Cais/ &&
-            $& eq "Francais", $message);
-        # COMBINING CEDILLA is two bytes when encoded
-        like("Franc\N{COMBINING CEDILLA}ais", qr/Franc\C\Cais/, $message);
         ok("Fran\N{LATIN SMALL LETTER C}ais" =~ /Fran\Xais/ &&
             $& eq "Francais", $message);
         ok("Fran\N{LATIN SMALL LETTER C WITH CEDILLA}ais" =~ /Fran\Xais/  &&
@@ -599,74 +535,88 @@ sub run_tests {
         like("\N{LATIN SMALL LETTER SHARP S}",
 	     qr/\N{LATIN SMALL LETTER SHARP S}/, $message);
         like("\N{LATIN SMALL LETTER SHARP S}",
+	     qr'\N{LATIN SMALL LETTER SHARP S}', $message);
+        like("\N{LATIN SMALL LETTER SHARP S}",
 	     qr/\N{LATIN SMALL LETTER SHARP S}/i, $message);
+        like("\N{LATIN SMALL LETTER SHARP S}",
+	     qr'\N{LATIN SMALL LETTER SHARP S}'i, $message);
         like("\N{LATIN SMALL LETTER SHARP S}",
 	     qr/[\N{LATIN SMALL LETTER SHARP S}]/, $message);
         like("\N{LATIN SMALL LETTER SHARP S}",
+	     qr'[\N{LATIN SMALL LETTER SHARP S}]', $message);
+        like("\N{LATIN SMALL LETTER SHARP S}",
 	     qr/[\N{LATIN SMALL LETTER SHARP S}]/i, $message);
+        like("\N{LATIN SMALL LETTER SHARP S}",
+	     qr'[\N{LATIN SMALL LETTER SHARP S}]'i, $message);
 
         like("ss", qr /\N{LATIN SMALL LETTER SHARP S}/i, $message);
+        like("ss", qr '\N{LATIN SMALL LETTER SHARP S}'i, $message);
         like("SS", qr /\N{LATIN SMALL LETTER SHARP S}/i, $message);
+        like("SS", qr '\N{LATIN SMALL LETTER SHARP S}'i, $message);
         like("ss", qr/[\N{LATIN SMALL LETTER SHARP S}]/i, $message);
+        like("ss", qr'[\N{LATIN SMALL LETTER SHARP S}]'i, $message);
         like("SS", qr/[\N{LATIN SMALL LETTER SHARP S}]/i, $message);
+        like("SS", qr'[\N{LATIN SMALL LETTER SHARP S}]'i, $message);
 
         like("\N{LATIN SMALL LETTER SHARP S}", qr/ss/i, $message);
         like("\N{LATIN SMALL LETTER SHARP S}", qr/SS/i, $message);
 
          $message = "Unoptimized named sequence in class";
         like("ss", qr/[\N{LATIN SMALL LETTER SHARP S}x]/i, $message);
+        like("ss", qr'[\N{LATIN SMALL LETTER SHARP S}x]'i, $message);
         like("SS", qr/[\N{LATIN SMALL LETTER SHARP S}x]/i, $message);
+        like("SS", qr'[\N{LATIN SMALL LETTER SHARP S}x]'i, $message);
         like("\N{LATIN SMALL LETTER SHARP S}",
 	     qr/[\N{LATIN SMALL LETTER SHARP S}x]/, $message);
         like("\N{LATIN SMALL LETTER SHARP S}",
+	     qr'[\N{LATIN SMALL LETTER SHARP S}x]', $message);
+        like("\N{LATIN SMALL LETTER SHARP S}",
 	     qr/[\N{LATIN SMALL LETTER SHARP S}x]/i, $message);
+        like("\N{LATIN SMALL LETTER SHARP S}",
+	     qr'[\N{LATIN SMALL LETTER SHARP S}x]'i, $message);
     }
 
     {
         # More whitespace: U+0085, U+2028, U+2029\n";
 
         # U+0085, U+00A0 need to be forced to be Unicode, the \x{100} does that.
-      SKIP: {
-          skip "EBCDIC platform", 4 if $::IS_EBCDIC;
-          # Do \x{0015} and \x{0041} match \s in EBCDIC?
-          ok "<\x{100}\x{0085}>" =~ /<\x{100}\s>/, '\x{0085} in \s';
-          ok        "<\x{0085}>" =~        /<\v>/, '\x{0085} in \v';
-          ok "<\x{100}\x{00A0}>" =~ /<\x{100}\s>/, '\x{00A0} in \s';
-          ok        "<\x{00A0}>" =~        /<\h>/, '\x{00A0} in \h';
-        }
-        my @h = map {sprintf "%05x" => $_} 0x01680, 0x0180E, 0x02000 .. 0x0200A,
+        like "<\x{100}" . uni_to_native("\x{0085}") . ">", qr/<\x{100}\s>/, '\x{0085} in \s';
+        like        "<" . uni_to_native("\x{0085}") . ">", qr/<\v>/, '\x{0085} in \v';
+        like "<\x{100}" . uni_to_native("\x{00A0}") . ">", qr/<\x{100}\s>/, '\x{00A0} in \s';
+        like        "<" . uni_to_native("\x{00A0}") . ">", qr/<\h>/, '\x{00A0} in \h';
+        my @h = map {sprintf "%05x" => $_} 0x01680, 0x02000 .. 0x0200A,
                                            0x0202F, 0x0205F, 0x03000;
         my @v = map {sprintf "%05x" => $_} 0x02028, 0x02029;
 
         my @H = map {sprintf "%05x" => $_} 0x01361,   0x0200B, 0x02408, 0x02420,
-                                           0x0303F,   0xE0020;
+                                           0x0303F,   0xE0020, 0x180E;
         my @V = map {sprintf "%05x" => $_} 0x0008A .. 0x0008D, 0x00348, 0x10100,
-                                           0xE005F,   0xE007C;
+                                           0xE005F,   0xE007C, 0x180E;
 
         for my $hex (@h) {
             my $str = eval qq ["<\\x{$hex}>"];
-            ok $str =~ /<\s>/, "\\x{$hex} in \\s";
-            ok $str =~ /<\h>/, "\\x{$hex} in \\h";
-            ok $str !~ /<\v>/, "\\x{$hex} not in \\v";
+            like $str, qr/<\s>/, "\\x{$hex} in \\s";
+            like $str, qr/<\h>/, "\\x{$hex} in \\h";
+            unlike $str, qr/<\v>/, "\\x{$hex} not in \\v";
         }
 
         for my $hex (@v) {
             my $str = eval qq ["<\\x{$hex}>"];
-            ok $str =~ /<\s>/, "\\x{$hex} in \\s";
-            ok $str =~ /<\v>/, "\\x{$hex} in \\v";
-            ok $str !~ /<\h>/, "\\x{$hex} not in \\h";
+            like $str, qr/<\s>/, "\\x{$hex} in \\s";
+            like $str, qr/<\v>/, "\\x{$hex} in \\v";
+            unlike $str, qr/<\h>/, "\\x{$hex} not in \\h";
         }
 
         for my $hex (@H) {
             my $str = eval qq ["<\\x{$hex}>"];
-            ok $str =~ /<\S>/, "\\x{$hex} in \\S";
-            ok $str =~ /<\H>/, "\\x{$hex} in \\H";
+            like $str, qr/<\S>/, "\\x{$hex} in \\S";
+            like $str, qr/<\H>/, "\\x{$hex} in \\H";
         }
 
         for my $hex (@V) {
             my $str = eval qq ["<\\x{$hex}>"];
-            ok $str =~ /<\S>/, "\\x{$hex} in \\S";
-            ok $str =~ /<\V>/, "\\x{$hex} in \\V";
+            like $str, qr/<\S>/, "\\x{$hex} in \\S";
+            like $str, qr/<\V>/, "\\x{$hex} in \\V";
         }
     }
 
@@ -705,10 +655,10 @@ sub run_tests {
 
     {
         my $message = "Unicode lookbehind";
-        like("A\x{100}B"       , qr/(?<=A.)B/, $message);
+        like("A\x{100}B",        qr/(?<=A.)B/, $message);
         like("A\x{200}\x{300}B", qr/(?<=A..)B/, $message);
-        like("\x{400}AB"       , qr/(?<=\x{400}.)B/, $message);
-        like("\x{500}\x{600}B" , qr/(?<=\x{500}.)B/, $message);
+        like("\x{400}AB",       qr/(?<=\x{400}.)B/, $message);
+        like("\x{500}\x{600}B", qr/(?<=\x{500}.)B/, $message);
 
         # Original code also contained:
         # ok "\x{500\x{600}}B"  =~ /(?<=\x{500}.)B/;
@@ -789,6 +739,12 @@ sub run_tests {
     }
 
     {
+        # The second half of RT #114808
+        warning_is(sub {'aa' =~ /.+\x{100}/}, undef,
+                   'utf8-only floating substr, non-utf8 target, no warning');
+    }
+
+    {
         my $message = "qr /.../x";
         my $R = qr / A B C # D E/x;
         ok("ABCDE" =~    $R   && $& eq "ABC", $message);
@@ -829,16 +785,7 @@ sub run_tests {
     }
 
     {
-        # XXX DAPM 13-Apr-06. Recursive split is still broken. It's only luck it
-        # hasn't been crashing. Disable this test until it is fixed properly.
-        # XXX also check what it returns rather than just doing ok(1,...)
-        # split /(?{ split "" })/, "abc";
-        local $::TODO = "Recursive split is still broken";
-        ok 0, 'cache_re & "(?{": it dumps core in 5.6.1 & 5.8.0';
-    }
-
-    {
-        ok "\x{100}\n" =~ /\x{100}\n$/, "UTF-8 length cache and fbm_compile";
+        like "\x{100}\n", qr/\x{100}\n$/, "UTF-8 length cache and fbm_compile";
     }
 
     {
@@ -854,14 +801,15 @@ sub run_tests {
     {
         my $re = qq /^([^X]*)X/;
         utf8::upgrade ($re);
-        ok "\x{100}X" =~ /$re/, "S_cl_and ANYOF_UNICODE & ANYOF_INVERTED";
+        like "\x{100}X", qr/$re/, "S_cl_and ANYOF_UNICODE & ANYOF_INVERTED";
         my $loc_re = qq /(?l:^([^X]*)X)/;
         utf8::upgrade ($loc_re);
-        ok "\x{100}X" =~ /$loc_re/, "locale, S_cl_and ANYOF_UNICODE & ANYOF_INVERTED";
+        no warnings 'locale';
+        like "\x{100}X", qr/$loc_re/, "locale, S_cl_and ANYOF_UNICODE & ANYOF_INVERTED";
     }
 
     {
-        ok "123\x{100}" =~ /^.*1.*23\x{100}$/,
+        like "123\x{100}", qr/^.*1.*23\x{100}$/,
            'UTF-8 + multiple floating substr';
     }
 
@@ -882,19 +830,21 @@ sub run_tests {
     }
 
     {
-        for (120 .. 130) {
+        for (120 .. 130, 240 .. 260) {
             my $head = 'x' x $_;
             my $message = q [Don't misparse \x{...} in regexp ] .
-                             q [near 127 char EXACT limit];
+                             q [near EXACT char count limit];
             for my $tail ('\x{0061}', '\x{1234}', '\x61') {
                 eval qq{like("$head$tail", qr/$head$tail/, \$message)};
 		is($@, '', $message);
             }
             $message = q [Don't misparse \N{...} in regexp ] .
-                             q [near 127 char EXACT limit];
+                             q [near EXACT char count limit];
             for my $tail ('\N{SNOWFLAKE}') {
                 eval qq {use charnames ':full';
                          like("$head$tail", qr/$head$tail/, \$message)};
+                eval qq {use charnames ':full';
+                         like("$head$tail", qr'$head$tail', \$message)};
 		is($@, '', $message);
             }
         }
@@ -914,7 +864,7 @@ sub run_tests {
         $re = qr/\b$re\b/;
 
         foreach (@nums) {
-            ok $_ =~ /$re/, "Trie nums";
+            like $_, qr/$re/, "Trie nums";
         }
 
         $_ = join " ", @nums;
@@ -974,74 +924,177 @@ sub run_tests {
     }
 
     {
-    BEGIN {
-        unshift @INC, 'lib';
-    }
-        use Cname;
+	BEGIN {
+	    unshift @INC, 'lib';
+	}
+        use Cname;  # Our custom charname plugin, currently found in
+                    # t/lib/Cname.pm
 
-        ok 'fooB'  =~ /\N{foo}[\N{B}\N{b}]/, "Passthrough charname";
+        like 'fooB', qr/\N{foo}[\N{B}\N{b}]/, "Passthrough charname";
+        my $name = "foo\xDF";
+        my $result = eval "'A${name}B'  =~ /^A\\N{$name}B\$/";
+        ok !$@ && $result,  "Passthrough charname of non-ASCII, Latin1";
+        eval "qr/\\p{name=foo}/";
+        like($@, qr/Can't find Unicode property definition "name=foo"/,
+                '\p{name=} doesn\'t see a cumstom charnames translator');
         #
         # Why doesn't must_warn work here?
         #
         my $w;
         local $SIG {__WARN__} = sub {$w .= "@_"};
-        eval 'q(xxWxx) =~ /[\N{WARN}]/';
-        ok $w && $w =~ /Using just the first character returned by \\N{} in character class/,
-                 "single character in [\\N{}] warning";
+        $result = eval 'q(WARN) =~ /^[\N{WARN}]$/';
+        ok !$@ && $result && ! $w,  '\N{} returning multi-char works';
 
         undef $w;
-        eval q [ok "\0" !~ /[\N{EMPTY-STR}XY]/,
+        eval q [unlike "\0", qr/[\N{EMPTY-STR}XY]/,
                    "Zerolength charname in charclass doesn't match \\\\0"];
         ok $w && $w =~ /Ignoring zero length/,
                  'Ignoring zero length \N{} in character class warning';
+        undef $w;
+        eval q [like 'xy', qr/x[\N{EMPTY-STR} y]/x,
+                    'Empty string charname in [] is ignored; finds a following character'];
+        ok $w && $w =~ /Ignoring zero length/,
+                 'Ignoring zero length \N{} in character class warning';
+        undef $w;
+        eval q [like 'x ', qr/x[\N{EMPTY-STR} y]/,
+                    'Empty string charname in [] is ignored; finds a following blank under /x'];
+        like $w, qr/Ignoring zero length/,
+                 'Ignoring zero length \N{} in character class warning';
 
+        # EVIL keeps track of its calls, and appends a new character each
+        # time: A AB ABC ABCD ...
         ok 'AB'  =~ /(\N{EVIL})/ && $1 eq 'A', 'Charname caching $1';
-        ok 'ABC' =~ /(\N{EVIL})/,              'Charname caching $1';
-        ok 'xy'  =~ /x\N{EMPTY-STR}y/,
+        like 'ABC', qr/(\N{EVIL})/,              'Charname caching $1';
+        ok 'ABCD'  =~ m'(\N{EVIL})' && $1 eq 'ABC', 'Charname caching $1';
+        ok 'ABCDE'  =~ m'(\N{EVIL})',          'Charname caching $1';
+        like 'xy',  qr/x\N{EMPTY-STR}y/,
                     'Empty string charname produces NOTHING node';
-        ok ''    =~ /\N{EMPTY-STR}/,
+        ok 'xy'  =~ 'x\N{EMPTY-STR}y',
                     'Empty string charname produces NOTHING node';
+        like '', qr/\N{EMPTY-STR}/,
+                    'Empty string charname produces NOTHING node';
+        like "\N{LONG-STR}", qr/^\N{LONG-STR}$/, 'Verify that long string works';
+        like "\N{LONG-STR}", qr/^\N{LONG-STR}$/i, 'Verify under folding that long string works';
+
+        # perlhacktips points out that these work on both ASCII and EBCDIC
+        like "\xfc", qr/\N{EMPTY-STR}\xdc/i, 'Empty \N{} should change /d to /u';
+        like "\xfc", qr'\N{EMPTY-STR}\xdc'i, 'Empty \N{} should change /d to /u';
+
+        eval '/(?[[\N{EMPTY-STR}]])/';
+        like $@, qr/Zero length \\N\{\}/, 'Verify zero-length return from \N{} correctly fails';
         ok "\N{LONG-STR}" =~ /^\N{LONG-STR}$/, 'Verify that long string works';
+        ok "\N{LONG-STR}" =~ '^\N{LONG-STR}$', 'Verify that long string works';
         ok "\N{LONG-STR}" =~ /^\N{LONG-STR}$/i, 'Verify under folding that long string works';
+        ok "\N{LONG-STR}" =~ m'^\N{LONG-STR}$'i, 'Verify under folding that long string works';
+
+        undef $w;
+        {
+            () = eval q ["\N{TOO  MANY SPACES}"];
+            like ($@, qr/charnames alias definitions may not contain a sequence of multiple spaces/, "Multiple spaces in a row in a charnames alias is fatal");
+            eval q [use utf8; () = "\N{TOO  MANY SPACES}"];
+            like ($@, qr/charnames alias definitions may not contain a sequence of multiple spaces/,  "... same under utf8");
+        }
+
+        undef $w;
+        my $Cedilla_Latin1 = "GAR"
+                           . uni_to_native("\xC7")
+                           . "ON";
+        my $Cedilla_utf8 = $Cedilla_Latin1;
+        utf8::upgrade($Cedilla_utf8);
+        eval qq[is("\\N{$Cedilla_Latin1}", "$Cedilla_Latin1", "A cedilla in character name works")];
+        undef $w;
+            {
+            use feature 'unicode_eval';
+            eval qq[use utf8; is("\\N{$Cedilla_utf8}", "$Cedilla_utf8", "... same under 'use utf8': they work")];
+        }
+
+        undef $w;
+        my $NBSP_Latin1 = "NBSP"
+                        . uni_to_native("\xA0")
+                        . "SEPARATED"
+                        . uni_to_native("\xA0")
+                        . "SPACE";
+        my $NBSP_utf8 = $NBSP_Latin1;
+        utf8::upgrade($NBSP_utf8);
+        () = eval qq[is("\\N{$NBSP_Latin1}", "$NBSP_Latin1"];
+        like ($@, qr/Invalid character in \\N\{...}/, "A NO-BREAK SPACE in a charnames alias is fatal");
+        undef $w;
+            {
+            use feature 'unicode_eval';
+            eval qq[use utf8; is("\\N{$NBSP_utf8}"];
+            like ($@, qr/Invalid character in \\N\{...}/, "A NO-BREAK SPACE in a charnames alias is fatal");
+        }
+
+        {
+            BEGIN { no strict; *CnameTest:: = *{"_charnames\0A::" } }
+            package CnameTest { sub translator { pop } }
+            BEGIN { $^H{charnames} = \&CnameTest::translator }
+            undef $w;
+            () = eval q ["\N{TOO  MANY SPACES}"];
+            like ($@, qr/charnames alias definitions may not contain a sequence of multiple spaces/,
+                 'translators in _charnames\0* packages get validated');
+        }
 
         # If remove the limitation in regcomp code these should work
         # differently
         undef $w;
-        eval q [ok "\N{TOO-LONG-STR}" =~ /^\N{TOO-LONG-STR}$/, 'Verify that what once was too long a string works'];
-        eval 'q(syntax error) =~ /\N{MALFORMED}/';
-        ok $@ && $@ =~ /Malformed/, 'Verify that malformed utf8 gives an error';
-        undef $w;
+        eval q [like "\N{TOO-LONG-STR}" =~ /^\N{TOO-LONG-STR}$/, 'Verify that what once was too long a string works'];
         eval 'q() =~ /\N{4F}/';
-        ok $w && $w =~ /Deprecated/, 'Verify that leading digit in name gives warning';
-        undef $w;
+        ok $@ && $@ =~ /Invalid character/, 'Verify that leading digit in name gives error';
         eval 'q() =~ /\N{COM,MA}/';
-        ok $w && $w =~ /Deprecated/, 'Verify that comma in name gives warning';
-        undef $w;
-        my $name = "A\x{D7}O";
+        ok $@ && $@ =~ /Invalid character/, 'Verify that comma in name gives error';
+        $name = "A" . uni_to_native("\x{D7}") . "O";
         eval "q(W) =~ /\\N{$name}/";
-        ok $w && $w =~ /Deprecated/, 'Verify that latin1 symbol in name gives warning';
+        ok $@ && $@ =~ /Invalid character/, 'Verify that latin1 symbol in name gives error';
+        my $utf8_name = "7 CITIES OF GOLD";
+        utf8::upgrade($utf8_name);
+        eval "use utf8; q(W) =~ /\\N{$utf8_name}/";
+        ok $@ && $@ =~ /Invalid character/, 'Verify that leading digit in utf8 name gives error';
+        $utf8_name = "SHARP #";
+        utf8::upgrade($utf8_name);
+        eval "use utf8; q(W) =~ /\\N{$utf8_name}/";
+        ok $@ && $@ =~ /Invalid character/, 'Verify that ASCII symbol in utf8 name gives error';
+        $utf8_name = "A HOUSE " . uni_to_native("\xF7") . " AGAINST ITSELF";
+        utf8::upgrade($utf8_name);
+        eval "use utf8; q(W) =~ /\\N{$utf8_name}/";
+        ok $@ && $@ =~ /Invalid character/, 'Verify that latin1 symbol in utf8 name gives error';
+        $utf8_name = "\x{664} HORSEMEN}";
+        eval "use utf8; q(W) =~ /\\N{$utf8_name}/";
+        ok $@ && $@ =~ /Invalid character/, 'Verify that leading above Latin1 digit in utf8 name gives error';
+        $utf8_name = "A \x{1F4A9} WOULD SMELL AS SWEET}";
+        eval "use utf8; q(W) =~ /\\N{$utf8_name}/";
+        ok $@ && $@ =~ /Invalid character/, 'Verify that above Latin1 symbol in utf8 name gives error';
+
         undef $w;
-        $name = "A\x{D1}O";
+        $name = "A" . uni_to_native("\x{D1}") . "O";
         eval "q(W) =~ /\\N{$name}/";
         ok ! $w, 'Verify that latin1 letter in name doesnt give warning';
 
+        # This tests the code path that restarts the parse when the recursive
+        # call to S_reg() from within S_grok_bslash_N() discovers that the
+        # pattern needs to be recalculated as UTF-8.  use eval to avoid
+        # needing literal Unicode in this source file:
+        my $r = eval "qr/\\N{\x{100}\x{100}}/";
+        isnt $r, undef, "Generated regex for multi-char UTF-8 charname"
+	    or diag($@);
+        like "\x{100}\x{100}", $r, "which matches";
     }
 
     {
         use charnames ':full';
 
-        ok 'aabc' !~ /a\N{PLUS SIGN}b/, '/a\N{PLUS SIGN}b/ against aabc';
-        ok 'a+bc' =~ /a\N{PLUS SIGN}b/, '/a\N{PLUS SIGN}b/ against a+bc';
+        unlike 'aabc', qr/a\N{PLUS SIGN}b/, '/a\N{PLUS SIGN}b/ against aabc';
+        like 'a+bc', qr/a\N{PLUS SIGN}b/, '/a\N{PLUS SIGN}b/ against a+bc';
 
-        ok ' A B' =~ /\N{SPACE}\N{U+0041}\N{SPACE}\N{U+0042}/,
+        like ' A B', qr/\N{SPACE}\N{U+0041}\N{SPACE}\N{U+0042}/,
             'Intermixed named and unicode escapes';
-        ok "\N{SPACE}\N{U+0041}\N{SPACE}\N{U+0042}" =~
-           /\N{SPACE}\N{U+0041}\N{SPACE}\N{U+0042}/,
+        like "\N{SPACE}\N{U+0041}\N{SPACE}\N{U+0042}",
+             qr/\N{SPACE}\N{U+0041}\N{SPACE}\N{U+0042}/,
             'Intermixed named and unicode escapes';
-        ok "\N{SPACE}\N{U+0041}\N{SPACE}\N{U+0042}" =~
-           /[\N{SPACE}\N{U+0041}][\N{SPACE}\N{U+0042}]/,
+        like "\N{SPACE}\N{U+0041}\N{SPACE}\N{U+0042}",
+            qr/[\N{SPACE}\N{U+0041}][\N{SPACE}\N{U+0042}]/,
             'Intermixed named and unicode escapes';
-        ok "\0" =~ /^\N{NULL}$/, 'Verify that \N{NULL} works; is not confused with an error';
+        like "\0", qr/^\N{NULL}$/, 'Verify that \N{NULL} works; is not confused with an error';
     }
 
     {
@@ -1050,7 +1103,7 @@ sub run_tests {
             {  (?> [^{}]+ | (??{ $brackets }) )* }
         }x;
 
-        ok "{b{c}d" !~ m/^((??{ $brackets }))/, "Bracket mismatch";
+        unlike "{b{c}d", qr/^((??{ $brackets }))/, "Bracket mismatch";
 
         SKIP: {
             our @stack = ();
@@ -1091,10 +1144,10 @@ sub run_tests {
 
     {
         my @ary = (
-            pack('U', 0x00F1),            # n-tilde
-            '_'.pack('U', 0x00F1),        # _ + n-tilde
+            pack('U', utf8::unicode_to_native(0x00F1)), # n-tilde
+            '_'.pack('U', utf8::unicode_to_native(0x00F1)), # _ + n-tilde
             'c'.pack('U', 0x0327),        # c + cedilla
-            pack('U*', 0x00F1, 0x0327),   # n-tilde + cedilla
+            pack('U*', utf8::unicode_to_native(0x00F1), 0x0327),# n-tilde + cedilla
             pack('U', 0x0391),            # ALPHA
             pack('U', 0x0391).'2',        # ALPHA + 2
             pack('U', 0x0391).'_',        # ALPHA + _
@@ -1136,17 +1189,13 @@ sub run_tests {
     }
 
     {
-        # \, breaks {3,4}
-        ok "xaaay"    !~ /xa{3\,4}y/, '\, in a pattern';
-        ok "xa{3,4}y" =~ /xa{3\,4}y/, '\, in a pattern';
-
         # \c\ followed by _
-        ok "x\c_y"    !~ /x\c\_y/,    '\_ in a pattern';
-        ok "x\c\_y"   =~ /x\c\_y/,    '\_ in a pattern';
+        unlike "x\c_y", qr/x\c\_y/,    '\_ in a pattern';
+        like "x\c\_y", qr/x\c\_y/,    '\_ in a pattern';
 
         # \c\ followed by other characters
         for my $c ("z", "\0", "!", chr(254), chr(256)) {
-            my $targ = "a\034$c";
+            my $targ = "a" . uni_to_native("\034") . "$c";
             my $reg  = "a\\c\\$c";
             ok eval ("qq/$targ/ =~ /$reg/"), "\\c\\ in pattern";
         }
@@ -1186,6 +1235,10 @@ sub run_tests {
         1 while /(a+b?)(*SKIP)(?{$count++; push @res,$1})(*FAIL)/g;
         is($count, 2, "Expect 2 with (*SKIP)");
         is("@res", "aaab aaab", "Adjacent (*SKIP) works as expected");
+
+        $_ = "dir/file.mp3";
+        my $got = m{ ( ([^/]+) (?: / (*SKIP)(*FAIL) | \z ) ) }x ? $1 : undef;
+        is($got, "file.mp3", "(*SKIP) and find_byclass() work together");
     }
 
     {   # Test the (*SKIP) pattern
@@ -1232,11 +1285,13 @@ sub run_tests {
         1 while /(a+b?)(*COMMIT)(?{$count++; push @res,$1})(*FAIL)/g;
         is($count, 1, "Expect 1 with (*COMMIT)");
         is("@res", "aaab", "Adjacent (*COMMIT) works as expected");
+
+	unlike("1\n2a\n", qr/^\d+(*COMMIT)\w+/m, "COMMIT and anchors");
     }
 
     {
         # Test named commits and the $REGERROR var
-        our $REGERROR;
+        local $REGERROR;
         for my $name ('', ':foo') {
             for my $pat ("(*PRUNE$name)",
                          ($name ? "(*MARK$name)" : "") . "(*SKIP$name)",
@@ -1255,6 +1310,7 @@ sub run_tests {
         # Test named commits and the $REGERROR var
         package Fnorble;
         our $REGERROR;
+        local $REGERROR;
         for my $name ('', ':foo') {
             for my $pat ("(*PRUNE$name)",
                          ($name ? "(*MARK$name)" : "") . "(*SKIP$name)",
@@ -1272,7 +1328,7 @@ sub run_tests {
     {
         # Test named commits and the $REGERROR var
 	my $message = '$REGERROR';
-        our $REGERROR;
+        local $REGERROR;
         for my $word (qw (bar baz bop)) {
             $REGERROR = "";
             "aaaaa$word" =~
@@ -1342,7 +1398,8 @@ sub run_tests {
     {
         my $message = '$REGMARK';
         our @r = ();
-        our ($REGMARK, $REGERROR);
+        local $REGMARK;
+        local $REGERROR;
         like('foofoo', qr/foo (*MARK:foo) (?{push @r,$REGMARK}) /x, $message);
         is("@r","foo", $message);
         is($REGMARK, "foo", $message);
@@ -1385,62 +1442,62 @@ sub run_tests {
 
     {
         use charnames ":full";
-        ok "\N{ROMAN NUMERAL ONE}" =~ /\p{Alphabetic}/, "I =~ Alphabetic";
-        ok "\N{ROMAN NUMERAL ONE}" =~ /\p{Uppercase}/,  "I =~ Uppercase";
-        ok "\N{ROMAN NUMERAL ONE}" !~ /\p{Lowercase}/,  "I !~ Lowercase";
-        ok "\N{ROMAN NUMERAL ONE}" =~ /\p{IDStart}/,    "I =~ ID_Start";
-        ok "\N{ROMAN NUMERAL ONE}" =~ /\p{IDContinue}/, "I =~ ID_Continue";
-        ok "\N{SMALL ROMAN NUMERAL ONE}" =~ /\p{Alphabetic}/, "i =~ Alphabetic";
-        ok "\N{SMALL ROMAN NUMERAL ONE}" !~ /\p{Uppercase}/,  "i !~ Uppercase";
-        ok "\N{SMALL ROMAN NUMERAL ONE}" =~ /\p{Uppercase}/i,  "i =~ Uppercase under /i";
-        ok "\N{SMALL ROMAN NUMERAL ONE}" !~ /\p{Titlecase}/,  "i !~ Titlecase";
-        ok "\N{SMALL ROMAN NUMERAL ONE}" =~ /\p{Titlecase}/i,  "i =~ Titlecase under /i";
-        ok "\N{ROMAN NUMERAL ONE}" =~ /\p{Lowercase}/i,  "I =~ Lowercase under /i";
+        like "\N{ROMAN NUMERAL ONE}", qr/\p{Alphabetic}/, "I =~ Alphabetic";
+        like "\N{ROMAN NUMERAL ONE}", qr/\p{Uppercase}/,  "I =~ Uppercase";
+        unlike "\N{ROMAN NUMERAL ONE}", qr/\p{Lowercase}/,  "I !~ Lowercase";
+        like "\N{ROMAN NUMERAL ONE}", qr/\p{IDStart}/,    "I =~ ID_Start";
+        like "\N{ROMAN NUMERAL ONE}", qr/\p{IDContinue}/, "I =~ ID_Continue";
+        like "\N{SMALL ROMAN NUMERAL ONE}", qr/\p{Alphabetic}/, "i =~ Alphabetic";
+        unlike "\N{SMALL ROMAN NUMERAL ONE}", qr/\p{Uppercase}/,  "i !~ Uppercase";
+        like "\N{SMALL ROMAN NUMERAL ONE}", qr/\p{Uppercase}/i,  "i =~ Uppercase under /i";
+        unlike "\N{SMALL ROMAN NUMERAL ONE}", qr/\p{Titlecase}/,  "i !~ Titlecase";
+        like "\N{SMALL ROMAN NUMERAL ONE}", qr/\p{Titlecase}/i,  "i =~ Titlecase under /i";
+        like "\N{ROMAN NUMERAL ONE}", qr/\p{Lowercase}/i,  "I =~ Lowercase under /i";
 
-        ok "\N{SMALL ROMAN NUMERAL ONE}" =~ /\p{Lowercase}/,  "i =~ Lowercase";
-        ok "\N{SMALL ROMAN NUMERAL ONE}" =~ /\p{IDStart}/,    "i =~ ID_Start";
-        ok "\N{SMALL ROMAN NUMERAL ONE}" =~ /\p{IDContinue}/, "i =~ ID_Continue"
+        like "\N{SMALL ROMAN NUMERAL ONE}", qr/\p{Lowercase}/,  "i =~ Lowercase";
+        like "\N{SMALL ROMAN NUMERAL ONE}", qr/\p{IDStart}/,    "i =~ ID_Start";
+        like "\N{SMALL ROMAN NUMERAL ONE}", qr/\p{IDContinue}/, "i =~ ID_Continue"
     }
 
     {   # More checking that /i works on the few properties that it makes a
         # difference.  Uppercase, Lowercase, and Titlecase were done in the
         # block above
-        ok "A" =~ /\p{PosixUpper}/,  "A =~ PosixUpper";
-        ok "A" =~ /\p{PosixUpper}/i,  "A =~ PosixUpper under /i";
-        ok "A" !~ /\p{PosixLower}/,  "A !~ PosixLower";
-        ok "A" =~ /\p{PosixLower}/i,  "A =~ PosixLower under /i";
-        ok "a" !~ /\p{PosixUpper}/,  "a !~ PosixUpper";
-        ok "a" =~ /\p{PosixUpper}/i,  "a =~ PosixUpper under /i";
-        ok "a" =~ /\p{PosixLower}/,  "a =~ PosixLower";
-        ok "a" =~ /\p{PosixLower}/i,  "a =~ PosixLower under /i";
+        like "A", qr/\p{PosixUpper}/,  "A =~ PosixUpper";
+        like "A", qr/\p{PosixUpper}/i,  "A =~ PosixUpper under /i";
+        unlike "A", qr/\p{PosixLower}/,  "A !~ PosixLower";
+        like "A", qr/\p{PosixLower}/i,  "A =~ PosixLower under /i";
+        unlike "a", qr/\p{PosixUpper}/,  "a !~ PosixUpper";
+        like "a", qr/\p{PosixUpper}/i,  "a =~ PosixUpper under /i";
+        like "a", qr/\p{PosixLower}/,  "a =~ PosixLower";
+        like "a", qr/\p{PosixLower}/i,  "a =~ PosixLower under /i";
 
-        ok "\xC0" =~ /\p{XPosixUpper}/,  "\\xC0 =~ XPosixUpper";
-        ok "\xC0" =~ /\p{XPosixUpper}/i,  "\\xC0 =~ XPosixUpper under /i";
-        ok "\xC0" !~ /\p{XPosixLower}/,  "\\xC0 !~ XPosixLower";
-        ok "\xC0" =~ /\p{XPosixLower}/i,  "\\xC0 =~ XPosixLower under /i";
-        ok "\xE0" !~ /\p{XPosixUpper}/,  "\\xE0 !~ XPosixUpper";
-        ok "\xE0" =~ /\p{XPosixUpper}/i,  "\\xE0 =~ XPosixUpper under /i";
-        ok "\xE0" =~ /\p{XPosixLower}/,  "\\xE0 =~ XPosixLower";
-        ok "\xE0" =~ /\p{XPosixLower}/i,  "\\xE0 =~ XPosixLower under /i";
+        like uni_to_native("\xC0"), qr/\p{XPosixUpper}/,  "\\xC0 =~ XPosixUpper";
+        like uni_to_native("\xC0"), qr/\p{XPosixUpper}/i,  "\\xC0 =~ XPosixUpper under /i";
+        unlike uni_to_native("\xC0"), qr/\p{XPosixLower}/,  "\\xC0 !~ XPosixLower";
+        like uni_to_native("\xC0"), qr/\p{XPosixLower}/i,  "\\xC0 =~ XPosixLower under /i";
+        unlike uni_to_native("\xE0"), qr/\p{XPosixUpper}/,  "\\xE0 !~ XPosixUpper";
+        like uni_to_native("\xE0"), qr/\p{XPosixUpper}/i,  "\\xE0 =~ XPosixUpper under /i";
+        like uni_to_native("\xE0"), qr/\p{XPosixLower}/,  "\\xE0 =~ XPosixLower";
+        like uni_to_native("\xE0"), qr/\p{XPosixLower}/i,  "\\xE0 =~ XPosixLower under /i";
 
-        ok "\xC0" =~ /\p{UppercaseLetter}/,  "\\xC0 =~ UppercaseLetter";
-        ok "\xC0" =~ /\p{UppercaseLetter}/i,  "\\xC0 =~ UppercaseLetter under /i";
-        ok "\xC0" !~ /\p{LowercaseLetter}/,  "\\xC0 !~ LowercaseLetter";
-        ok "\xC0" =~ /\p{LowercaseLetter}/i,  "\\xC0 =~ LowercaseLetter under /i";
-        ok "\xC0" !~ /\p{TitlecaseLetter}/,  "\\xC0 !~ TitlecaseLetter";
-        ok "\xC0" =~ /\p{TitlecaseLetter}/i,  "\\xC0 =~ TitlecaseLetter under /i";
-        ok "\xE0" !~ /\p{UppercaseLetter}/,  "\\xE0 !~ UppercaseLetter";
-        ok "\xE0" =~ /\p{UppercaseLetter}/i,  "\\xE0 =~ UppercaseLetter under /i";
-        ok "\xE0" =~ /\p{LowercaseLetter}/,  "\\xE0 =~ LowercaseLetter";
-        ok "\xE0" =~ /\p{LowercaseLetter}/i,  "\\xE0 =~ LowercaseLetter under /i";
-        ok "\xE0" !~ /\p{TitlecaseLetter}/,  "\\xE0 !~ TitlecaseLetter";
-        ok "\xE0" =~ /\p{TitlecaseLetter}/i,  "\\xE0 =~ TitlecaseLetter under /i";
-        ok "\x{1C5}" !~ /\p{UppercaseLetter}/,  "\\x{1C5} !~ UppercaseLetter";
-        ok "\x{1C5}" =~ /\p{UppercaseLetter}/i,  "\\x{1C5} =~ UppercaseLetter under /i";
-        ok "\x{1C5}" !~ /\p{LowercaseLetter}/,  "\\x{1C5} !~ LowercaseLetter";
-        ok "\x{1C5}" =~ /\p{LowercaseLetter}/i,  "\\x{1C5} =~ LowercaseLetter under /i";
-        ok "\x{1C5}" =~ /\p{TitlecaseLetter}/,  "\\x{1C5} =~ TitlecaseLetter";
-        ok "\x{1C5}" =~ /\p{TitlecaseLetter}/i,  "\\x{1C5} =~ TitlecaseLetter under /i";
+        like uni_to_native("\xC0"), qr/\p{UppercaseLetter}/,  "\\xC0 =~ UppercaseLetter";
+        like uni_to_native("\xC0"), qr/\p{UppercaseLetter}/i,  "\\xC0 =~ UppercaseLetter under /i";
+        unlike uni_to_native("\xC0"), qr/\p{LowercaseLetter}/,  "\\xC0 !~ LowercaseLetter";
+        like uni_to_native("\xC0"), qr/\p{LowercaseLetter}/i,  "\\xC0 =~ LowercaseLetter under /i";
+        unlike uni_to_native("\xC0"), qr/\p{TitlecaseLetter}/,  "\\xC0 !~ TitlecaseLetter";
+        like uni_to_native("\xC0"), qr/\p{TitlecaseLetter}/i,  "\\xC0 =~ TitlecaseLetter under /i";
+        unlike uni_to_native("\xE0"), qr/\p{UppercaseLetter}/,  "\\xE0 !~ UppercaseLetter";
+        like uni_to_native("\xE0"), qr/\p{UppercaseLetter}/i,  "\\xE0 =~ UppercaseLetter under /i";
+        like uni_to_native("\xE0"), qr/\p{LowercaseLetter}/,  "\\xE0 =~ LowercaseLetter";
+        like uni_to_native("\xE0"), qr/\p{LowercaseLetter}/i,  "\\xE0 =~ LowercaseLetter under /i";
+        unlike uni_to_native("\xE0"), qr/\p{TitlecaseLetter}/,  "\\xE0 !~ TitlecaseLetter";
+        like uni_to_native("\xE0"), qr/\p{TitlecaseLetter}/i,  "\\xE0 =~ TitlecaseLetter under /i";
+        unlike "\x{1C5}", qr/\p{UppercaseLetter}/,  "\\x{1C5} !~ UppercaseLetter";
+        like "\x{1C5}", qr/\p{UppercaseLetter}/i,  "\\x{1C5} =~ UppercaseLetter under /i";
+        unlike "\x{1C5}", qr/\p{LowercaseLetter}/,  "\\x{1C5} !~ LowercaseLetter";
+        like "\x{1C5}", qr/\p{LowercaseLetter}/i,  "\\x{1C5} =~ LowercaseLetter under /i";
+        like "\x{1C5}", qr/\p{TitlecaseLetter}/,  "\\x{1C5} =~ TitlecaseLetter";
+        like "\x{1C5}", qr/\p{TitlecaseLetter}/i,  "\\x{1C5} =~ TitlecaseLetter under /i";
     }
 
     {
@@ -1450,24 +1507,30 @@ sub run_tests {
             no warnings 'utf8'; # oops
             my $c = chr $u;
             my $x = sprintf '%04X', $u;
-            ok "A${c}B" =~ /A[\0-\x{10000}]B/, "Unicode range - $x";
+            like "A${c}B", qr/A[\0-\x{10000}]B/, "Unicode range - $x";
         }
     }
 
     {
-        my $res="";
+        no warnings 'uninitialized';
+        my $res = "";
 
         if ('1' =~ /(?|(?<digit>1)|(?<digit>2))/) {
             $res = "@{$- {digit}}";
         }
-        is($res, "1",
-	   "Check that (?|...) doesnt cause dupe entries in the names array");
+        is($res, "1 ",
+	   "Check that repeated named captures in branch reset (?|...) work as expected");
+        if ('2' =~ /(?|(?<digit>1)|(?<digit>2))/) {
+            $res = "@{$- {digit}}";
+        }
+        is($res, " 2",
+	   "Check that repeated named captures in branch reset (?|...) work as expected");
 
         $res = "";
         if ('11' =~ /(?|(?<digit>1)|(?<digit>2))(?&digit)/) {
             $res = "@{$- {digit}}";
         }
-        is($res, "1",
+        is($res, "1 ",
 	   "Check that (?&..) to a buffer inside a (?|...) goes to the leftmost");
     }
 
@@ -1508,13 +1571,17 @@ sub run_tests {
 
     {
         # Various whitespace special patterns
-        my @h = map {chr $_}   0x09,   0x20,   0xa0, 0x1680, 0x180e, 0x2000,
+        my @h = map {chr utf8::unicode_to_native($_) }
+                             0x09,   0x20,   0xa0,   0x1680, 0x2000,
                              0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006,
                              0x2007, 0x2008, 0x2009, 0x200a, 0x202f, 0x205f,
                              0x3000;
-        my @v = map {chr $_}   0x0a,   0x0b,   0x0c,   0x0d,   0x85, 0x2028,
+        my @v = map {chr utf8::unicode_to_native($_) }
+                             0x0a,   0x0b,   0x0c,   0x0d,   0x85, 0x2028,
                              0x2029;
-        my @lb = ("\x0D\x0A", map {chr $_} 0x0A .. 0x0D, 0x85, 0x2028, 0x2029);
+        my @lb = (uni_to_native("\x0D\x0A"),
+                             map {chr utf8::unicode_to_native($_) }
+                                  0x0A .. 0x0D, 0x85, 0x2028, 0x2029);
         foreach my $t ([\@h,  qr/\h/, qr/\h+/],
                        [\@v,  qr/\v/, qr/\v+/],
                        [\@lb, qr/\R/, qr/\R+/],) {
@@ -1539,9 +1606,9 @@ sub run_tests {
         # Test that \xDF matches properly. this is pretty hacky stuff,
         # but its actually needed. The malarky with '-' is to prevent
         # compilation caching from playing any role in the test.
-        my @df = (chr (0xDF), '-', chr (0xDF));
+        my @df = (chr utf8::unicode_to_native(0xDF), '-', chr utf8::unicode_to_native(0xDF));
         utf8::upgrade ($df [2]);
-        my @strs = ('ss', 'sS', 'Ss', 'SS', chr (0xDF));
+        my @strs = ('ss', 'sS', 'Ss', 'SS', chr utf8::unicode_to_native(0xDF));
         my @ss = map {("$_", "$_")} @strs;
         utf8::upgrade ($ss [$_ * 2 + 1]) for 0 .. $#strs;
 
@@ -1551,21 +1618,38 @@ sub run_tests {
                 my $str = $ss [$ssi];
                 my $utf_df = ($dfi > 1) ? 'utf8' : '';
                 my $utf_ss = ($ssi % 2) ? 'utf8' : '';
-                (my $sstr = $str) =~ s/\xDF/\\xDF/;
+                my $sstr;   # We hard-code the ebcdic value below to avoid
+                            # perturbing the test
+                ($sstr = $str) =~ s/\xDF/\\xDF/ if $::IS_ASCII;
+                ($sstr = $str) =~ s/\x59/\\x59/ if $::IS_EBCDIC;
 
                 if ($utf_df || $utf_ss || length ($ss [$ssi]) == 1) {
                     my $ret = $str =~ /$pat/i;
                     next if $pat eq '-';
-                    ok $ret, "\"$sstr\" =~ /\\xDF/i " .
+                    if ($::IS_ASCII) {
+                        ok $ret, "\"$sstr\" =~ /\\xDF/i " .
                              "(str is @{[$utf_ss||'latin']}, pat is " .
                              "@{[$utf_df||'latin']})";
+                    }
+                    else {
+                        ok $ret, "\"$sstr\" =~ /\\x59/i " .
+                             "(str is @{[$utf_ss||'latin']}, pat is " .
+                             "@{[$utf_df||'latin']})";
+                    }
                 }
                 else {
                     my $ret = $str !~ /$pat/i;
                     next if $pat eq '-';
-                    ok $ret, "\"$sstr\" !~ /\\xDF/i " .
+                    if ($::IS_EBCDIC) {
+                        ok $ret, "\"$sstr\" !~ /\\x59/i " .
                              "(str is @{[$utf_ss||'latin']}, pat is " .
                              "@{[$utf_df||'latin']})";
+                    }
+                    else {
+                        ok $ret, "\"$sstr\" !~ /\\xDF/i " .
+                             "(str is @{[$utf_ss||'latin']}, pat is " .
+                             "@{[$utf_df||'latin']})";
+                    }
                 }
             }
         }
@@ -1589,7 +1673,7 @@ sub run_tests {
         # Test for keys in %+ and %-
         my $message = 'Test keys in %+ and %-';
         no warnings 'uninitialized';
-        my $_ = "abcdef";
+        local $_ = "abcdef";
         /(?<foo>a)|(?<foo>b)/;
         is((join ",", sort keys %+), "foo", $message);
         is((join ",", sort keys %-), "foo", $message);
@@ -1609,7 +1693,7 @@ sub run_tests {
 
     {
         # length() on captures, the numbered ones end up in Perl_magic_len
-        my $_ = "aoeu \xe6var ook";
+        local $_ = "aoeu " . uni_to_native("\xe6") . "var ook";
         /^ \w+ \s (?<eek>\S+)/x;
 
         is(length $`,      0, q[length $`]);
@@ -1658,7 +1742,6 @@ $x='123';
 print ">$1<\n";
 EOP
 
-        local $::TODO = 'RT #86042';
         fresh_perl_is(<<'EOP', ">abc<\n", {}, 'no mention of $&');
 my $x; 
 ($x='abc')=~/(abc)/g; 
@@ -1689,11 +1772,12 @@ EOP
 
     {
 # more TRIE/AHOCORASICK problems with mixed utf8 / latin-1 and case folding
-    for my $chr (160 .. 255) {
+    for my $ord (160 .. 255) {
+        my $chr = utf8::unicode_to_native($ord);
         my $chr_byte = chr($chr);
         my $chr_utf8 = chr($chr); utf8::upgrade($chr_utf8);
         my $rx = qr{$chr_byte|X}i;
-        ok($chr_utf8 =~ $rx, "utf8/latin, codepoint $chr");
+        like($chr_utf8, $rx, "utf8/latin, codepoint $chr");
     }
     }
 
@@ -1747,8 +1831,7 @@ EOP
 	   'IsPunct disagrees with [:punct:] outside ASCII');
 
         my @isPunctLatin1 = eval q {
-            use encoding 'latin1';
-            grep {/[[:punct:]]/ != /\p{IsPunct}/} map {chr} 0x80 .. 0xff;
+            grep {/[[:punct:]]/u != /\p{IsPunct}/} map {chr} 0x80 .. 0xff;
         };
         skip "Eval failed ($@)", 1 if $@;
         skip "PERL_LEGACY_UNICODE_CHARCLASS_MAPPINGS set to 0", 1
@@ -2061,24 +2144,223 @@ EOP
     }
 
     # RT #82610
-    ok 'foo/file.fob' =~ m,^(?=[^\.])[^/]*/(?=[^\.])[^/]*\.fo[^/]$,;
+    like 'foo/file.fob', qr,^(?=[^\.])[^/]*/(?=[^\.])[^/]*\.fo[^/]$,;
 
     {   # This was failing unless an explicit /d was added
-        my $p = qr/[\xE0_]/i;
-        utf8::upgrade($p);
-        like("\xC0", $p, "Verify \"\\xC0\" =~ /[\\xE0_]/i; pattern in utf8");
+        my $E0 = uni_to_native("\xE0");
+        utf8::upgrade($E0);
+        my $p = qr/[_$E0]/i;
+        like(uni_to_native("\xC0"), qr/$p/, "Verify \"\\xC0\" =~ /[\\xE0_]/i; pattern in utf8");
     }
 
-    ok "x" =~ /\A(?>(?:(?:)A|B|C?x))\z/,
+    like "x", qr/\A(?>(?:(?:)A|B|C?x))\z/,
         "Check TRIE does not overwrite EXACT following NOTHING at start - RT #111842";
 
-    #
-    # Keep the following tests last -- they may crash perl
-    #
+    {
+        my $single = "z";
+        my $upper = "\x{390}";  # Fold is 3 chars.
+        my $multi = CORE::fc($upper);
+
+        my $failed = 0;
+
+        # Try forcing a node to be split, with a multi-char fold at the
+        # boundary
+        for my $repeat (1 .. 300) {
+            my $string = $single x $repeat;
+            my $lhs = $string . $upper;
+            if ($lhs !~ m/$string$multi/i) {
+                $failed = $repeat;
+                last;
+            }
+        }
+        ok(! $failed, "Matched multi-char fold across EXACTFish node boundaries; if failed, was at count $failed");
+
+        $failed = 0;
+        for my $repeat (1 .. 300) {
+            my $string = $single x $repeat;
+            my $lhs = $string . "\N{LATIN SMALL LIGATURE FFI}";
+            if ($lhs !~ m/${string}ff\N{LATIN SMALL LETTER I}/i) {
+                $failed = $repeat;
+                last;
+            }
+        }
+        ok(! $failed, "Matched multi-char fold across EXACTFish node boundaries; if failed, was at count $failed");
+
+        $failed = 0;
+        for my $repeat (1 .. 300) {
+            my $string = $single x $repeat;
+            my $lhs = $string . "\N{LATIN SMALL LIGATURE FFL}";
+            if ($lhs !~ m/${string}ff\N{U+6c}/i) {
+                $failed = $repeat;
+                last;
+            }
+        }
+        ok(! $failed, "Matched multi-char fold across EXACTFish node boundaries; if failed, was at count $failed");
+
+        # This tests that under /d matching that an 'ss' split across two
+        # parts of a node doesn't end up turning into something that matches
+        # \xDF unless it is in utf8.
+        $failed = 0;
+        $single = 'a';  # Is non-terminal multi-char fold char
+        for my $repeat (1 .. 300) {
+            my $string = $single x $repeat;
+            my $lhs = "$string\N{LATIN SMALL LETTER SHARP S}";
+            utf8::downgrade($lhs);
+            $string .= "s";
+            if ($lhs =~ m/${string}s/di) {
+                $failed = $repeat;
+                last;
+            }
+        }
+        ok(! $failed, "Matched multi-char fold 'ss' across EXACTF node boundaries; if failed, was at count $failed");
+
+        for my $non_finals ("t", "ft", "ift", "sift") {
+            my $base_pat = $non_finals . "enKalt";   # (The tail is taken from
+                                                     # the trouble ticket, is
+                                                     # arbitrary)
+            for my $utf8 ("non-UTF-8", "UTF-8") {
+
+                # Try at different lengths to be sure to get a node boundary
+                for my $repeat (120 .. 270) {   # [perl #133756]
+                    my $head = ("b" x $repeat) . "\xDC";
+                    my $pat = $base_pat;
+                    utf8::upgrade($pat) if $utf8 eq "UTF-8";
+                    $pat     = $head . $pat;
+                    my $text = $head . $base_pat;
+
+                    if ($text !~ /$pat/i) {
+                        $failed = $repeat;
+                        last;
+                    }
+                }
+
+                ok(! $failed, "A non-final fold character "
+                            . (length($non_finals) - 1)
+                            . " characters from the end of an EXACTFish"
+                            . " $utf8 pattern works; if failed, was at count $failed");
+            }
+        }
+    }
+
+    {
+        fresh_perl_is('print eval "\"\x{101}\" =~ /[[:lower:]]/", "\n"; print eval "\"\x{100}\" =~ /[[:lower:]]/i", "\n";',
+                      "1\n1",   # Both re's should match
+                      {},
+                      "get [:lower:] swash in first eval; test under /i in second");
+    }
+
+    {
+        fresh_perl_is(<<'EOF',
+                my $s = "\x{41c}";
+                $s =~ /(.*)/ or die;
+                $ls = lc $1;
+                print $ls eq lc $s ? "good\n" : "bad: [$ls]\n";
+EOF
+            "good\n",
+            {},
+            "swash triggered by lc() doesn't corrupt \$1"
+        );
+    }
+
+    {
+        #' RT #119075
+        no warnings 'regexp';   # Silence "has useless greediness modifier"
+        local $@;
+        eval { /a{0}?/; };
+        ok(! $@,
+            "PCRE regression test: No 'Quantifier follows nothing in regex' warning");
+
+    }
+
+    {
+        unlike("\xB5", qr/^_?\p{IsMyRuntimeProperty}\z/, "yadayada");
+        like("\xB6", qr/^_?\p{IsMyRuntimeProperty}\z/, "yadayada");
+        unlike("\xB7", qr/^_?\p{IsMyRuntimeProperty}\z/, "yadayada");
+        like("\xB5", qr/^_?\P{IsMyRuntimeProperty}\z/, "yadayada");
+        unlike("\xB6", qr/^_?\P{IsMyRuntimeProperty}\z/, "yadayada");
+        like("\xB7", qr/^_?\P{IsMyRuntimeProperty}\z/, "yadayada");
+
+        unlike("_\xB5", qr/^_?\p{IsMyRuntimeProperty}\z/, "yadayada");
+        like("_\xB6", qr/^_?\p{IsMyRuntimeProperty}\z/, "yadayada");
+        unlike("_\xB7", qr/^_?\p{IsMyRuntimeProperty}\z/, "yadayada");
+        like("_\xB5", qr/^_?\P{IsMyRuntimeProperty}\z/, "yadayada");
+        unlike("_\xB6", qr/^_?\P{IsMyRuntimeProperty}\z/, "yadayada");
+        like("_\xB7", qr/^_?\P{IsMyRuntimeProperty}\z/, "yadayada");
+    }
+
+    # These are defined later, so won't be known at regex compile time above
+    sub IsMyRuntimeProperty {
+        return "B6\n";
+    }
+
+    sub IsntMyRuntimeProperty {
+        return "!B6\n";
+    }
+
+    {   # [perl 121777]
+        my $regex;
+        { package Some;
+            # define a Unicode propertyIs_q
+            sub Is_q
+            {
+                sprintf '%x', ord 'q'
+            }
+            $regex = qr/\p{Is_q}/;
+
+            # If we uncomment the following line, prior to the patch that
+            # fixed this, everything would work because we would have expanded
+            # the property by the time the regex in the 'like' below got
+            # compiled.
+            #'q' =~ $regex;
+        }
+
+        like('q', $regex, 'User-defined property matches outside package');
+
+        package Some {
+            main::like('abcq', qr/abc$regex/, 'Run-time compiled in-package user-defined property matches');
+        }
+    }
+
+    {   # From Lingua::Stem::UniNE; no ticket filed but related to #121778
+        use utf8;
+        my $word = 'рабта';
+        $word =~ s{ (?:
+                          ия  # definite articles for nouns:
+                        | ът  # ∙ masculine
+                        | та  # ∙ feminine
+                        | то  # ∙ neutral
+                        | те  # ∙ plural
+                    ) $ }{}x;
+        is($word, 'раб', "Handles UTF8 trie correctly");
+    }
+
+    { # [perl #122460]
+        my $a = "rdvark";
+        $a =~ /(?{})(?=[A-Za-z0-9_])a*?/g;
+        is (pos $a, 0, "optimizer correctly thinks (?=...) is 0-length");
+    }
+
+    {   # [perl #123417] multi-char \N{...} tripping roundly
+        use Cname;
+        my $qr = qr$(\N{foo})$;
+        "afoot" =~ eval "qr/$qr/";
+        is "$1" || $@, "foo", 'multichar \N{...} stringified and retoked';
+    }
+
+    is (scalar split(/\b{sb}/, "Don't think twice.  It's all right."),
+        2, '\b{wb} splits sentences correctly');
+
+    ok "my/dir/audio_07.mp3" =~
+     qr/(.*)\/(.*)\/(.*)\.(?<=(?=(?:\.(?!\d+\b)\w{1,4}$)$)\.)(.*)$()/,
+     "[perl #133948]";
+
+
+    # !!! NOTE!  Keep the following tests last -- they may crash perl
+
     print "# Tests that follow may crash perl\n";
     {
         eval '/\k/';
-        ok $@ =~ /\QSequence \k... not terminated in regex;\E/,
+        like $@, qr/\QSequence \k... not terminated in regex;\E/,
            'Lone \k not allowed';
     }
 
@@ -2107,11 +2389,10 @@ EOP
         ok(1, $message);  # If it didn't crash, it worked.
     }
 
-    TODO: {   # Was looping
-        todo_skip('Triggers thread clone SEGV. See #86550')
-	  if $::running_as_thread && $::running_as_thread;
-        watchdog(10);   # Use a bigger value for busy systems
+    {   # Was looping
+        watchdog(10);
         like("\x{00DF}", qr/[\x{1E9E}_]*/i, "\"\\x{00DF}\" =~ /[\\x{1E9E}_]*/i was looping");
+        watchdog(0);
     }
 
     {   # Bug #90536, caused failed assertion
@@ -2119,7 +2400,7 @@ EOP
     }
 
     # User-defined Unicode properties to match above-Unicode code points
-    sub Is_32_Bit_Super { return "110000\tFFFFFFFF\n" }
+    sub Is_31_Bit_Super { return "110000\t7FFFFFFF\n" }
     sub Is_Portable_Super { return '!utf8::Any' }   # Matches beyond 32 bits
 
     {   # Assertion was failing on on 64-bit platforms; just didn't work on 32.
@@ -2128,35 +2409,314 @@ EOP
 
         # We use 'ok' instead of 'like' because the warnings are lexically
         # scoped, and want to turn them off, so have to do the match in this
-        # scope
+        # scope.
         if ($Config{uvsize} < 8) {
-            ok(chr(0xFFFF_FFFE) =~ /\p{Is_32_Bit_Super}/,
-                            "chr(0xFFFF_FFFE) can match a Unicode property");
-            ok(chr(0xFFFF_FFFF) =~ /\p{Is_32_Bit_Super}/,
-                            "chr(0xFFFF_FFFF) can match a Unicode property");
+            like(chr(0x7FFF_FFFE), qr/\p{Is_31_Bit_Super}/,
+                            "chr(0x7FFF_FFFE) can match a Unicode property");
+            like(chr(0x7FFF_FFFF), qr/\p{Is_31_Bit_Super}/,
+                            "chr(0x7FFF_FFFF) can match a Unicode property");
+            my $p = qr/^[\x{7FFF_FFFF}]$/;
+            like(chr(0x7FFF_FFFF), qr/$p/,
+                    "chr(0x7FFF_FFFF) can match itself in a [class]");
+            like(chr(0x7FFF_FFFF), qr/$p/, # Tests any caching
+                    "chr(0x7FFF_FFFF) can match itself in a [class] subsequently");
         }
         else {
             no warnings 'overflow';
-            ok(chr(0xFFFF_FFFF_FFFF_FFFE) =~ qr/\p{Is_Portable_Super}/,
-                    "chr(0xFFFF_FFFF_FFFF_FFFE) can match a Unicode property");
-            ok(chr(0xFFFF_FFFF_FFFF_FFFF) =~ qr/^\p{Is_Portable_Super}$/,
-                    "chr(0xFFFF_FFFF_FFFF_FFFF) can match a Unicode property");
+            like(chr(0x7FFF_FFFF_FFFF_FFFE), qr/\p{Is_Portable_Super}/,
+                    "chr(0x7FFF_FFFF_FFFF_FFFE) can match a Unicode property");
+            like(chr(0x7FFF_FFFF_FFFF_FFFF), qr/^\p{Is_Portable_Super}$/,
+                    "chr(0x7FFF_FFFF_FFFF_FFFF) can match a Unicode property");
+
+            my $p = eval 'qr/^\x{7FFF_FFFF_FFFF_FFFF}$/';
+            like(chr(0x7FFF_FFFF_FFFF_FFFF), qr/$p/,
+                    "chr(0x7FFF_FFFF_FFFF_FFFF) can match itself in a [class]");
+            like(chr(0x7FFF_FFFF_FFFF_FFFF), qr/$p/, # Tests any caching
+                    "chr(0x7FFF_FFFF_FFFF_FFFF) can match itself in a [class] subsequently");
 
             # This test is because something was declared as 32 bits, but
             # should have been cast to 64; only a problem where
             # sizeof(STRLEN) != sizeof(UV)
-            ok(chr(0xFFFF_FFFF_FFFF_FFFE) !~ qr/\p{Is_32_Bit_Super}/, "chr(0xFFFF_FFFF_FFFF_FFFE) shouldn't match a range ending in 0xFFFF_FFFF");
+            unlike(chr(0x7FFF_FFFF_FFFF_FFFE), qr/\p{Is_31_Bit_Super}/,
+                   "chr(0x7FFF_FFFF_FFFF_FFFE) shouldn't match a range ending in 0x7FFF_FFFF");
         }
     }
 
     { # [perl #112530], the code below caused a panic
         sub InFoo { "a\tb\n9\ta\n" }
-        like("\n", qr/\p{InFoo}/,
+        like(chr(0xA), qr/\p{InFoo}/,
                             "Overlapping ranges in user-defined properties");
     }
 
+    { # [perl #125990], the final 2 tests below each caused a panic.
+        # The \0's are not necessary; it could be a printable character
+        # instead, but were in the ticket, so using them.
+        my $sharp_s = chr utf8::unicode_to_native(0xdf);
+        my $string        = ("\0" x 8)
+                          . ($sharp_s x 3)
+                          . ("\0" x 42)
+                          .  "ý";
+        my $folded_string = ("\0" x 8)
+                          . ("ss" x 3)
+                          . ("\0" x 42)
+                          .  "ý";
+        utf8::downgrade($string);
+        utf8::downgrade($folded_string);
+
+        use Cname;
+        like($string, qr/$string/i, "LATIN SMALL SHARP S matches itself under /id");
+        unlike($folded_string, qr/$string/i, "LATIN SMALL SHARP S doesn't match 'ss' under /di");
+        like($folded_string, qr/\N{EMPTY-STR}$string/i, "\\N{} earlier than LATIN SMALL SHARP S transforms /di into /ui, matches 'ss'");
+        like($folded_string, qr/$string\N{EMPTY-STR}/i, "\\N{} after LATIN SMALL SHARP S transforms /di into /ui, matches 'ss'");
+    }
+
+    {   # [perl #126606 crashed the interpreter
+        use Cname;
+        like("sS", qr/\N{EMPTY-STR}Ss|/i, '\N{} with empty branch alternation works');
+        like("sS", qr'\N{EMPTY-STR}Ss|'i, '\N{} with empty branch alternation works');
+    }
+
+    { # Regexp:Grammars was broken:
+  # http://www.xray.mpe.mpg.de/mailing-lists/perl5-porters/2013-06/msg01290.html
+        fresh_perl_like('use warnings; "abc" =~ qr{(?&foo){0}abc(?<foo>)}',
+                        qr/Quantifier unexpected on zero-length expression/,
+                        {},
+                        'No segfault on qr{(?&foo){0}abc(?<foo>)}');
+    }
+
+    SKIP:
+    {   # [perl #125826] buffer overflow in TRIE_STORE_REVCHAR
+        # (during compilation, so use a fresh perl)
+        $Config{uvsize} == 8
+	  or skip("need large code-points for this test", 1);
+
+	fresh_perl_is('/\x{E000000000}|/ and print qq(ok\n)', "ok\n", {},
+		      "buffer overflow in TRIE_STORE_REVCHAR");
+    }
+
+    {
+        fresh_perl_like('use warnings; s 0(?(?!00000000000000000000000000·000000)\500000000 0000000000000000000000000000000000000000000000000000·00000000000000000000000000000000 0',
+                        qr/Switch \(\?\(condition\)\.\.\. not terminated/,
+                        {},
+                        'No segfault [perl #126886]');
+    }
+
+    {
+        # [perl 130010]  Downstream application texinfo started to report panics
+        # as of commit a5540cf.
+
+        runperl( prog => 'A::xx(); package A; sub InFullwidth{ return qq|\n| } sub xx { split /[^\s\p{InFullwidth}]/, q|x| }' );
+        ok(! $?, "User-defined pattern did not cause panic [perl 130010]");
+    }
+
+    {   # [perl #133999]    Previously assertion failure
+	fresh_perl_like('0 =~ /\p{nv:(\B(*COMMIT)C+)}/',
+                        qr/No Unicode property value wildcard matches/,
+                        {},
+                        "Assertion failure with *COMMIT and wildcard property");
+    }
+
+    {   # [perl #134029]    Previously assertion failure
+        fresh_perl_like('qr/\p{upper:]}|\337(?|ss)|)(?0/',
+                        qr/Unicode property wildcard not terminated/,
+                        {},
+                        "Assertion failure with single character wildcard");
+    }
+
+    {   # [perl #134034]    Previously assertion failure
+        fresh_perl_is('use utf8; q!Ȧिम한글💣΢ყაოსაა!=~/(?li)\b{wb}\B(*COMMIT)0/;',
+                      "", {}, "*COMMIT caused positioning beyond EOS");
+    }
+
+    {   # [GH #17486]    Previously assertion failure
+        fresh_perl_is('0=~/(?iaa)ss\337(?0)|/',
+                      "", {}, "EXACTFUP node isn't changed into something else");
+    }
+
+    {   # [GH #17593]
+        fresh_perl_is('qr/((?+2147483647))/',
+                      "Invalid reference to group in regex; marked by <--"
+                    . " HERE in m/((?+2147483647) <-- HERE )/ at - line 1.",
+                      {}, "integer overflow, undefined behavior in ASAN");
+        fresh_perl_is('qr/((?-2147483647))/',
+                      "Reference to nonexistent group in regex; marked by <--"
+                    . " HERE in m/((?-2147483647) <-- HERE )/ at - line 1.",
+                      {}, "Large negative relative capture group");
+        fresh_perl_is('qr/((?+18446744073709551615))/',
+                      "Invalid reference to group in regex; marked by <--"
+                    . " HERE in m/((?+18446744073709551615 <-- HERE ))/ at -"
+                    . " line 1.",
+                      {}, "Too large relative group number");
+        fresh_perl_is('qr/((?-18446744073709551615))/',
+                      "Invalid reference to group in regex; marked by <--"
+                    . " HERE in m/((?-18446744073709551615 <-- HERE ))/ at -"
+                    . " line 1.",
+                      {}, "Too large negative relative group number");
+    }
+
+    {   # GH #17734, ASAN use after free
+        fresh_perl_like('no warnings "experimental::uniprop_wildcards";
+                         my $re = q<[[\p{name=/[Y-]+Z/}]]>;
+                         eval { "\N{BYZANTINE MUSICAL SYMBOL PSILI}"
+                                =~ /$re/ }; print $@ if $@; print "Done\n";',
+                         qr/Done/,
+                         {}, "GH #17734");
+    }
+
+    {   # GH $17278 assertion fails
+        fresh_perl_is('use locale;
+                       my $A_grave = "\N{LATIN CAPITAL LETTER A WITH GRAVE}";
+                       my $a_grave = "\N{LATIN SMALL LETTER A WITH GRAVE}";
+
+                       my $z="q!$a_grave! =~ m!(?^i)[$A_grave]!";
+                       print eval $z, "\n";',
+                       1,
+                       {}, "GH #17278");
+    }
+    
+    for my $try ( 1 .. 10 ) {
+        # GH $19350 assertion fails - run 10 times as this bug is a heisenbug
+        # and does not always fail, but should fail at least once in 10 tries.
+        fresh_perl_is('use re Debug=>"ALL";qr{(?{a})(?<b>\g{c}})',
+                      <<'EOF_DEBUG_OUT',
+Assembling pattern from 2 elements
+Compiling REx "(?{a})(?<b>\g{c}"
+Starting parse and generation
+<(?{a})(?<b>>...|   1|  reg    
+                |    |    brnc   
+                |    |      piec   
+                |    |        atom   
+<?{a})(?<b>\>...|    |          reg    
+<(?<b>\g{c}>    |   4|      piec   
+                |    |        atom   
+<?<b>\g{c}>     |    |          reg    
+                |    |            Setting open paren #1 to 4
+<\g{c}>         |   6|            brnc   
+                |    |              piec   
+                |    |                atom   
+<>              |   9|            tail~ OPEN1 'b' (4) -> REFN
+                |    |            Setting close paren #1 to 9
+                |  11|          lsbr~ tying lastbr REFN <1> (6) to ender CLOSE1 'b' (9) offset 3
+                |    |            tail~ REFN <1> (6) -> CLOSE
+Unmatched ( in regex; marked by <-- HERE in m/(?{a})( <-- HERE ?<b>\g{c}/ at - line 1.
+Freeing REx: "(?{a})(?<b>\g{c}"
+EOF_DEBUG_OUT
+                      {rtrim_result=>1},
+                      "Github Issue #19350, assert fail in "
+                          . "Debug => 'ALL' from malformed qr// (heisenbug try $try)");
+    }
+    {   # Related to GH $19350 but segfaults instead of asserts, and does so reliably, not randomly.
+        # use re Debug => "PARSE" is similar to "ALL", but does not include the optimize info, so we
+        # do not need to deal with normlazing memory addresses in the output.
+        fresh_perl_is(
+                      'use re Debug=>"PARSE";qr{(?<b>\g{c})(?<c>x)(?&b)}',
+                      <<'EOF_DEBUG_OUT',
+Assembling pattern from 1 elements
+Compiling REx "(?<b>\g{c})(?<c>x)(?&b)"
+Starting parse and generation
+<(?<b>\g{c})>...|   1|  reg    
+                |    |    brnc   
+                |    |      piec   
+                |    |        atom   
+<?<b>\g{c})(>...|    |          reg    
+<\g{c})(?<c>>...|   3|            brnc   
+                |    |              piec   
+                |    |                atom   
+<)(?<c>x)(?&b)> |   6|            tail~ OPEN1 'b' (1) -> REFN
+                |   8|          lsbr~ tying lastbr REFN <1> (3) to ender CLOSE1 'b' (6) offset 3
+                |    |            tail~ REFN <1> (3) -> CLOSE
+<(?<c>x)(?&b)>  |    |      piec   
+                |    |        atom   
+<?<c>x)(?&b)>   |    |          reg    
+<x)(?&b)>       |  10|            brnc
+                |    |              piec   
+                |    |                atom   
+<)(?&b)>        |  12|            tail~ OPEN2 'c' (8) -> EXACT
+                |  14|          lsbr~ tying lastbr EXACT <x> (10) to ender CLOSE2 'c' (12) offset 2
+                |    |            tail~ EXACT <x> (10) -> CLOSE
+<(?&b)>         |    |      tail~ OPEN1 'b' (1)  
+                |    |          ~ REFN <1> (3)
+                |    |          ~ CLOSE1 'b' (6) -> OPEN
+                |    |      piec   
+                |    |        atom   
+<?&b)>          |    |          reg    
+<>              |  17|      tail~ OPEN2 'c' (8)
+                |    |          ~ EXACT <x> (10)
+                |    |          ~ CLOSE2 'c' (12) -> GOSUB
+                |  18|  lsbr~ tying lastbr OPEN1 'b' (1) to ender END (17) offset 16
+                |    |    tail~ OPEN1 'b' (1)  
+                |    |        ~ REFN <1> (3)
+                |    |        ~ CLOSE1 'b' (6)
+                |    |        ~ OPEN2 'c' (8)
+                |    |        ~ EXACT <x> (10)
+                |    |        ~ CLOSE2 'c' (12)
+                |    |        ~ GOSUB1[+0:14] 'b' (14) -> END
+Need to redo parse
+Freeing REx: "(?<b>\g{c})(?<c>x)(?&b)"
+Starting parse and generation
+<(?<b>\g{c})>...|   1|  reg    
+                |    |    brnc   
+                |    |      piec   
+                |    |        atom   
+<?<b>\g{c})(>...|    |          reg    
+<\g{c})(?<c>>...|   3|            brnc   
+                |    |              piec   
+                |    |                atom   
+<)(?<c>x)(?&b)> |   6|            tail~ OPEN1 'b' (1) -> REFN
+                |   8|          lsbr~ tying lastbr REFN2 'c' <1> (3) to ender CLOSE1 'b' (6) offset 3
+                |    |            tail~ REFN2 'c' <1> (3) -> CLOSE
+<(?<c>x)(?&b)>  |    |      piec   
+                |    |        atom   
+<?<c>x)(?&b)>   |    |          reg    
+<x)(?&b)>       |  10|            brnc
+                |    |              piec   
+                |    |                atom   
+<)(?&b)>        |  12|            tail~ OPEN2 'c' (8) -> EXACT
+                |  14|          lsbr~ tying lastbr EXACT <x> (10) to ender CLOSE2 'c' (12) offset 2
+                |    |            tail~ EXACT <x> (10) -> CLOSE
+<(?&b)>         |    |      tail~ OPEN1 'b' (1)  
+                |    |          ~ REFN2 'c' <1> (3)
+                |    |          ~ CLOSE1 'b' (6) -> OPEN
+                |    |      piec   
+                |    |        atom   
+<?&b)>          |    |          reg    
+<>              |  17|      tail~ OPEN2 'c' (8)
+                |    |          ~ EXACT <x> (10)
+                |    |          ~ CLOSE2 'c' (12) -> GOSUB
+                |  18|  lsbr~ tying lastbr OPEN1 'b' (1) to ender END (17) offset 16
+                |    |    tail~ OPEN1 'b' (1)  
+                |    |        ~ REFN2 'c' <1> (3)
+                |    |        ~ CLOSE1 'b' (6)
+                |    |        ~ OPEN2 'c' (8)
+                |    |        ~ EXACT <x> (10)
+                |    |        ~ CLOSE2 'c' (12)
+                |    |        ~ GOSUB1[+0:14] 'b' (14) -> END
+Required size 17 nodes
+first at 3
+Freeing REx: "(?<b>\g{c})(?<c>x)(?&b)"
+EOF_DEBUG_OUT
+                      {rtrim_result=>1},
+                      "Related to Github Issue #19350, forward \\g{x} pattern segv under use re Debug => 'PARSE'");
+    }
+
+    {   # perl-security#140, read/write past buffer end
+        fresh_perl_like('qr/\p{utf8::perl x}/',
+                        qr/Illegal user-defined property name "utf8::perl x" in regex/,
+                        {}, "perl-security#140");
+        fresh_perl_is('qr/\p{utf8::_perl_surrogate}/', "",
+                        {}, "perl-security#140");
+    }
+
+    {   # GH 20009
+        my $x = "awesome quotes";
+        utf8::upgrade($x);
+        $x =~ s/^[\x{0301}\x{030C}]+//;
+    }
+
+
     # !!! NOTE that tests that aren't at all likely to crash perl should go
-    # a ways above, above these last ones.
+    # a ways above, above these last ones.  There's a comment there that, like
+    # this comment, contains the word 'NOTE'
 
     done_testing();
 } # End of sub run_tests

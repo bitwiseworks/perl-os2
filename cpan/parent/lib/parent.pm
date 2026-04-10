@@ -1,7 +1,7 @@
 package parent;
 use strict;
-use vars qw($VERSION);
-$VERSION = '0.225';
+
+our $VERSION = '0.244';
 
 sub import {
     my $class = shift;
@@ -12,10 +12,7 @@ sub import {
         shift @_;
     } else {
         for ( my @filename = @_ ) {
-            if ( $_ eq $inheritor ) {
-                warn "Class '$inheritor' tried to inherit from itself\n";
-            };
-
+            local @_; # protect us against the loaded module changing @_
             s{::|'}{/}g;
             require "$_.pm"; # dies if the file is not found
         }
@@ -23,11 +20,11 @@ sub import {
 
     {
         no strict 'refs';
-        push @{"$inheritor\::ISA"}, @_;
+        push @{"$inheritor\::ISA"}, @_; # dies if a loop is detected
     };
 };
 
-"All your base are belong to us"
+1;
 
 __END__
 
@@ -94,19 +91,6 @@ either C<.pm> or C<.pmc>), use the following code:
   require './plugins/custom.plugin'; # contains Plugin::Custom
   use parent -norequire, 'Plugin::Custom';
 
-=head1 DIAGNOSTICS
-
-=over 4
-
-=item Class 'Foo' tried to inherit from itself
-
-Attempting to inherit from yourself generates a warning.
-
-    package Foo;
-    use parent 'Foo';
-
-=back
-
 =head1 HISTORY
 
 This module was forked from L<base> to remove the cruft
@@ -116,7 +100,15 @@ that had accumulated in it.
 
 =head1 SEE ALSO
 
-L<base>
+=over 4
+
+=item L<base>
+
+=item L<parent::versioned>
+
+A fork of L<parent> that provides version checking in parent class modules.
+
+=back
 
 =head1 AUTHORS AND CONTRIBUTORS
 
@@ -126,7 +118,7 @@ Rafaël Garcia-Suarez, Bart Lateur, Max Maischein, Anno Siegel, Michael Schwern
 
 Max Maischein C< corion@cpan.org >
 
-Copyright (c) 2007-10 Max Maischein C<< <corion@cpan.org> >>
+Copyright (c) 2007-2017 Max Maischein C<< <corion@cpan.org> >>
 Based on the idea of C<base.pm>, which was introduced with Perl 5.004_04.
 
 =head1 LICENSE

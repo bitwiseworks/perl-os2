@@ -1,15 +1,16 @@
+use Config;
 BEGIN {
-    require Config; import Config;
     if ($Config{'extensions'} !~ /\bXS\/Typemap\b/) {
         print "1..0 # Skip: XS::Typemap was not built\n";
         exit 0;
     }
 }
 
-use Test::More tests => 140;
+use Test::More tests => 170;
 
 use strict;
-use warnings;
+#catch WARN_INTERNAL type errors, and anything else unexpected
+use warnings FATAL => 'all';
 use XS::Typemap;
 
 pass();
@@ -17,13 +18,13 @@ pass();
 # Some inheritance trees to check ISA relationships
 BEGIN {
   package intObjPtr::SubClass;
-  use base qw/ intObjPtr /;
+  use parent '-norequire', qw/ intObjPtr /;
   sub xxx { 1; }
 }
 
 BEGIN {
   package intRefIvPtr::SubClass;
-  use base qw/ intRefIvPtr /;
+  use parent '-norequire', qw/ intRefIvPtr /;
   sub xxx { 1 }
 }
 
@@ -31,6 +32,10 @@ BEGIN {
 note("T_SV");
 my $sv = "Testing T_SV";
 is( T_SV($sv), $sv);
+
+# T_SV with output
+is_deeply([ T_SV_output($sv) ], [], "T_SV_output: no return value");
+is($sv, "test", "T_SV_output: output written to");
 
 # T_SVREF - reference to Scalar
 note("T_SVREF");
@@ -50,6 +55,14 @@ is( ${ T_SVREF_REFCOUNT_FIXED($svref) }, $$svref );
 eval { T_SVREF_REFCOUNT_FIXED( "fail - not ref" ) };
 ok( $@ );
 
+# output only
+SKIP:{
+   my $svr;
+   is_deeply([ T_SVREF_REFCOUNT_FIXED_output($svr) ], [ ], "call with non-ref lvalue, no return value");
+   ok(ref $svr, "output parameter now a reference")
+     or skip "Not a reference", 1;
+   is($$svr, "test", "reference to correct value");
+}
 
 # T_AVREF - reference to a perl Array
 note("T_AVREF");
@@ -66,6 +79,14 @@ is( T_AVREF_REFCOUNT_FIXED(\@array), \@array);
 eval { T_AVREF_REFCOUNT_FIXED( \$sv ) };
 ok( $@ );
 
+# output only
+SKIP:{
+   my $avr;
+   is_deeply([ T_AVREF_REFCOUNT_FIXED_output($avr) ], [ ], "call with non-ref lvalue, no return value");
+   ok(ref $avr, "output parameter now a reference")
+     or skip "Not a reference", 1;
+   is_deeply($avr, [ "test" ], "has expected entry");
+}
 
 # T_HVREF - reference to a perl Hash
 note("T_HVREF");
@@ -83,6 +104,14 @@ is( T_HVREF_REFCOUNT_FIXED(\%hash), \%hash);
 eval { T_HVREF_REFCOUNT_FIXED( \@array ) };
 ok( $@ );
 
+# output only
+SKIP:{
+   my $hvr;
+   is_deeply([ T_HVREF_REFCOUNT_FIXED_output($hvr) ], [ ], "call with non-ref lvalue, no return value");
+   ok(ref $hvr, "output parameter now a reference")
+     or skip "Not a reference", 1;
+   is($hvr->{test}, "value", "has expected key");
+}
 
 # T_CVREF - reference to perl subroutine
 note("T_CVREF");
@@ -97,6 +126,14 @@ is( T_CVREF_REFCOUNT_FIXED($sub), $sub );
 eval { T_CVREF_REFCOUNT_FIXED( \@array ) };
 ok( $@ );
 
+# output only
+SKIP:{
+   my $cvr;
+   is_deeply([ T_CVREF_REFCOUNT_FIXED_output($cvr) ], [ ], "call with non-ref lvalue, no return value");
+   ok(ref $cvr, "output parameter now a reference")
+     or skip "Not a reference", 1;
+   is($cvr, \&XSLoader::load, "ref to expected sub");
+}
 
 # T_SYSRET - system return values
 note("T_SYSRET");
@@ -150,6 +187,25 @@ ok( ! T_BOOL(0) );
 ok( ! T_BOOL('') );
 ok( ! T_BOOL(undef) );
 
+{
+  # these attempt to modify a read-only value
+  ok( !eval { T_BOOL_2(52); 1 } );
+  ok( !eval { T_BOOL_2(0); 1 } );
+  ok( !eval { T_BOOL_2(''); 1 } );
+  ok( !eval { T_BOOL_2(undef); 1 } );
+}
+
+{
+    my ($in, $out);
+    $in = 1;
+    T_BOOL_OUT($out, $in);
+    ok($out, "T_BOOL_OUT, true in");
+    $in = 0;
+    $out = 1;
+    T_BOOL_OUT($out, $in);
+    ok(!$out, "T_BOOL_OUT, false in");
+}
+
 # T_U_SHORT aka U16
 note("T_U_SHORT");
 is( T_U_SHORT(32000), 32000);
@@ -192,6 +248,14 @@ is( sprintf("%6.3f",T_DOUBLE(52.345)), sprintf("%6.3f",52.345), "T_DOUBLE" );
 note("T_PV");
 is( T_PV("a string"), "a string");
 is( T_PV(52), 52);
+ok !defined T_PV_null, 'RETVAL = NULL returns undef for char*';
+{
+    use warnings NONFATAL => 'all';
+    my $uninit;
+    local $SIG{__WARN__} = sub { ++$uninit if shift =~ /uninit/ };
+    () = ''.T_PV_null;
+    is $uninit, 1, 'uninit warning from NULL returned from char* func';
+}
 
 # T_PTR
 my $t = 5;
@@ -333,6 +397,8 @@ note("T_STDIO");
 
 # open a file in XS for write
 my $testfile= "stdio.tmp";
+# not everything below cleans up
+END { 1 while unlink $testfile; }
 my $fh = T_STDIO_open( $testfile );
 ok( $fh );
 
@@ -351,7 +417,7 @@ if (defined $fh) {
   ok( $Config{useperlio} ? T_STDIO_close( $fh ) : close( $fh ) );
 
   # open from perl, and check contents
-  open($fh, "< $testfile");
+  open($fh, '<', $testfile);
   ok($fh);
   my $line = <$fh>;
   is($line,$lines[0]);
@@ -367,6 +433,17 @@ if (defined $fh) {
   }
 }
 
+$fh = "FOO";
+T_STDIO_open_ret_in_arg( $testfile, $fh);
+ok( $fh ne "FOO", 'return io in arg open succeeds');
+ok( print($fh "first line\n"), 'can print to return io in arg');
+ok( close($fh), 'can close return io in arg');
+$fh = "FOO";
+#now with a bad file name to make sure $fh is written to on failure
+my $badfile = $^O eq 'VMS' ? '?' : '';
+T_STDIO_open_ret_in_arg( $badfile, $fh);
+ok( !defined$fh, 'return io in arg open failed successfully');
+
 # T_INOUT
 note("T_INOUT");
 SCOPE: {
@@ -379,6 +456,9 @@ SCOPE: {
   seek($fh2, 0, 0);
   is(readline($fh2), $str);
   ok(print $fh2 "foo\n");
+  ok(close $fh);
+  # this fails because the underlying shared handle is already closed
+  ok(!close $fh2);
 }
 
 # T_IN
@@ -405,7 +485,14 @@ SCOPE: {
   seek($fh2, 0, 0);
   is(readline($fh2), $str);
   ok(eval {print $fh2 "foo\n"; 1});
+  ok(close $fh);
+  # this fails because the underlying shared handle is already closed
+  ok(!close $fh2);
 }
+
+# Perl RT #124181 SEGV due to double free in typemap
+# "Attempt to free unreferenced scalar"
+%{*{main::XS::}{HASH}} = ();
 
 sub is_approx {
   my ($l, $r, $n) = @_;
