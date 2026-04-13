@@ -3810,7 +3810,6 @@ EOM
 	rp="Which of these apply, if any?"
 	. UU/myread
 	tans=$ans
-        echo "trace $tans" >&4
 	for file in $tans; do
 		if $test X$file = XPolicy -a -f Policy.sh; then
 			. Policy.sh
