@@ -18,7 +18,7 @@ chdir dirname($0);
 my $file = basename($0, '.PL');
 $file .= '.com' if $^O eq 'VMS';
 
-open OUT,">$file" or die "Can't create $file: $!";
+open OUT, ">", $file or die "Can't create $file: $!";
 
 print "Extracting $file (with variable substitutions)\n";
 
@@ -28,7 +28,7 @@ print "Extracting $file (with variable substitutions)\n";
 print OUT <<"!GROK!THIS!";
 $Config{startperl}
     eval 'exec $Config{perlpath} -S \$0 \${1+"\$@"}'
-	if \$running_under_some_shell;
+	if 0; # ^ Run only under a shell
 !GROK!THIS!
 
 # In the following, perl variables are not expanded during extraction.
@@ -85,7 +85,7 @@ specified using the -o option, C<-o newfile>.
 
 =head1 SEE ALSO
 
-L<Net::Config>, L<Net::libnetFAQ>
+L<Net::Config>, L<libnetFAQ>
 
 =head1 AUTHORS
 
@@ -97,6 +97,7 @@ Jarkko Hietaniemi, conversion into libnetcfg for inclusion into Perl 5.8.
 
 # $Id: Configure,v 1.8 1997/03/04 09:22:32 gbarr Exp $
 
+BEGIN { pop @INC if $INC[-1] eq '.' }
 use strict;
 use IO::File;
 use Getopt::Std;
@@ -342,7 +343,7 @@ my %oldcfg = ();
 $Net::Config::CONFIGURE = 1; # Suppress load of user overrides
 if( -f $libnet_cfg_in )
  {
-  %oldcfg = ( %{ do $libnet_cfg_in } );
+  %oldcfg = ( %{ local @INC = '.'; do $libnet_cfg_in } );
  }
 elsif (eval { require Net::Config }) 
  {

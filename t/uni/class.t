@@ -1,26 +1,32 @@
 BEGIN {
     chdir 't' if -d 't';
-    @INC = qw(../lib .);
-    require "test.pl";
+    require './test.pl';
+    set_up_inc(qw(../lib .));
+    skip_all_without_unicode_tables();
 }
 
-plan tests => 11;
+plan tests => 12;
 
-my $str = join "", map latin1_to_native(chr($_)), 0x20 .. 0x6F;
+my $str = join "", map { chr utf8::unicode_to_native($_) } 0x20 .. 0x6F;
 
 is(($str =~ /(\p{IsMyUniClass}+)/)[0], '0123456789:;<=>?@ABCDEFGHIJKLMNO',
                                 'user-defined class compiled before defined');
 
 sub IsMyUniClass {
-  <<END;
-0030	004F
+  my $return = "";
+  for my $i (0x30 .. 0x4F) {
+    $return .= sprintf("%04X\n", utf8::unicode_to_native($i));
+  }
+  return $return;
 END
 }
 
 sub Other::IsClass {
-  <<END;
-0040	005F
-END
+  my $return = "";
+  for my $i (0x40 .. 0x5F) {
+    $return .= sprintf("%04X\n", utf8::unicode_to_native($i));
+  }
+  return $return;
 }
 
 sub A::B::Intersection {
@@ -81,6 +87,23 @@ is(($str =~ /(\P{bc=AL}+)/)[0], "\x{0711}");
 $str = "[\x{038B}\x{038C}\x{038D}]";
 
 is(($str =~ /(\p{InGreek}+)/)[0], "\x{038B}\x{038C}\x{038D}");
+
+{   # [perl #133860], compilation before data for it is available
+    package Foo;
+
+    sub make {
+        my @lines;
+        while( my($c) = splice(@_,0,1) ) {
+            push @lines, sprintf("%04X", $c);
+        }
+        return join "\n", @lines;
+    }
+
+    my @characters = ( ord("a") );
+    sub IsProperty { make(@characters); };
+
+    main::like('a', qr/\p{IsProperty}/, "foo");
+}
 
 # The other tests that are based on looking at the generated files are now
 # in t/re/uniprops.t

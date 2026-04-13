@@ -1,16 +1,16 @@
 package TAP::Parser::Multiplexer;
 
 use strict;
-use vars qw($VERSION @ISA);
+use warnings;
 
 use IO::Select;
-use TAP::Object ();
+use Errno;
+
+use base 'TAP::Object';
 
 use constant IS_WIN32 => $^O =~ /^(MS)?Win32$/;
 use constant IS_VMS => $^O eq 'VMS';
 use constant SELECT_OK => !( IS_VMS || IS_WIN32 );
-
-@ISA = 'TAP::Object';
 
 =head1 NAME
 
@@ -18,11 +18,11 @@ TAP::Parser::Multiplexer - Multiplex multiple TAP::Parsers
 
 =head1 VERSION
 
-Version 3.23
+Version 3.50
 
 =cut
 
-$VERSION = '3.23';
+our $VERSION = '3.50';
 
 =head1 SYNOPSIS
 
@@ -131,9 +131,10 @@ sub _iter {
             return ( $parser, $stash, $result );
         }
 
-        unless (@ready) {
+        until (@ready) {
             return unless $sel->count;
             @ready = $sel->can_read;
+            last if @ready || !$!{EINTR};
         }
 
         my ( $h, $parser, $stash, @handles ) = @{ shift @ready };

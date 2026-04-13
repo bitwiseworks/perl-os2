@@ -5,13 +5,14 @@
 
 # Additional rules supported: perl_
 
-perl_fullversion="5.00${PERL_VERSION}_$PERL_SUBVERSION"
+perl_fullversion="${PERL_REVISION}.00${PERL_VERSION}_${PERL_SUBVERSION}"
 case "$archname" in
  *-thread*)	perl_fullversion="${perl_fullversion}-threaded";;
 esac
 
 dll_post="`echo $perl_fullversion | sum | sed -e 's/^0*//' | awk '{print $1}'`"
 dll_post="`printf '%x' $dll_post | tr '[a-z]' '[A-Z]'`"
+
 if test -z "dll_post"; then
     echo "error: dll_post is emtpy.";
     exit 1;
@@ -71,8 +72,8 @@ perl_dll_t: t/$(PERL_DLL)
 t/$(PERL_DLL): $(PERL_DLL)
 	cp -f $(PERL_DLL) t/$(PERL_DLL)
 
-$(PERL_DLL): $(obj) $(DYNALOADER) perl5.def
-	$(LD) $(LD_OPT) $(LDDLFLAGS) $(PERL_DLL_LD_OPT) -o $@ $(obj) $(libs) $(DYNALOADER) perl5.def || ( rm $(PERL_DLL) && sh -c false )
+$(PERL_DLL): $(perllib_obj) $(DYNALOADER) perl5.def
+	$(LD) $(LD_OPT) $(LDDLFLAGS) $(PERL_DLL_LD_OPT) -o $@ $(perllib_obj) $(libs) $(DYNALOADER) perl5.def || ( rm $(PERL_DLL) && sh -c false )
 
 perl5.olddef: perl.linkexp
 	echo "LIBRARY '$(PERL_DLL_BASE)' INITINSTANCE TERMINSTANCE"	> $@
@@ -108,8 +109,8 @@ perl.linkexp: perl.exports perl.map  os2/os2.sym
 
 miniperl.map: miniperl$(EXE_EXT)
 
-miniperl$(EXE_EXT): $(mini_obj)
-	$(CC) $(CLDFLAGS) -o $@ $(mini_obj) $(libs) -Zmap -Zargs-wild
+miniperl$(EXE_EXT): $(miniperl_obj)
+	$(CC) $(CLDFLAGS) -o $@ $(miniperl_obj) $(libs) -Zmap -Zargs-wild
 	@./miniperl$(EXE_EXT) -w -Ilib -MExporter -e '<?>' || $(MAKE) minitest
 
 depend: os2/os2ish.h os2/os2thread.h
@@ -160,6 +161,7 @@ os2_clean:
 perlrexx: $(PERLREXX_DLL)
 	@sh -c true
 
+
 # Remove -Zexe, add -Zdll -Zso.  No stack needed
 SO_CLDFLAGS = -Zdll -Zomf
 
@@ -198,8 +200,6 @@ REDIR_TEST = 2>&1 | tee 00_$@
 
 test_prep_perl_: test_prep_pre miniperl_$(EXE_EXT) ./perl_$(EXE_EXT)
 	PERL=./perl_ $(MAKE) _test_prep
-
-test_prep_various: test_prep_pre miniperl$(EXE_EXT) $(dynamic_ext) $(TEST_PERL_DLL)
 
 all_test: test
 

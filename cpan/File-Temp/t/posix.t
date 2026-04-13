@@ -2,8 +2,7 @@
 # Test for File::Temp - POSIX functions
 
 use strict;
-use Test;
-BEGIN { plan tests => 7}
+use Test::More tests => 7;
 
 use File::Temp qw/ :POSIX unlink0 /;
 use FileHandle;
@@ -35,7 +34,9 @@ my $status = unlink0($fh, $tmpnam);
 if ($status) {
   ok( $status );
 } else {
-  skip("Skip test failed probably due to \$TMPDIR being on NFS",1);
+    SKIP: {
+        skip("Skip test failed probably due to \$TMPDIR being on NFS",1);
+    }
 }
 
 # TMPFILE
@@ -68,7 +69,9 @@ if (defined $fh) {
 } else {
   # Skip all the remaining tests
   foreach (1..3) {
-    skip("Skip test failed probably due to \$TMPDIR being on NFS",1);
+    SKIP: {
+        skip("Skip test failed probably due to \$TMPDIR being on NFS",1);
+    }
   }
 }
 

@@ -38,9 +38,11 @@ typedef struct
  CV *UTF8;
 } PerlIOVia;
 
+static const MGVTBL PerlIOVia_tag = { 0, 0, 0, 0, 0, 0, 0, 0 };
+
 #define MYMethod(x) #x,&s->x
 
-CV *
+static CV *
 PerlIOVia_fetchmethod(pTHX_ PerlIOVia * s, const char *method, CV ** save)
 {
     GV *gv = gv_fetchmeth(s->stash, method, strlen(method), 0);
@@ -63,31 +65,37 @@ PerlIOVia_fetchmethod(pTHX_ PerlIOVia * s, const char *method, CV ** save)
  * Returns scalar returned by method (if any) otherwise sv_undef
  */
 
-SV *
+static SV *
 PerlIOVia_method(pTHX_ PerlIO * f, const char *method, CV ** save, int flags,
 		 ...)
 {
     PerlIOVia *s = PerlIOSelf(f, PerlIOVia);
+    SV *result = Nullsv;
     CV *cv =
 	(*save) ? *save : PerlIOVia_fetchmethod(aTHX_ s, method, save);
-    SV *result = Nullsv;
-    va_list ap;
-    va_start(ap, flags);
     if (cv != (CV *) - 1) {
 	IV count;
 	dSP;
 	SV *arg;
+        va_list ap;
+
+        va_start(ap, flags);
 	PUSHSTACKi(PERLSI_MAGIC);
 	ENTER;
-	SPAGAIN;
 	PUSHMARK(sp);
 	XPUSHs(s->obj);
 	while ((arg = va_arg(ap, SV *))) {
 	    XPUSHs(arg);
 	}
+        va_end(ap);
 	if (*PerlIONext(f)) {
 	    if (!s->fh) {
-		GV *gv = newGVgen(HvNAME_get(s->stash));
+		GV *gv;
+		char *package = HvNAME_get(s->stash);
+
+                if (!package)
+                    return Nullsv; /* can this ever happen? */
+		gv = newGVgen(package);
 		GvIOp(gv) = newIO();
 		s->fh = newRV((SV *) gv);
 		s->io = GvIOp(gv);
@@ -117,17 +125,22 @@ PerlIOVia_method(pTHX_ PerlIO * f, const char *method, CV ** save, int flags,
 	LEAVE;
 	POPSTACK;
     }
-    va_end(ap);
     return result;
 }
 
-IV
+static IV
 PerlIOVia_pushed(pTHX_ PerlIO * f, const char *mode, SV * arg,
 		 PerlIO_funcs * tab)
 {
     IV code = PerlIOBase_pushed(aTHX_ f, mode, Nullsv, tab);
+
+    if (arg && SvTYPE(arg) >= SVt_PVMG
+        && mg_findext(arg, PERL_MAGIC_ext, &PerlIOVia_tag)) {
+	return code;
+    }
+
     if (code == 0) {
-	PerlIOVia *s = PerlIOSelf(f, PerlIOVia);
+        PerlIOVia *s = PerlIOSelf(f, PerlIOVia);
 	if (!arg) {
 	    if (ckWARN(WARN_LAYER))
 		Perl_warner(aTHX_ packWARN(WARN_LAYER),
@@ -204,7 +217,7 @@ push_failed:
     return code;
 }
 
-PerlIO *
+static PerlIO *
 PerlIOVia_open(pTHX_ PerlIO_funcs * self, PerlIO_list_t * layers,
 	       IV n, const char *mode, int fd, int imode, int perm,
 	       PerlIO * f, int narg, SV ** args)
@@ -299,7 +312,7 @@ PerlIOVia_open(pTHX_ PerlIO_funcs * self, PerlIO_list_t * layers,
     return f;
 }
 
-IV
+static IV
 PerlIOVia_popped(pTHX_ PerlIO * f)
 {
     PerlIOVia *s = PerlIOSelf(f, PerlIOVia);
@@ -325,7 +338,7 @@ PerlIOVia_popped(pTHX_ PerlIO * f)
     return 0;
 }
 
-IV
+static IV
 PerlIOVia_close(pTHX_ PerlIO * f)
 {
     PerlIOVia *s = PerlIOSelf(f, PerlIOVia);
@@ -338,7 +351,7 @@ PerlIOVia_close(pTHX_ PerlIO * f)
     return code;
 }
 
-IV
+static IV
 PerlIOVia_fileno(pTHX_ PerlIO * f)
 {
     PerlIOVia *s = PerlIOSelf(f, PerlIOVia);
@@ -347,7 +360,7 @@ PerlIOVia_fileno(pTHX_ PerlIO * f)
     return (result) ? SvIV(result) : PerlIO_fileno(PerlIONext(f));
 }
 
-IV
+static IV
 PerlIOVia_binmode(pTHX_ PerlIO * f)
 {
     PerlIOVia *s = PerlIOSelf(f, PerlIOVia);
@@ -360,7 +373,7 @@ PerlIOVia_binmode(pTHX_ PerlIO * f)
     return SvIV(result);
 }
 
-IV
+static IV
 PerlIOVia_seek(pTHX_ PerlIO * f, Off_t offset, int whence)
 {
     PerlIOVia *s = PerlIOSelf(f, PerlIOVia);
@@ -380,7 +393,7 @@ PerlIOVia_seek(pTHX_ PerlIO * f, Off_t offset, int whence)
 #endif
 }
 
-Off_t
+static Off_t
 PerlIOVia_tell(pTHX_ PerlIO * f)
 {
     PerlIOVia *s = PerlIOSelf(f, PerlIOVia);
@@ -391,7 +404,7 @@ PerlIOVia_tell(pTHX_ PerlIO * f)
 	   : (Off_t) - 1;
 }
 
-SSize_t
+static SSize_t
 PerlIOVia_unread(pTHX_ PerlIO * f, const void *vbuf, Size_t count)
 {
     PerlIOVia *s = PerlIOSelf(f, PerlIOVia);
@@ -405,7 +418,7 @@ PerlIOVia_unread(pTHX_ PerlIO * f, const void *vbuf, Size_t count)
     }
 }
 
-SSize_t
+static SSize_t
 PerlIOVia_read(pTHX_ PerlIO * f, void *vbuf, Size_t count)
 {
     SSize_t rd = 0;
@@ -420,17 +433,37 @@ PerlIOVia_read(pTHX_ PerlIO * f, void *vbuf, Size_t count)
 	    SV *result =
 		PerlIOVia_method(aTHX_ f, MYMethod(READ), G_SCALAR, buf, n,
 				 Nullsv);
-	    if (result) {
+            /* QP appears to use undef to indicate an error here */
+            if (result && SvOK(result)) {
 		rd = (SSize_t) SvIV(result);
+                STRLEN buflen = SvCUR(buf);
+                STRLEN max = buflen < count ? buflen : count;
+                if (rd < 0 || (STRLEN)rd > max) {
+                    PerlIOVia *s = PerlIOSelf(f, PerlIOVia);
+                    if (rd > 0 && (STRLEN)rd <= count && (STRLEN)rd > buflen) {
+                        Perl_warn(aTHX_ "Invalid return from %s::READ = %zd, beyond end of the returned buffer at %zu",
+                                  HvNAME(s->stash), rd, buflen);
+                    }
+                    else {
+                        Perl_warn(aTHX_ "Invalid return from %s::READ = %zd, expected undef or 0 to %zu",
+                                  HvNAME(s->stash), rd, count);
+                    }
+                    SETERRNO(EINVAL,LIB_INVARG);
+                    return -1;
+                }
+
 		Move(SvPVX(buf), vbuf, rd, char);
 		return rd;
 	    }
+            else {
+                return -1;
+            }
 	}
     }
     return rd;
 }
 
-SSize_t
+static SSize_t
 PerlIOVia_write(pTHX_ PerlIO * f, const void *vbuf, Size_t count)
 {
     if (PerlIOBase(f)->flags & PERLIO_F_CANWRITE) {
@@ -447,7 +480,7 @@ PerlIOVia_write(pTHX_ PerlIO * f, const void *vbuf, Size_t count)
     return 0;
 }
 
-IV
+static IV
 PerlIOVia_fill(pTHX_ PerlIO * f)
 {
     if (PerlIOBase(f)->flags & PERLIO_F_CANREAD) {
@@ -471,7 +504,7 @@ PerlIOVia_fill(pTHX_ PerlIO * f)
     return -1;
 }
 
-IV
+static IV
 PerlIOVia_flush(pTHX_ PerlIO * f)
 {
     PerlIOVia *s = PerlIOSelf(f, PerlIOVia);
@@ -484,7 +517,7 @@ PerlIOVia_flush(pTHX_ PerlIO * f)
     return (result) ? SvIV(result) : 0;
 }
 
-STDCHAR *
+static STDCHAR *
 PerlIOVia_get_base(pTHX_ PerlIO * f)
 {
     if (PerlIOBase(f)->flags & PERLIO_F_CANREAD) {
@@ -496,7 +529,7 @@ PerlIOVia_get_base(pTHX_ PerlIO * f)
     return (STDCHAR *) NULL;
 }
 
-STDCHAR *
+static STDCHAR *
 PerlIOVia_get_ptr(pTHX_ PerlIO * f)
 {
     if (PerlIOBase(f)->flags & PERLIO_F_CANREAD) {
@@ -509,7 +542,7 @@ PerlIOVia_get_ptr(pTHX_ PerlIO * f)
     return (STDCHAR *) NULL;
 }
 
-SSize_t
+static SSize_t
 PerlIOVia_get_cnt(pTHX_ PerlIO * f)
 {
     if (PerlIOBase(f)->flags & PERLIO_F_CANREAD) {
@@ -521,7 +554,7 @@ PerlIOVia_get_cnt(pTHX_ PerlIO * f)
     return 0;
 }
 
-Size_t
+static Size_t
 PerlIOVia_bufsiz(pTHX_ PerlIO * f)
 {
     if (PerlIOBase(f)->flags & PERLIO_F_CANREAD) {
@@ -532,7 +565,7 @@ PerlIOVia_bufsiz(pTHX_ PerlIO * f)
     return 0;
 }
 
-void
+static void
 PerlIOVia_set_ptrcnt(pTHX_ PerlIO * f, STDCHAR * ptr, SSize_t cnt)
 {
     PerlIOVia *s = PerlIOSelf(f, PerlIOVia);
@@ -540,7 +573,7 @@ PerlIOVia_set_ptrcnt(pTHX_ PerlIO * f, STDCHAR * ptr, SSize_t cnt)
     s->cnt = cnt;
 }
 
-void
+static void
 PerlIOVia_setlinebuf(pTHX_ PerlIO * f)
 {
     PerlIOVia *s = PerlIOSelf(f, PerlIOVia);
@@ -548,7 +581,7 @@ PerlIOVia_setlinebuf(pTHX_ PerlIO * f)
     PerlIOBase_setlinebuf(aTHX_ f);
 }
 
-void
+static void
 PerlIOVia_clearerr(pTHX_ PerlIO * f)
 {
     PerlIOVia *s = PerlIOSelf(f, PerlIOVia);
@@ -556,7 +589,7 @@ PerlIOVia_clearerr(pTHX_ PerlIO * f)
     PerlIOBase_clearerr(aTHX_ f);
 }
 
-IV
+static IV
 PerlIOVia_error(pTHX_ PerlIO * f)
 {
     PerlIOVia *s = PerlIOSelf(f, PerlIOVia);
@@ -565,7 +598,7 @@ PerlIOVia_error(pTHX_ PerlIO * f)
     return (result) ? SvIV(result) : PerlIOBase_error(aTHX_ f);
 }
 
-IV
+static IV
 PerlIOVia_eof(pTHX_ PerlIO * f)
 {
     PerlIOVia *s = PerlIOSelf(f, PerlIOVia);
@@ -574,30 +607,69 @@ PerlIOVia_eof(pTHX_ PerlIO * f)
     return (result) ? SvIV(result) : PerlIOBase_eof(aTHX_ f);
 }
 
-SV *
+static SV *
 PerlIOVia_getarg(pTHX_ PerlIO * f, CLONE_PARAMS * param, int flags)
 {
     PerlIOVia *s = PerlIOSelf(f, PerlIOVia);
-    PERL_UNUSED_ARG(param);
+    SV *arg;
     PERL_UNUSED_ARG(flags);
-    return PerlIOVia_method(aTHX_ f, MYMethod(GETARG), G_SCALAR, Nullsv);
+
+    /* During cloning, return an undef token object so that _pushed() knows
+     * that it should not call methods and wait for _dup() to actually dup the
+     * object. */
+    if (param) {
+	SV *sv = newSV(0);
+	sv_magicext(sv, NULL, PERL_MAGIC_ext, &PerlIOVia_tag, 0, 0);
+	return sv;
+    }
+
+    arg = PerlIOVia_method(aTHX_ f, MYMethod(GETARG), G_SCALAR, Nullsv);
+    if (arg) {
+        /* arg is a temp, and PerlIOBase_dup() will explicitly free it */
+        SvREFCNT_inc(arg);
+    }
+    else {
+        arg = newSVpvn(HvNAME(s->stash), HvNAMELEN(s->stash));
+    }
+
+    return arg;
 }
 
-PerlIO *
+static PerlIO *
 PerlIOVia_dup(pTHX_ PerlIO * f, PerlIO * o, CLONE_PARAMS * param,
 	      int flags)
 {
     if ((f = PerlIOBase_dup(aTHX_ f, o, param, flags))) {
-	/* Most of the fields will lazily set themselves up as needed
-	   stash and obj have been set up by the implied push
-	 */
+#ifdef USE_ITHREADS
+        if (param) {
+            /* For a non-interpreter dup stash and obj have been set up
+               by the implied push.
+
+               But if this is a clone for a new interpreter we need to
+               translate the objects to their dups.
+            */
+
+            PerlIOVia *fs = PerlIOSelf(f, PerlIOVia);
+            PerlIOVia *os = PerlIOSelf(o, PerlIOVia);
+
+            fs->obj = sv_dup_inc(os->obj, param);
+            fs->stash = (HV*)sv_dup((SV*)os->stash, param);
+            fs->var = sv_dup_inc(os->var, param);
+            fs->cnt = os->cnt;
+
+            /* fh, io, cached CVs left as NULL, PerlIOVia_method()
+               will reinitialize them if needed */
+        }
+#endif
+        /* for a non-threaded dup fs->obj and stash should be set by _pushed() */
     }
+
     return f;
 }
 
 
 
-PERLIO_FUNCS_DECL(PerlIO_object) = {
+static PERLIO_FUNCS_DECL(PerlIO_object) = {
  sizeof(PerlIO_funcs),
  "via",
  sizeof(PerlIOVia),

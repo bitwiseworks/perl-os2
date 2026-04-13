@@ -1,16 +1,15 @@
 #!./perl 
 
 BEGIN {
-    chdir 't';
-    @INC = '../lib';
+    chdir 't' if -d 't';
     require './test.pl';
+    set_up_inc('../lib');
 }
 
-BEGIN {
-    use Config;
-    if( !$Config{d_alarm} ) {
-        skip_all("alarm() not implemented on this platform");
-    }
+
+use Config;
+if ( !$Config{d_alarm} ) {
+    skip_all("alarm() not implemented on this platform");
 }
 
 plan tests => 5;
@@ -51,7 +50,7 @@ is( $@, "ALARM!\n",             'alarm w/$SIG{ALRM} vs system()' );
 
 {
     local $TODO = "Why does system() block alarm() on $^O?"
-		if $^O eq 'VMS' || $^O eq 'dos';
+		if $^O eq 'VMS';
     ok( abs($diff - 3) <= 1,   "   right time (waited $diff secs for 3-sec alarm)" );
 }
 

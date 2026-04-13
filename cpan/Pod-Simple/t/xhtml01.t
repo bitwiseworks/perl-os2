@@ -1,15 +1,7 @@
-#!/usr/bin/perl -w
-
 # t/xhtml01.t - check basic output from Pod::Simple::XHTML
-
-BEGIN {
-    chdir 't' if -d 't';
-}
-
 use strict;
-use lib '../lib';
-#use Test::More tests => 56;
-use Test::More 'no_plan';
+use warnings;
+use Test::More tests => 64;
 
 use_ok('Pod::Simple::XHTML') or exit;
 
@@ -18,12 +10,12 @@ isa_ok ($parser, 'Pod::Simple::XHTML');
 
 my $results;
 
-my $PERLDOC = "http://search.cpan.org/perldoc";
+my $PERLDOC = "https://metacpan.org/pod";
 my $MANURL = "http://man.he.net/man";
 
 initialize($parser, $results);
 $parser->parse_string_document( "=head1 Poit!" );
-is($results, qq{<h1 id="Poit-">Poit!</h1>\n\n}, "head1 level output");
+is($results, qq{<h1 id="Poit">Poit!</h1>\n\n}, "head1 level output");
 
 initialize($parser, $results);
 $parser->parse_string_document( "=head2 Yada Yada Operator
@@ -31,23 +23,35 @@ X<...> X<... operator> X<yada yada operator>" );
 is($results, qq{<h2 id="Yada-Yada-Operator">Yada Yada Operator   </h2>\n\n}, "head ID with X<>");
 
 initialize($parser, $results);
+$parser->parse_string_document( "=head2 Platforms with no supporting programmers:");
+is($results, qq{<h2 id="Platforms-with-no-supporting-programmers">Platforms with no supporting programmers:</h2>\n\n}, "head ID ending in colon");
+
+initialize($parser, $results);
 $parser->html_h_level(2);
 $parser->parse_string_document( "=head1 Poit!" );
-is($results, qq{<h2 id="Poit-">Poit!</h2>\n\n}, "head1 level output h_level 2");
+is($results, qq{<h2 id="Poit">Poit!</h2>\n\n}, "head1 level output h_level 2");
 
 initialize($parser, $results);
 $parser->parse_string_document( "=head2 I think so Brain." );
-is($results, qq{<h2 id="I-think-so-Brain.">I think so Brain.</h2>\n\n}, "head2 level output");
+is($results, qq{<h2 id="I-think-so-Brain">I think so Brain.</h2>\n\n}, "head2 level output");
 
 initialize($parser, $results);
 $parser->parse_string_document( "=head3 I say, Brain..." );
-is($results, qq{<h3 id="I-say-Brain...">I say, Brain...</h3>\n\n}, "head3 level output");
+is($results, qq{<h3 id="I-say-Brain">I say, Brain...</h3>\n\n}, "head3 level output");
 
 initialize($parser, $results);
 $parser->parse_string_document( "=head4 Zort & Zog!" );
-is($results, qq{<h4 id="Zort-Zog-">Zort &amp; Zog!</h4>\n\n}, "head4 level output");
+is($results, qq{<h4 id="Zort-Zog">Zort &amp; Zog!</h4>\n\n}, "head4 level output");
 
-sub x ($;&) {
+initialize($parser, $results);
+$parser->parse_string_document( "=head5 I think so Brain, but..." );
+is($results, qq{<h5 id="I-think-so-Brain-but">I think so Brain, but...</h5>\n\n}, "head5 level output");
+
+initialize($parser, $results);
+$parser->parse_string_document( "=head6 Narf!" );
+is($results, qq{<h6 id="Narf">Narf!</h6>\n\n}, "head6 level output");
+
+sub x {
   my $code = $_[1];
   Pod::Simple::XHTML->_out(
   sub { $code->($_[0]) if $code },
@@ -474,9 +478,14 @@ $parser->parse_string_document(<<'EOPOD');
 =pod
 
 A plain paragraph with a C<functionname>.
+
+C<< This code is B<important> to E<lt>me>! >>
+
 EOPOD
 is($results, <<"EOHTML", "code entity in a paragraph");
 <p>A plain paragraph with a <code>functionname</code>.</p>
+
+<p><code>This code is <b>important</b> to &lt;me&gt;!</code></p>
 
 EOHTML
 
@@ -532,7 +541,7 @@ $parser->parse_string_document(<<'EOPOD');
 A plain paragraph with a L<Newlines>.
 EOPOD
 is($results, <<"EOHTML", "Link entity in a paragraph");
-<p>A plain paragraph with a <a href="$PERLDOC?Newlines">Newlines</a>.</p>
+<p>A plain paragraph with a <a href="$PERLDOC/Newlines">Newlines</a>.</p>
 
 EOHTML
 
@@ -543,7 +552,7 @@ $parser->parse_string_document(<<'EOPOD');
 A plain paragraph with a L<perlport/Newlines>.
 EOPOD
 is($results, <<"EOHTML", "Link entity in a paragraph");
-<p>A plain paragraph with a <a href="$PERLDOC?perlport#Newlines">&quot;Newlines&quot; in perlport</a>.</p>
+<p>A plain paragraph with a <a href="$PERLDOC/perlport#Newlines">&quot;Newlines&quot; in perlport</a>.</p>
 
 EOHTML
 
@@ -651,12 +660,29 @@ is($results, <<"EOHTML", "Text with numeric entities");
 
 EOHTML
 
+my $html = q{<tt>
+<pre>
+#include &lt;stdio.h&gt;
+
+int main(int argc,char *argv[]) {
+
+        printf("Hellow World\n");
+        return 0;
+
+}
+</pre>
+</tt>};
+initialize($parser, $results);
+$parser->parse_string_document("=begin html\n\n$html\n\n=end html\n");
+is($results, "$html\n\n", "Text with =begin html");
+
 SKIP: for my $use_html_entities (0, 1) {
   if ($use_html_entities and not $Pod::Simple::XHTML::HAS_HTML_ENTITIES) {
-    skip("HTML::Entities not installed", 1);
+    skip("HTML::Entities not installed", 3);
   }
   local $Pod::Simple::XHTML::HAS_HTML_ENTITIES = $use_html_entities;
   initialize($parser, $results);
+  $parser->codes_in_verbatim(1);
   $parser->parse_string_document(<<'EOPOD');
 =pod
 
@@ -682,9 +708,17 @@ This is Anna's "Answer" to the <q>Question</q>.
 =cut
 
 EOPOD
-my $T = $use_html_entities ? 84 : 'x54';
+my $T = $use_html_entities ? ord('T') : sprintf ("x%X", ord('T'));
 is($results, <<"EOHTML", 'HTML Entities should be only for specified characters');
 <p>&#$T;his is Anna's &quot;Answer&quot; to the &lt;q&gt;Question&lt;/q&gt;.</p>
+
+EOHTML
+
+  # Keep =encoding out of content.
+  initialize($parser, $results);
+  $parser->parse_string_document("=encoding ascii\n\n=head1 NAME\n");
+  is($results, <<"EOHTML", 'Encoding should not be in content')
+<h1 id="NAME">NAME</h1>
 
 EOHTML
 
@@ -708,16 +742,16 @@ like $results, qr{\Q<meta http-equiv="Content-Type" content="text/html; charset=
 
 # Test the link generation methods.
 is $parser->resolve_pod_page_link('Net::Ping', 'INSTALL'),
-    "$PERLDOC?Net::Ping#INSTALL",
+    "$PERLDOC/Net::Ping#INSTALL",
     'POD link with fragment';
 is $parser->resolve_pod_page_link('perlpodspec'),
-    "$PERLDOC?perlpodspec", 'Simple POD link';
+    "$PERLDOC/perlpodspec", 'Simple POD link';
 is $parser->resolve_pod_page_link(undef, 'SYNOPSIS'), '#SYNOPSIS',
     'Simple fragment link';
 is $parser->resolve_pod_page_link(undef, 'this that'), '#this-that',
     'Fragment link with space';
 is $parser->resolve_pod_page_link('perlpod', 'this that'),
-    "$PERLDOC?perlpod#this-that",
+    "$PERLDOC/perlpod#this-that",
     'POD link with fragment with space';
 
 is $parser->resolve_man_page_link('crontab(5)', 'EXAMPLE CRON FILE'),
@@ -737,10 +771,10 @@ is $parser->batch_mode_current_level, 6,
 ######################################
 
 sub initialize {
-	$_[0] = Pod::Simple::XHTML->new ();
+    $_[0] = Pod::Simple::XHTML->new ();
         $_[0]->html_header("");
         $_[0]->html_footer("");
-	$_[0]->output_string( \$results ); # Send the resulting output to a string
-	$_[1] = '';
-	return;
+    $_[0]->output_string( \$results ); # Send the resulting output to a string
+    $_[1] = '';
+    return;
 }

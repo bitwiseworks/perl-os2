@@ -14,9 +14,7 @@ use Test::More;
 
 my $TB = Test::More->builder;
 
-plan tests => 463;
-
-# We're going to override rename() later on but Perl has to see an override
+# We are going to override rename() later on but Perl has to see an override
 # at compile time to honor it.
 BEGIN { *CORE::GLOBAL::rename = sub { CORE::rename($_[0], $_[1]) }; }
 
@@ -24,6 +22,11 @@ BEGIN { *CORE::GLOBAL::rename = sub { CORE::rename($_[0], $_[1]) }; }
 use File::Copy qw(copy move cp);
 use Config;
 
+# If we have Time::HiRes, File::Copy loaded it for us.
+BEGIN {
+  eval { Time::HiRes->import(qw( stat utime )) };
+  note "Testing Time::HiRes::utime support" unless $@;
+}
 
 foreach my $code ("copy()", "copy('arg')", "copy('arg', 'arg', 'arg', 'arg')",
                   "move()", "move('arg')", "move('arg', 'arg', 'arg')"
@@ -43,14 +46,14 @@ for my $cross_partition_test (0..1) {
   }
 
   # First we create a file
-  open(F, ">file-$$") or die $!;
+  open(F, ">", "file-$$") or die $!;
   binmode F; # for DOSISH platforms, because test 3 copies to stdout
   printf F "ok\n";
   close F;
 
   copy "file-$$", "copy-$$";
 
-  open(F, "copy-$$") or die $!;
+  open(F, "<", "copy-$$") or die $!;
   my $foo = <F>;
   close(F);
 
@@ -65,16 +68,18 @@ for my $cross_partition_test (0..1) {
   $TB->current_test($TB->current_test + 1);
   unlink "copy-$$" or die "unlink: $!";
 
-  open(F,"file-$$");
+  open(F, "<", "file-$$");
+  binmode F;
   copy(*F, "copy-$$");
-  open(R, "copy-$$") or die "open copy-$$: $!"; $foo = <R>; close(R);
+  open(R, "<:raw", "copy-$$") or die "open copy-$$: $!"; $foo = <R>; close(R);
   is $foo, "ok\n", 'copy(*F, fn): same contents';
   unlink "copy-$$" or die "unlink: $!";
 
-  open(F,"file-$$");
+  open(F, "<", "file-$$");
+  binmode F;
   copy(\*F, "copy-$$");
   close(F) or die "close: $!";
-  open(R, "copy-$$") or die; $foo = <R>; close(R) or die "close: $!";
+  open(R, "<", "copy-$$") or die; $foo = <R>; close(R) or die "close: $!";
   is $foo, "ok\n", 'copy(\*F, fn): same contents';
   unlink "copy-$$" or die "unlink: $!";
 
@@ -83,7 +88,7 @@ for my $cross_partition_test (0..1) {
   binmode $fh or die $!;
   copy("file-$$",$fh);
   $fh->close or die "close: $!";
-  open(R, "copy-$$") or die; $foo = <R>; close(R);
+  open(R, "<", "copy-$$") or die; $foo = <R>; close(R);
   is $foo, "ok\n", 'copy(fn, io): same contents';
   unlink "copy-$$" or die "unlink: $!";
 
@@ -92,7 +97,7 @@ for my $cross_partition_test (0..1) {
   binmode $fh or die $!;
   copy("file-$$",$fh);
   $fh->close;
-  open(R, "copy-$$") or die $!; $foo = <R>; close(R);
+  open(R, "<", "copy-$$") or die $!; $foo = <R>; close(R);
   is $foo, "ok\n", 'copy(fn, fh): same contents';
   unlink "file-$$" or die "unlink: $!";
 
@@ -100,7 +105,7 @@ for my $cross_partition_test (0..1) {
   ok -e "copy-$$",                '  target still there';
 
   # Doesn't really matter what time it is as long as its not now.
-  my $time = 1000000000;
+  my $time = 1000000000.12345;
   utime( $time, $time, "copy-$$" );
 
   # Recheck the mtime rather than rely on utime in case we're on a
@@ -111,7 +116,7 @@ for my $cross_partition_test (0..1) {
   ok move("copy-$$", "file-$$"), 'move';
   ok -e "file-$$",              '  destination exists';
   ok !-e "copy-$$",              '  source does not';
-  open(R, "file-$$") or die $!; $foo = <R>; close(R);
+  open(R, "<", "file-$$") or die $!; $foo = <R>; close(R);
   is $foo, "ok\n", 'contents preserved';
 
   TODO: {
@@ -126,27 +131,27 @@ for my $cross_partition_test (0..1) {
   # trick: create lib/ if not exists - not needed in Perl core
   unless (-d 'lib') { mkdir 'lib' or die $!; }
   copy "file-$$", "lib";
-  open(R, "lib/file-$$") or die $!; $foo = <R>; close(R);
+  open(R, "<", "lib/file-$$") or die $!; $foo = <R>; close(R);
   is $foo, "ok\n", 'copy(fn, dir): same contents';
   unlink "lib/file-$$" or die "unlink: $!";
 
   # Do it twice to ensure copying over the same file works.
   copy "file-$$", "lib";
-  open(R, "lib/file-$$") or die $!; $foo = <R>; close(R);
+  open(R, "<", "lib/file-$$") or die $!; $foo = <R>; close(R);
   is $foo, "ok\n", 'copy over the same file works';
   unlink "lib/file-$$" or die "unlink: $!";
 
   { 
     my $warnings = '';
     local $SIG{__WARN__} = sub { $warnings .= join '', @_ };
-    ok copy("file-$$", "file-$$"), 'copy(fn, fn) succeeds';
+    ok !copy("file-$$", "file-$$"), 'copy to itself fails';
 
     like $warnings, qr/are identical/, 'but warns';
     ok -s "file-$$", 'contents preserved';
   }
 
   move "file-$$", "lib";
-  open(R, "lib/file-$$") or die "open lib/file-$$: $!"; $foo = <R>; close(R);
+  open(R, "<", "lib/file-$$") or die "open lib/file-$$: $!"; $foo = <R>; close(R);
   is $foo, "ok\n", 'move(fn, dir): same contents';
   ok !-e "file-$$", 'file moved indeed';
   unlink "lib/file-$$" or die "unlink: $!";
@@ -154,10 +159,13 @@ for my $cross_partition_test (0..1) {
   SKIP: {
     skip "Testing symlinks", 3 unless $Config{d_symlink};
 
-    open(F, ">file-$$") or die $!;
+    open(F, ">", "file-$$") or die $!;
     print F "dummy content\n";
     close F;
-    symlink("file-$$", "symlink-$$") or die $!;
+    if (!symlink("file-$$", "symlink-$$")) {
+        unlink "file-$$";
+        skip "Can't create symlink", 3;
+    }
 
     my $warnings = '';
     local $SIG{__WARN__} = sub { $warnings .= join '', @_ };
@@ -175,7 +183,7 @@ for my $cross_partition_test (0..1) {
     skip "Testing hard links", 3 
          if !$Config{d_link} or $^O eq 'MSWin32' or $^O eq 'cygwin';
 
-    open(F, ">file-$$") or die $!;
+    open(F, ">", "file-$$") or die $!;
     print F "dummy content\n";
     close F;
     link("file-$$", "hardlink-$$") or die $!;
@@ -192,13 +200,13 @@ for my $cross_partition_test (0..1) {
     unlink "file-$$" or die $!;
   }
 
-  open(F, ">file-$$") or die $!;
+  open(F, ">", "file-$$") or die $!;
   binmode F;
   print F "this is file\n";
   close F;
 
   my $copy_msg = "this is copy\n";
-  open(F, ">copy-$$") or die $!;
+  open(F, ">", "copy-$$") or die $!;
   binmode F;
   print F $copy_msg;
   close F;
@@ -207,7 +215,7 @@ for my $cross_partition_test (0..1) {
   local $SIG{__WARN__} = sub { push @warnings, join '', @_ };
 
   # pie-$$ so that we force a non-constant, else the numeric conversion (of 0)
-  # is cached and we don't get a warning the second time round
+  # is cached and we do not get a warning the second time round
   is eval { copy("file-$$", "copy-$$", "pie-$$"); 1 }, undef,
     "a bad buffer size fails to copy";
   like $@, qr/Bad buffer size for copy/, "with a helpful error message";
@@ -216,7 +224,7 @@ for my $cross_partition_test (0..1) {
   }
 
   is -s "copy-$$", length $copy_msg, "but does not truncate the destination";
-  open(F, "copy-$$") or die $!;
+  open(F, "<", "copy-$$") or die $!;
   $foo = <F>;
   close(F);
   is $foo, $copy_msg, "nor change the destination's contents";
@@ -228,7 +236,7 @@ for my $cross_partition_test (0..1) {
 
   TODO: {
   local $TODO = 'spaces in filenames require DECC$EFS_CHARSET enabled' if $^O eq 'VMS';
-  open(F, ">file-$$") or die $!;
+  open(F, ">", "file-$$") or die $!;
   close F;
   copy "file-$$", " copy-$$";
   ok -e " copy-$$", "copy with leading whitespace";
@@ -267,6 +275,9 @@ SKIP: {
           if $^O eq "MSWin32";
     skip "Copy maps POSIX permissions to VOS permissions.", $skips
           if $^O eq "vos";
+    skip "There be dragons here with DragonflyBSD.", $skips
+         if $^O eq 'dragonfly';
+
 
     # Just a sub to get better failure messages.
     sub __ ($) {
@@ -289,6 +300,7 @@ SKIP: {
     my $copy4 = "copy4-$$";
     my $copy5 = "copy5-$$";
     my $copy6 = "copy6-$$";
+    my $copyd = "copyd-$$";
 
     open my $fh => ">", $src   or die $!;
     close   $fh                or die $!;
@@ -303,7 +315,7 @@ SKIP: {
     foreach my $test (@tests) {
         foreach my $id (0 .. 7) {
             my ($umask, $s_perm, $c_perm1, $c_perm3) = @$test;
-            # Make sure the copies doesn't exist.
+            # Make sure the copies do not exist.
             ! -e $_ or unlink $_ or die $! for $copy1, $copy2, $copy4, $copy5;
 
             $s_perm  |= $id << 9;
@@ -314,11 +326,11 @@ SKIP: {
 	    # Test that we can actually set a file to the correct permission.
 	    # Slightly convoluted, because some operating systems will let us
 	    # set a directory, but not a file. These should all work:
-	    mkdir $copy1 or die "Can't mkdir $copy1: $!";
-	    chmod $s_perm, $copy1
-		or die sprintf "Can't chmod %o $copy1: $!", $s_perm;
-	    rmdir $copy1
-		or die sprintf "Can't rmdir $copy1: $!";
+	    mkdir $copyd or die "Can't mkdir $copyd: $!";
+	    chmod $s_perm, $copyd
+		or die sprintf "Can't chmod %o $copyd: $!", $s_perm;
+	    rmdir $copyd
+		or die sprintf "Can't rmdir $copyd: $!";
 	    open my $fh0, '>', $copy1 or die "Can't open $copy1: $!";
 	    close $fh0 or die "Can't close $copy1: $!";
 	    unless (chmod $s_perm, $copy1) {
@@ -341,6 +353,7 @@ SKIP: {
             chmod $c_perm3 => $copy6 or die $!;
 
             open my $fh => "<", $src or die $!;
+            binmode $fh;
 
             copy ($src, $copy1);
             copy ($fh,  $copy2);
@@ -360,12 +373,8 @@ SKIP: {
             is (__$perm2, __$permdef, "Permission bits set correctly");
             is (__$perm4, __$c_perm1, "Permission bits set correctly");
             is (__$perm5, __$c_perm1, "Permission bits set correctly");
-            TODO: {
-                local $TODO = 'Permission bits inconsistent under cygwin'
-                   if $^O eq 'cygwin';
-                is (__$perm3, __$c_perm3, "Permission bits not modified");
-                is (__$perm6, __$c_perm3, "Permission bits not modified");
-            }
+            is (__$perm3, __$c_perm3, "Permission bits not modified");
+            is (__$perm6, __$c_perm3, "Permission bits not modified");
         }
     }
     umask $old_mask or die $!;
@@ -411,7 +420,7 @@ SKIP: {
 	foreach my $right (qw(plain object1 object2)) {
 	    @warnings = ();
 	    $! = 0;
-	    is eval {copy $what{$left}, $what{$right}}, 1, "copy $left $right";
+	    is eval {copy $what{$left}, $what{$right}}, 0, "copy $left $right";
 	    is $@, '', 'No croaking';
 	    is $!, '', 'No system call errors';
 	    is @warnings, 1, 'Exactly 1 warning';
@@ -465,6 +474,8 @@ SKIP: {
 
     open(my $IN, "-|") || exec $^X, '-e', 'print "Hello, world!\n"';
     open(my $OUT, "|-") || exec $^X, '-ne', 'exit(/Hello/ ? 55 : 0)';
+    binmode $IN;
+    binmode $OUT;
 
     ok(copy($IN, $OUT), "copy pipe to another");
     close($OUT);
@@ -472,7 +483,46 @@ SKIP: {
     close($IN);
 }
 
+use File::Temp qw(tempdir);
+use File::Spec;
+
+SKIP: {
+    # RT #111126: File::Copy copy() zeros file when copying a file
+    # into the same directory it is stored in
+
+    my $temp_dir = tempdir( CLEANUP => 1 );
+    my $temp_file = File::Spec->catfile($temp_dir, "somefile");
+
+    open my $fh, ">", $temp_file
+	or skip "Cannot create $temp_file: $!", 2;
+    print $fh "Just some data";
+    close $fh
+	or skip "Cannot close $temp_file: $!", 2;
+
+    my $warn_message = "";
+    local $SIG{__WARN__} = sub { $warn_message .= "@_" };
+    ok(!copy($temp_file, $temp_dir),
+       "Copy of foo/file to foo/ should fail");
+    like($warn_message, qr/^\Q'$temp_file' and '$temp_file'\E are identical.*Copy\.t/i,
+	 "error message should describe the problem");
+    1 while unlink $temp_file;
+}
+
+{
+  open(my $F, '>', "file-$$") or die $!;
+  binmode $F; # for DOSISH platforms
+  printf $F "ok\n";
+  close $F;
+
+  my $buffer = (1024 * 1024 * 2) + 1;
+  is eval {copy "file-$$", "copy-$$", $buffer}, 1,
+    "copy with buffer above normal size";
+}
+
+done_testing();
+
 END {
+    1 while unlink "copy-$$";
     1 while unlink "file-$$";
     1 while unlink "lib/file-$$";
 }

@@ -45,7 +45,9 @@
  *
  */
 
+#define PERL_EXT
 #include "EXTERN.h"
+#define PERL_IN_DL_VMS_XS
 #include "perl.h"
 #include "XSUB.h"
 
@@ -127,7 +129,7 @@ my_find_image_symbol(struct dsc$descriptor_s *imgname,
                      struct dsc$descriptor_s *defspec)
 {
   unsigned long int retsts;
-  VAXC$ESTABLISH(lib$sig_to_ret);
+  VAXC$ESTABLISH((__vms_handler)lib$sig_to_ret);
   retsts = lib$find_image_symbol(imgname,symname,entry,defspec,DL_CASE_SENSITIVE);
   return retsts;
 }
@@ -155,7 +157,7 @@ MODULE = DynaLoader PACKAGE = DynaLoader
 BOOT:
     (void)dl_private_init(aTHX);
 
-void
+SV *
 dl_expandspec(filespec)
     char *	filespec
     CODE:
@@ -176,7 +178,7 @@ dl_expandspec(filespec)
     DLDEBUG(2,PerlIO_printf(Perl_debug_log, "\tSYNCHK sys$parse = %d\n",sts));
     if (!(sts & 1)) {
       dl_set_error(dl_fab.fab$l_sts,dl_fab.fab$l_stv);
-      ST(0) = &PL_sv_undef;
+      RETVAL = &PL_sv_undef;
     }
     else {
       /* Now set up a default spec - everything but the name */
@@ -197,7 +199,7 @@ dl_expandspec(filespec)
       DLDEBUG(2,PerlIO_printf(Perl_debug_log, "\tname/default sys$parse = %d\n",sts));
       if (!(sts & 1)) {
         dl_set_error(dl_fab.fab$l_sts,dl_fab.fab$l_stv);
-        ST(0) = &PL_sv_undef;
+        RETVAL = &PL_sv_undef;
       }
       else {
         /* Now find the actual file */
@@ -205,17 +207,20 @@ dl_expandspec(filespec)
         DLDEBUG(2,PerlIO_printf(Perl_debug_log, "\tsys$search = %d\n",sts));
         if (!(sts & 1)) {
           dl_set_error(dl_fab.fab$l_sts,dl_fab.fab$l_stv);
-          ST(0) = &PL_sv_undef;
+          RETVAL = &PL_sv_undef;
         }
         else {
-          ST(0) = sv_2mortal(newSVpvn(dl_nam.nam$l_rsa,dl_nam.nam$b_rsl));
+          RETVAL = newSVpvn(dl_nam.nam$l_rsa,dl_nam.nam$b_rsl);
           DLDEBUG(1,PerlIO_printf(Perl_debug_log, "\tresult = \\%.*s\\\n",
                             dl_nam.nam$b_rsl,dl_nam.nam$l_rsa));
         }
       }
     }
 
-void
+    OUTPUT:
+      RETVAL
+
+SV *
 dl_load_file(filename, flags=0)
     char *	filename
     int		flags
@@ -292,23 +297,27 @@ dl_load_file(filename, flags=0)
       Safefree(dlptr->name.dsc$a_pointer);
       Safefree(dlptr->defspec.dsc$a_pointer);
       Safefree(dlptr);
-      ST(0) = &PL_sv_undef;
+      RETVAL = &PL_sv_undef;
     }
     else {
-      ST(0) = sv_2mortal(newSViv(PTR2IV(dlptr)));
+      RETVAL = newSViv(PTR2IV(dlptr));
     }
 
+    OUTPUT:
+      RETVAL
 
-void
-dl_find_symbol(librefptr,symname)
+SV *
+dl_find_symbol(librefptr,symname,ign_err=0)
     void *	librefptr
     SV *	symname
-    CODE:
+    int	        ign_err
+    PREINIT:
     struct libref thislib = *((struct libref *)librefptr);
     struct dsc$descriptor_s
       symdsc = {SvCUR(symname),DSC$K_DTYPE_T,DSC$K_CLASS_S,SvPVX(symname)};
     void (*entry)();
     vmssts sts;
+    CODE:
 
     DLDEBUG(1,PerlIO_printf(Perl_debug_log, "dl_find_symbol(%.*s,%.*s):\n",
                       thislib.name.dsc$w_length, thislib.name.dsc$a_pointer,
@@ -319,11 +328,13 @@ dl_find_symbol(librefptr,symname)
     DLDEBUG(2,PerlIO_printf(Perl_debug_log, "\tentry point is %d\n",
                       (unsigned long int) entry));
     if (!(sts & 1)) {
-      dl_set_error(sts,0);
-      ST(0) = &PL_sv_undef;
+      if (!ign_err) dl_set_error(sts,0);
+      RETVAL = &PL_sv_undef;
     }
-    else ST(0) = sv_2mortal(newSViv(PTR2IV(entry)));
+    else RETVAL = newSViv(PTR2IV(entry));
 
+    OUTPUT:
+      RETVAL
 
 void
 dl_undef_symbols()
@@ -332,7 +343,7 @@ dl_undef_symbols()
 
 # These functions should not need changing on any platform:
 
-void
+SV *
 dl_install_xsub(perl_name, symref, filename="$Package")
     char *	perl_name
     void *	symref 
@@ -340,19 +351,21 @@ dl_install_xsub(perl_name, symref, filename="$Package")
     CODE:
     DLDEBUG(2,PerlIO_printf(Perl_debug_log, "dl_install_xsub(name=%s, symref=%x)\n",
         perl_name, symref));
-    ST(0) = sv_2mortal(newRV((SV*)newXS_flags(perl_name,
+    RETVAL = newRV((SV*)newXS_flags(perl_name,
 					      (void(*)(pTHX_ CV *))symref,
 					      filename, NULL,
-					      XS_DYNAMIC_FILENAME)));
+					      XS_DYNAMIC_FILENAME));
 
+    OUTPUT:
+      RETVAL
 
-char *
+SV *
 dl_error()
     CODE:
     dMY_CXT;
-    RETVAL = dl_last_error ;
+    RETVAL = newSVsv(MY_CXT.x_dl_last_error);
     OUTPUT:
-      RETVAL
+    RETVAL
 
 #if defined(USE_ITHREADS)
 
@@ -361,12 +374,23 @@ CLONE(...)
     CODE:
     MY_CXT_CLONE;
 
+    PERL_UNUSED_VAR(items);
+
     /* MY_CXT_CLONE just does a memcpy on the whole structure, so to avoid
      * using Perl variables that belong to another thread, we create our 
      * own for this thread.
      */
-    MY_CXT.x_dl_last_error = newSVpvn("", 0);
+    MY_CXT.x_dl_last_error = newSVpvs("");
     dl_require_symbols = get_av("DynaLoader::dl_require_symbols", GV_ADDMULTI);
+
+    /* Set up the "static" control blocks for dl_expand_filespec() */
+    dl_fab = cc$rms_fab;
+    dl_nam = cc$rms_nam;
+    dl_fab.fab$l_nam = &dl_nam;
+    dl_nam.nam$l_esa = dl_esa;
+    dl_nam.nam$b_ess = sizeof dl_esa;
+    dl_nam.nam$l_rsa = dl_rsa;
+    dl_nam.nam$b_rss = sizeof dl_rsa;
 
 #endif
 

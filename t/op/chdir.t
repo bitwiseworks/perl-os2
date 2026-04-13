@@ -1,36 +1,24 @@
 #!./perl -w
 
 BEGIN {
+    # We really want to know if chdir is working, as the build process will
+    # all go wrong if it is not.  So avoid clearing @INC under miniperl.
+    @INC = () if defined &DynaLoader::boot_DynaLoader;
+
     # We're not going to chdir() into 't' because we don't know if
     # chdir() works!  Instead, we'll hedge our bets and put both
     # possibilities into @INC.
-    @INC = qw(t . lib ../lib);
-    require "test.pl";
-    # Really want to know if chdir is working, as the build process will all go
-    # wrong if it is not.
-    if (is_miniperl() && !eval {require File::Spec::Functions; 1}) {
-	push @INC, qw(dist/Cwd/lib dist/Cwd ../dist/Cwd/lib ../dist/Cwd);
-    }
-    plan(tests => 48);
+    require "./test.pl";
+    set_up_inc(qw(t . lib ../lib));
 }
+
+plan(tests => 2 + 20 + 1 + 1 + 3*8 + 3);
 
 use Config;
+use Errno qw(ENOENT EBADF EINVAL);
+no warnings qw(experimental::builtin); # is_bool
 
 my $IsVMS   = $^O eq 'VMS';
-
-my $vms_unix_rpt = 0;
-my $vms_efs = 0;
-if ($IsVMS) {
-    if (eval 'require VMS::Feature') {
-        $vms_unix_rpt = VMS::Feature::current("filename_unix_report");
-        $vms_efs = VMS::Feature::current("efs_charset");
-    } else {
-        my $unix_rpt = $ENV{'DECC$FILENAME_UNIX_REPORT'} || '';
-        my $efs_charset = $ENV{'DECC$EFS_CHARSET'} || '';
-        $vms_unix_rpt = $unix_rpt =~ /^[ET1]/i; 
-        $vms_efs = $efs_charset =~ /^[ET1]/i; 
-    }
-}
 
 # For an op regression test, I don't want to rely on "use constant" working.
 my $has_fchdir = ($Config{d_fchdir} || "") eq "define";
@@ -42,9 +30,7 @@ use File::Spec::Functions qw(:DEFAULT splitdir rel2abs splitpath);
 # Can't use Cwd::abs_path() because it has different ideas about
 # path separators than File::Spec.
 sub abs_path {
-    my $d = rel2abs(curdir);
-    $d = lc($d) if $^O =~ /^uwin/;
-    $d;
+    return rel2abs(curdir);
 }
 
 my $Cwd = abs_path;
@@ -68,7 +54,7 @@ SKIP: {
 $Cwd = abs_path;
 
 SKIP: {
-    skip("no fchdir", 16) unless $has_fchdir;
+    skip("no fchdir", 20) unless $has_fchdir;
     my $has_dirfd = ($Config{d_dirfd} || $Config{d_dir_dd_fd} || "") eq "define";
     ok(opendir(my $dh, "."), "opendir .");
     ok(open(my $fh, "<", "op"), "open op");
@@ -99,29 +85,29 @@ SKIP: {
     }
     ok(-d "op", "verify that we are back");
 
-    # And now the ambiguous case
-    {
-	no warnings qw<io deprecated>;
-	ok(opendir(H, "op"), "opendir op") or diag $!;
-	ok(open(H, "<", "base"), "open base") or diag $!;
-    }
-    if ($has_dirfd) {
-	ok(chdir(H), "fchdir to op");
-	ok(-f "chdir.t", "verify that we are in 'op'");
-	chdir ".." or die $!;
-    }
-    else {
-	eval { chdir(H); };
-	like($@, qr/^The dirfd function is unimplemented at/,
-	     "dirfd is unimplemented");
-	SKIP: {
-	    skip("dirfd is unimplemented");
-	}
-    }
-    ok(closedir(H), "closedir");
+    ok(open(H, "<", "base"), "open base") or diag $!;
     ok(chdir(H), "fchdir to base");
     ok(-f "cond.t", "verify that we are in 'base'");
-    chdir ".." or die $!;
+    ok(close(H), "close");
+    $! = 0;
+    {
+        my $warn;
+        local $SIG{__WARN__} = sub { $warn = shift };
+        my $r = chdir(H);
+        ok(!$r, "check we can't chdir to closed handle");
+        ok(builtin::is_bool($r), 'chdir returns bool on failure');
+        is(0+$!, EBADF, 'check $! set appropriately');
+        like($warn, qr/on closed filehandle H/, 'like closed');
+        $! = 0;
+    }
+    {
+        my $warn;
+        local $SIG{__WARN__} = sub { $warn = shift };
+        ok(!chdir(NEVEROPENED), "check we can't chdir to never opened handle");
+        is(0+$!, EBADF, 'check $! set appropriately');
+        like($warn, qr/on unopened filehandle NEVEROPENED/, 'like never opened');
+        chdir ".." or die $!;
+    }
 }
 
 SKIP: {
@@ -139,43 +125,35 @@ sub check_env {
 
     # Make sure $ENV{'SYS$LOGIN'} is only honored on VMS.
     if( $key eq 'SYS$LOGIN' && !$IsVMS ) {
-        ok( !chdir(),         "chdir() on $^O ignores only \$ENV{$key} set" );
-        is( abs_path, $Cwd,   '  abs_path() did not change' );
-        pass( "  no need to test SYS\$LOGIN on $^O" ) for 1..7;
+        my $r = chdir();
+        ok( !$r,                  "chdir() on $^O ignores only \$ENV{$key} set" );
+        ok( builtin::is_bool($r), '  and the return value is a bool' );
+        is( abs_path, $Cwd,       '  abs_path() did not change' );
+        pass( "  no need to test SYS\$LOGIN on $^O" ) for 1..5;
     }
     else {
         ok( chdir(),              "chdir() w/ only \$ENV{$key} set" );
         is( abs_path, $ENV{$key}, '  abs_path() agrees' );
-        chdir($Cwd);
+        my $r = chdir($Cwd);
         is( abs_path, $Cwd,       '  and back again' );
+        ok( builtin::is_bool($r), '  and the return value is a bool' );
 
         my $warning = '';
         local $SIG{__WARN__} = sub { $warning .= join '', @_ };
-
-
-        # Check the deprecated chdir(undef) feature.
-#line 64
-        ok( chdir(undef),           "chdir(undef) w/ only \$ENV{$key} set" );
-        is( abs_path, $ENV{$key},   '  abs_path() agrees' );
-        is( $warning,  <<WARNING,   '  got uninit & deprecation warning' );
-Use of uninitialized value in chdir at $0 line 64.
-Use of chdir('') or chdir(undef) as chdir() is deprecated at $0 line 64.
-WARNING
-
-        chdir($Cwd);
-
-        # Ditto chdir('').
-        $warning = '';
-#line 76
-        ok( chdir(''),              "chdir('') w/ only \$ENV{$key} set" );
-        is( abs_path, $ENV{$key},   '  abs_path() agrees' );
-        is( $warning,  <<WARNING,   '  got deprecation warning' );
-Use of chdir('') or chdir(undef) as chdir() is deprecated at $0 line 76.
-WARNING
-
-        chdir($Cwd);
+        $! = 0;
+        $r = chdir('');
+        ok(!$r, "chdir('') no longer implies chdir()");
+        ok(builtin::is_bool($r), 'chdir returns bool on failure');
+        is($!+0, ENOENT, 'check $! set appropriately');
+        is($warning, '', 'should no longer warn about deprecation');
     }
 }
+
+fresh_perl_is(<<'EOP', '', { stderr => 1 }, "check stack handling");
+for $x (map $_+1, 1 .. 100) {
+  map chdir, 1 .. $x;
+}
+EOP
 
 my %Saved_Env = ();
 sub clean_env {
@@ -184,7 +162,6 @@ sub clean_env {
 
         # Can't actually delete SYS$ stuff on VMS.
         next if $IsVMS && $env eq 'SYS$LOGIN';
-        next if $IsVMS && $env eq 'HOME' && !$Config{'d_setenv'};
 
 	# On VMS, %ENV is many layered.
 	delete $ENV{$env} while exists $ENV{$env};
@@ -197,8 +174,6 @@ sub clean_env {
 }
 
 END {
-    no warnings 'uninitialized';
-
     # Restore the environment for VMS (and doesn't hurt for anyone else)
     @ENV{@magic_envs} = @Saved_Env{@magic_envs};
 
@@ -209,21 +184,21 @@ END {
 
 
 foreach my $key (@magic_envs) {
-    # We're going to be using undefs a lot here.
-    no warnings 'uninitialized';
-
     clean_env;
-    $ENV{$key} = catdir $Cwd, ($IsVMS ? 'OP' : 'op');
+    $ENV{$key} = catdir $Cwd, 'op';
 
     check_env($key);
 }
 
 {
     clean_env;
-    if ($IsVMS && !$Config{'d_setenv'}) {
-        pass("Can't reset HOME, so chdir() test meaningless");
-    } else {
+  SKIP:
+    {
+        $IsVMS
+          and skip "Can't delete SYS\$LOGIN, so chdir() test meaningless", 2;
+        $! = 0;
         ok( !chdir(),                   'chdir() w/o any ENV set' );
+        is( $!+0, EINVAL,               'check $! set to EINVAL');
     }
     is( abs_path, $Cwd,             '  abs_path() agrees' );
 }

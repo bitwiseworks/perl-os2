@@ -1,17 +1,18 @@
 #!./perl
 
 BEGIN {
-    chdir 't';
-    @INC = '../lib';
+    chdir 't' if -d 't';
     require './test.pl';
+    set_up_inc('../lib');
 }
 
-plan tests => 30;
+plan tests => 36;
 
 # [perl #19566]: sv_gets writes directly to its argument via
 # TARG. Test that we respect SvREADONLY.
-eval { for (\2) { $_ = <FH> } };
-like($@, 'Modification of a read-only value attempted', '[perl #19566]');
+use constant roref => \2;
+eval { for (roref) { $_ = <FH> } };
+like($@, qr/Modification of a read-only value attempted/, '[perl #19566]');
 
 # [perl #21628]
 {
@@ -62,7 +63,7 @@ foreach my $l (1, 21) {
 
 use strict;
 
-open F, '.' and sysread F, $_, 1;
+open F, '.' and binmode F and sysread F, $_, 1;
 my $err = $! + 0;
 close F;
 
@@ -147,6 +148,9 @@ SKIP: {
 	skip( 2, 'The pipe function is unimplemented' );
     }
 
+    binmode $out;
+    binmode $in;
+
     # Make the pipe autoflushing
     {
 	my $old_fh = select $out;
@@ -211,7 +215,7 @@ SKIP: {
     my $line = 'ascii';
     my ( $in, $out );
     pipe $in, $out;
-    binmode $out, ':utf8';
+    binmode $out;
     binmode $in,  ':utf8';
     syswrite $out, "...\n";
     $line .= readline $in;
@@ -223,9 +227,11 @@ SKIP: {
     my $line = "\x{2080} utf8";;
     my ( $in, $out );
     pipe $in, $out;
-    binmode $out, ':utf8';
+    binmode $out;
     binmode $in,  ':utf8';
-    syswrite $out, "\x{2080}...\n";
+    my $outdata = "\x{2080}...\n";
+    utf8::encode($outdata);
+    syswrite $out, $outdata;
     $line .= readline $in;
 
     is( $line, "\x{2080} utf8\x{2080}...\n", 'appending from utf to utf8' );
@@ -268,6 +274,35 @@ $f{g} = *foom; # since PL_last_in_gv is null, this should have no effect
 is tell, -1, 'unglobbery of last gv nullifies PL_last_in_gv';
 readline *{$f{g}};
 is tell, tell *foom, 'readline *$glob_copy sets PL_last_in_gv';
+
+# PL_last_in_gv should not point to &PL_sv_undef, either.
+# This used to fail an assertion or return a scalar ref.
+readline undef;
+is ${^LAST_FH}, undef, '${^LAST_FH} after readline undef';
+
+{
+    my $w;
+    local($SIG{__WARN__},$^W) = (sub { $w .= shift }, 1);
+    *x=<y>;
+    like $w, qr/^readline\(\) on unopened filehandle y at .*\n(?x:
+                )Undefined value assigned to typeglob at .*\n\z/,
+        '[perl #123790] *x=<y> used to fail an assertion';
+}
+
+SKIP:
+{
+    skip_without_dynamic_extension("IO", 4);
+    my $tmpfile = tempfile();
+    open my $fh, ">", $tmpfile
+        or die "Cannot open $tmpfile: $!";
+    my @layers = PerlIO::get_layers($fh);
+    skip "fgetc doesn't set error flag on failure on solaris likes", 4
+        if $^O eq 'solaris' && $layers[-1] eq 'stdio';
+    ok(!$fh->error, "no error before we try to read");
+    ok(!<$fh>, "fail to readline file opened for write");
+    ok($fh->error, "error after trying to readline file opened for write");
+    ok(!close($fh), "closing the file should fail");
+}
 
 __DATA__
 moo

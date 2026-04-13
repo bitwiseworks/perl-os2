@@ -29,18 +29,18 @@ is( $pkg_ref, $exp_ref, '%Pod::Functions::Type_Description exported' );
 is( $pkg_ref, $exp_ref, '@Pod::Functions::Type_Order exported' );
 
 # Check @Type_Order
-my @catagories = qw(
+my @categories = qw(
     String  Regexp  Math   ARRAY  LIST      HASH    I/O
     Binary  File    Flow   Namespace Misc    Process
     Modules Objects Socket SysV   User      Network Time
 );
 
-ok( eq_array( \@Type_Order, \@catagories ),
+is_deeply( \@Type_Order, \@categories,
     '@Type_Order' );
 
 my @cat_keys = grep exists $Type_Description{ $_ } => @Type_Order;
 
-ok( eq_array( \@cat_keys, \@catagories ),
+is_deeply( \@cat_keys, \@categories,
     'keys() %Type_Description' );
 
 SKIP: {
@@ -91,7 +91,8 @@ Functions for real @ARRAYs:
      each, keys, pop, push, shift, splice, unshift, values
 
 Functions for list data:
-     grep, join, map, qw/STRING/, reverse, sort, unpack
+     all, any, grep, join, map, qw/STRING/, reverse, sort,
+     unpack
 
 Functions for real %HASHes:
      delete, each, exists, keys, values
@@ -110,15 +111,16 @@ Functions for fixed-length data or records:
 Functions for filehandles, files, or directories:
      -X, chdir, chmod, chown, chroot, fcntl, glob, ioctl, link,
      lstat, mkdir, open, opendir, readlink, rename, rmdir,
-     stat, symlink, sysopen, umask, unlink, utime
+     select, stat, symlink, sysopen, umask, unlink, utime
 
 Keywords related to the control flow of your Perl program:
      __FILE__, __LINE__, __PACKAGE__, __SUB__, break, caller,
      continue, die, do, dump, eval, evalbytes, exit, goto,
-     last, next, redo, return, sub, wantarray
+     last, method, next, redo, return, sub, wantarray
 
 Keywords related to scoping:
-     caller, import, local, my, our, package, state, use
+     caller, class, field, import, local, my, our, package,
+     state, use
 
 Miscellaneous functions:
      defined, formline, lock, prototype, reset, scalar, undef
@@ -132,8 +134,8 @@ Keywords related to Perl modules:
      do, import, no, package, require, use
 
 Keywords related to classes and object-orientation:
-     bless, dbmclose, dbmopen, package, ref, tie, tied, untie,
-     use
+     __CLASS__, bless, class, dbmclose, dbmopen, field, method,
+     package, ref, tie, tied, untie, use
 
 Low-level socket functions:
      accept, bind, connect, getpeername, getsockname,

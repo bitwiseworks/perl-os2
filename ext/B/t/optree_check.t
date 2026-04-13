@@ -7,10 +7,6 @@ BEGIN {
         print "1..0 # Skip -- Perl configured without B module\n";
         exit 0;
     }
-    if (!$Config::Config{useperlio}) {
-        print "1..0 # Skip -- need perlio to walk the optree\n";
-        exit 0;
-    }
 }
 
 use OptreeCheck;
@@ -26,7 +22,12 @@ cmdline args in 'standard' way across all clients of OptreeCheck.
 
 =cut
 
-plan tests => 5 + 15 + 12 + 16 * $gOpts{selftest};	# pass()s + $#tests
+plan tests =>     11 # REGEX TEST HARNESS SELFTEST
+		+  3 # TEST FATAL ERRS
+		+ 11 # TEST -e \$srcCode
+		+  5 # REFTEXT FIXUP TESTS
+		+  5 # CANONICAL B::Concise EXAMPLE
+		+ 16 * $gOpts{selftest}; # XXX I don't understand this - DAPM
 
 pass("REGEX TEST HARNESS SELFTEST");
 
@@ -144,11 +145,11 @@ checkOptree ( name	=> 'fixup nextstate (in reftext)',
 	      strip_open_hints => 1,
 	      expect	=> <<'EOT_EOT', expect_nt => <<'EONT_EONT');
 # 1  <;> nextstate( NOTE THAT THIS CAN BE ANYTHING ) v:>,<,%
-# 2  <0> padsv[$a:54,55] M/LVINTRO
+# 2  <0> padsv[$a:54,55] sM/LVINTRO
 # 3  <1> leavesub[1 ref] K/REFC,1
 EOT_EOT
 # 1  <;> nextstate(main 54 optree_concise.t:84) v:>,<,%
-# 2  <0> padsv[$a:54,55] M/LVINTRO
+# 2  <0> padsv[$a:54,55] sM/LVINTRO
 # 3  <1> leavesub[1 ref] K/REFC,1
 EONT_EONT
 
@@ -159,11 +160,11 @@ checkOptree ( name	=> 'fixup opcode args',
 	      strip_open_hints => 1,
 	      expect	=> <<'EOT_EOT', expect_nt => <<'EONT_EONT');
 # 1  <;> nextstate(main 56 optree_concise.t:96) v:>,<,%
-# 2  <0> padsv[$a:56,57] M/LVINTRO
+# 2  <0> padsv[$a:56,57] sM/LVINTRO
 # 3  <1> leavesub[1 ref] K/REFC,1
 EOT_EOT
 # 1  <;> nextstate(main 56 optree_concise.t:96) v:>,<,%
-# 2  <0> padsv[$a:56,57] M/LVINTRO
+# 2  <0> padsv[$a:56,57] sM/LVINTRO
 # 3  <1> leavesub[1 ref] K/REFC,1
 EONT_EONT
 

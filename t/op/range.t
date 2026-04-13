@@ -2,14 +2,14 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = ('../lib', '.');
+    require './test.pl';
+    set_up_inc('../lib', '.');
 }   
 # Avoid using eq_array below as it uses .. internally.
-require 'test.pl';
 
 use Config;
 
-plan (141);
+plan (162);
 
 is(join(':',1..5), '1:2:3:4:5');
 
@@ -41,6 +41,20 @@ is($x, 'abcdefghijklmnopqrstuvwxyz');
 
 @x = 'A'..'ZZ';
 is (scalar @x, 27 * 26);
+
+foreach (0, 1) {
+    use feature 'unicode_strings';
+    $s = "a";
+    $e = "\xFF";
+    utf8::upgrade($e) if $_;
+    @x = $s .. $e;
+    is (scalar @x, 26, "list-context range with rhs 0xFF, utf8=$_");
+    @y = ();
+    foreach ($s .. $e) {
+        push @y, $_;
+    }
+    is(join(",", @y), join(",", @x), "foreach range with rhs 0xFF, utf8=$_");
+}
 
 @x = '09' .. '08';  # should produce '09', '10',... '99' (strange but true)
 is(join(",", @x), join(",", map {sprintf "%02d",$_} 9..99));
@@ -97,6 +111,27 @@ is(join(":","-4".."0")     , "-4:-3:-2:-1:0");
 is(join(":","-4".."-0")    , "-4:-3:-2:-1:0");
 is(join(":","-4\n".."0\n") , "-4:-3:-2:-1:0");
 is(join(":","-4\n".."-0\n"), "-4:-3:-2:-1:0");
+
+# [#133695] "0".."-1" should be the same as 0..-1
+is(join(":","-2".."-1")    , "-2:-1");
+is(join(":","-1".."-1")    , "-1");
+is(join(":","0".."-1")     , "");
+is(join(":","1".."-1")     , "");
+
+# these test the statements made in the documentation
+# regarding the rules of string ranges
+is(join(":","-2".."2"),      join(":",-2..2));
+is(join(":","2.18".."3.14"), "2:3");
+is(join(":","01".."04"),     "01:02:03:04");
+is(join(":","00".."-1"),     "00:01:02:03:04:05:06:07:08:09:10:11:12:13:14:15:16:17:18:19:20:21:22:23:24:25:26:27:28:29:30:31:32:33:34:35:36:37:38:39:40:41:42:43:44:45:46:47:48:49:50:51:52:53:54:55:56:57:58:59:60:61:62:63:64:65:66:67:68:69:70:71:72:73:74:75:76:77:78:79:80:81:82:83:84:85:86:87:88:89:90:91:92:93:94:95:96:97:98:99");
+is(join(":","00".."31"),     "00:01:02:03:04:05:06:07:08:09:10:11:12:13:14:15:16:17:18:19:20:21:22:23:24:25:26:27:28:29:30:31");
+is(join(":","ax".."az"),     "ax:ay:az");
+is(join(":","*x".."az"),     "*x");
+is(join(":","A".."Z"),       "A:B:C:D:E:F:G:H:I:J:K:L:M:N:O:P:Q:R:S:T:U:V:W:X:Y:Z");
+is(join(":", 0..9,"a".."f"), "0:1:2:3:4:5:6:7:8:9:a:b:c:d:e:f");
+is(join(":","a".."--"),      join(":","a".."zz"));
+is(join(":","0".."xx"),      "0:1:2:3:4:5:6:7:8:9:10:11:12:13:14:15:16:17:18:19:20:21:22:23:24:25:26:27:28:29:30:31:32:33:34:35:36:37:38:39:40:41:42:43:44:45:46:47:48:49:50:51:52:53:54:55:56:57:58:59:60:61:62:63:64:65:66:67:68:69:70:71:72:73:74:75:76:77:78:79:80:81:82:83:84:85:86:87:88:89:90:91:92:93:94:95:96:97:98:99");
+is(join(":","aaa".."--"),    "");
 
 # undef should be treated as 0 for numerical range
 is(join(":",undef..2), '0:1:2');
@@ -390,17 +425,48 @@ is(stores($x), 0);
 
 is( ( join ' ', map { join '', map ++$_, ($x=1)..4 } 1..2 ), '2345 2345',
     'modifiable variable num range' );
-is( ( join ' ', map { join '', map ++$_, 1..4      } 1..2 ), '2345 3456',
-    'modifiable const num range' );  # Unresolved bug RT#3105
+is( ( join ' ', map { join '', map ++$_, 1..4      } 1..2 ), '2345 2345',
+    'modifiable const num range' );  # RT#3105
 $s = ''; for (1..2) { for (1..4) { $s .= ++$_ } $s.=' ' if $_==1; }
 is( $s, '2345 2345','modifiable num counting loop counter' );
 
 
 is( ( join ' ', map { join '', map ++$_, ($x='a')..'d' } 1..2 ), 'bcde bcde',
     'modifiable variable alpha range' );
-is( ( join ' ', map { join '', map ++$_, 'a'..'d'      } 1..2 ), 'bcde cdef',
-    'modifiable const alpha range' );  # Unresolved bug RT#3105
+is( ( join ' ', map { join '', map ++$_, 'a'..'d'      } 1..2 ), 'bcde bcde',
+    'modifiable const alpha range' );  # RT#3105
 $s = ''; for (1..2) { for ('a'..'d') { $s .= ++$_ } $s.=' ' if $_==1; }
 is( $s, 'bcde bcde','modifiable alpha counting loop counter' );
 
-# EOF
+# RT #130841
+# generating an extreme range triggered a croak, which if caught,
+# left the temps stack small but with a very large PL_tmps_max
+
+SKIP: {
+    skip 'mem wrap check disabled' unless $Config{usemallocwrap};
+    fresh_perl_like(<<'EOF', qr/\Aok 1 ok 2\Z/, {}, "RT #130841");
+my $max_iv = (~0 >> 1);
+eval {
+    my @range = 1..($max_iv - 1);
+};
+if ($@ =~ /panic: memory wrap|Out of memory/) {
+    print "ok 1";
+}
+else {
+    print "unexpected err status: [$@]";
+}
+
+# create and push lots of temps
+my $max = 10_000;
+my @ints = map $_+1, 0..($max-1);
+my $sum = 0;
+$sum += $_ for @ints;
+my $exp = $max*($max+1)/2;
+if ($sum == $exp) {
+    print " ok 2";
+}
+else {
+    print " unexpected sum: [$sum]; expected: [$exp]";
+}
+EOF
+}

@@ -1,7 +1,10 @@
 #!/usr/bin/perl
 
+use strict;
+use warnings;
+
 $| = 1;
-my $file = "tf$$.txt";
+my $file = "tf01-$$.txt";
 1 while unlink $file;
 
 print "1..75\n";
@@ -10,6 +13,7 @@ my $N = 1;
 use Tie::File;
 print "ok $N\n"; $N++;
 
+my @a;
 my $o = tie @a, 'Tie::File', $file, autochomp => 0, autodefer => 0;
 print $o ? "ok $N\n" : "not ok $N\n";
 $N++;
@@ -119,7 +123,7 @@ sub check_contents {
   my $x = join $:, @c, '';
   local *FH = $o->{fh};
   seek FH, 0, SEEK_SET;
-#  my $open = open FH, "< $file";
+#  my $open = open FH, "<", $file;
   my $a;
   { local $/; $a = <FH> }
   $a = "" unless defined $a;

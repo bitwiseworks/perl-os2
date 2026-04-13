@@ -54,10 +54,6 @@ else
 fi
 
 #emxpath="`dirname $libemx`"
-#if test ! -d "$emxpath"; then 
-#  emxpath="`./UU/loc . /emx c:/emx d:/emx e:/emx f:/emx g:/emx h:/emx /emx`"
-#fi
-#emxpath="`which gcc.exe`"
 emxpath="`./UU/loc gcc.exe /@unixroot/usr/bin $trypath`"
 emxpath="`dirname $emxpath`"
 emxpath="`dirname $emxpath`"
@@ -139,7 +135,6 @@ ccflags="-DDOSISH -DOS2=2 -DEMBED -I."
 use_clib='libc_dll'
 usedl='define'
 
-
 # indented to miss config.sh
   _ar="$ar"
 
@@ -148,7 +143,6 @@ usedl='define'
 plibext="$plibext"
 # plibext is not needed anymore.  Just directly set $libperl.
 libperl="libperl${plibext}"
-
 
 libc="$libemx/$use_clib$lib_ext"
 
@@ -220,7 +214,6 @@ d_getprior='define'
 d_setprior='define'
 d_usleep='define'
 d_usleepproto='define'
-
 d_link='undef'
 dont_use_nlink='define'
 # no posix (aka hard) links for us!
@@ -373,7 +366,7 @@ esac
 cat > UU/usethreads.cbu <<'EOCBU'
 case "$usethreads" in
 $define|true|[yY]*)
-	ccflags="$ccflags -DUSE_THREADS"
+        ccflags="$ccflags -DUSE_THREADS"
         cppflags="$cppflags -DUSE_THREADS"  # Do we really need to set this?
 	;;
 esac

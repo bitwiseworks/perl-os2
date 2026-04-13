@@ -7,6 +7,7 @@ BEGIN {
 }
 
 use strict;
+use warnings;
 use File::Spec;
 use POSIX;
 
@@ -67,8 +68,15 @@ sub _check_and_report {
 	like($return_val, qr/\A(?:-?[1-9][0-9]*|0 but true)\z/,
 	     'the returned value should be a signed integer');
     } else {
-	cmp_ok($errno, '==', 0, 'errno should be 0 as before the call')
-	    or diag("\$!: $errno");
+      SKIP:
+	{
+	    # POSIX specifies EINVAL is returned if the f?pathconf()
+	    # isn't implemented for the specific path
+	    skip "$description not implemented for this path", 1
+		if $errno == EINVAL && $description =~ /pathconf/;
+	    cmp_ok($errno, '==', 0, 'errno should be 0 as before the call')
+		or diag("\$!: $errno");
+	}
     }
 }
 
@@ -79,8 +87,11 @@ SKIP: {
 	  2 * @path_consts;
 
     for my $constant (@path_consts) {
-	_check_and_report(sub { fpathconf($fd, shift) }, $constant,
+        SKIP: {
+            skip "pathconf($constant) hangs on Android", 2 if $constant eq '_PC_LINK_MAX' && $^O =~ /android/;
+            _check_and_report(sub { fpathconf($fd, shift) }, $constant,
 			  "calling fpathconf($fd, $constant)");
+        }
     }
     
     POSIX::close($fd);
@@ -88,8 +99,11 @@ SKIP: {
 
 # testing pathconf() on a non-terminal file
 for my $constant (@path_consts) {
+   SKIP: {
+      skip "pathconf($constant) hangs on Android", 2 if $constant eq '_PC_LINK_MAX' && $^O =~ /android/;
     _check_and_report(sub { pathconf($testdir, shift) }, $constant,
 		      "calling pathconf('$testdir', $constant)");
+   }
 }
 
 SKIP: {
@@ -97,12 +111,12 @@ SKIP: {
 
     -c $TTY
 	or skip("$TTY not a character file", $n);
-    open(TTY, $TTY)
+    open(my $LEXTTY, '<', $TTY)
 	or skip("failed to open $TTY: $!", $n);
-    -t TTY
-	or skip("TTY ($TTY) not a terminal file", $n);
+    -t $LEXTTY
+	or skip("$LEXTTY ($TTY) not a terminal file", $n);
 
-    my $fd = fileno(TTY);
+    my $fd = fileno($LEXTTY);
 
     # testing fpathconf() on a terminal file
     for my $constant (@path_consts_terminal) {
@@ -110,7 +124,7 @@ SKIP: {
 			  "calling fpathconf($fd, $constant) ($TTY)");
     }
     
-    close($fd);
+    close($LEXTTY);
     # testing pathconf() on a terminal file
     for my $constant (@path_consts_terminal) {
 	_check_and_report(sub { pathconf($TTY, shift) }, $constant,
@@ -144,7 +158,9 @@ SKIP: {
 }
 
 END {
-    1 while unlink($fifo);
+    if ($fifo) {
+        1 while unlink($fifo);
+    }
 }
 
 SKIP: {

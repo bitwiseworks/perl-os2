@@ -2,8 +2,8 @@
 
 use FileCache;
 
-use vars qw(@files);
-BEGIN { @files = qw(foo bar baz quux Foo_Bar) }
+our @files;
+BEGIN { @files = map { "open_$_" } qw(foo bar baz quux Foo_Bar) }
 END   { 1 while unlink @files }
 
 use Test::More tests => 1;

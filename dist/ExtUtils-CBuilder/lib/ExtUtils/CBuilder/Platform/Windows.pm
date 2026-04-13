@@ -1,5 +1,4 @@
 package ExtUtils::CBuilder::Platform::Windows;
-
 use strict;
 use warnings;
 
@@ -9,9 +8,8 @@ use File::Spec;
 use ExtUtils::CBuilder::Base;
 use IO::File;
 
-use vars qw($VERSION @ISA);
-$VERSION = '0.280206';
-@ISA = qw(ExtUtils::CBuilder::Base);
+our $VERSION = '0.280242'; # VERSION
+our @ISA = qw(ExtUtils::CBuilder::Base);
 
 =begin comment
 
@@ -53,12 +51,28 @@ sub _compiler_type {
 	  : 'GCC');
 }
 
+# native quoting, not shell quoting
+sub quote_literal {
+  my ($self, $string) = @_;
+
+  # some of these characters don't need to be quoted for "native" quoting, but
+  # quote them anyway so they are more likely to make it through cmd.exe
+  if (length $string && $string !~ /[ \t\n\x0b"|<>%]/) {
+    return $string;
+  }
+
+  $string =~ s{(\\*)(?="|\z)}{$1$1}g;
+  $string =~ s{"}{\\"}g;
+
+  return qq{"$string"};
+}
+
 sub split_like_shell {
   # Since Windows will pass the whole command string (not an argument
   # array) to the target program and make the program parse it itself,
   # we don't actually need to do any processing here.
   (my $self, local $_) = @_;
-  
+
   return @$_ if defined() && UNIVERSAL::isa($_, 'ARRAY');
   return unless defined() && length();
   return ($_);
@@ -67,17 +81,22 @@ sub split_like_shell {
 sub do_system {
   # See above
   my $self = shift;
-  my $cmd = join(" ",
-		 grep length,
-		 map {$a=$_;$a=~s/\t/ /g;$a=~s/^\s+|\s+$//;$a}
-		 grep defined, @_);
+  my $cmd = join ' ',
+    grep length,
+    map {$a=$_;$a=~s/\t/ /g;$a=~s/^\s+|\s+$//;$a}
+    grep defined, @_;
+
+  if (!$self->{quiet}) {
+    print $cmd . "\n";
+  }
+  local $self->{quiet} = 1;
   return $self->SUPER::do_system($cmd);
 }
 
 sub arg_defines {
   my ($self, %args) = @_;
   s/"/\\"/g foreach values %args;
-  return map qq{"-D$_=$args{$_}"}, keys %args;
+  return map qq{"-D$_=$args{$_}"}, sort keys %args;
 }
 
 sub compile {
@@ -86,7 +105,7 @@ sub compile {
 
   die "Missing 'source' argument to compile()" unless defined $args{source};
 
-  $args{include_dirs} = [ $args{include_dirs} ] 
+  $args{include_dirs} = [ $args{include_dirs} ]
     if exists($args{include_dirs}) && ref($args{include_dirs}) ne "ARRAY";
 
   my ($basename, $srcdir) =
@@ -152,7 +171,7 @@ sub link {
   # if running in perl source tree, look for libs there, not installed
   my $lddlflags = $cf->{lddlflags};
   my $perl_src = $self->perl_src();
-  $lddlflags =~ s/\Q$cf->{archlibexp}\E[\\\/]CORE/$perl_src/ if $perl_src;
+  $lddlflags =~ s{\Q$cf->{archlibexp}\E[\\/]CORE}{$perl_src/lib/CORE} if $perl_src;
 
   my %spec = (
     srcdir        => $to,
@@ -179,8 +198,7 @@ sub link {
 
   $spec{output}    ||= File::Spec->catfile( $spec{builddir},
                                             $spec{basename}  . '.'.$cf->{dlext}   );
-  $spec{manifest}  ||= File::Spec->catfile( $spec{builddir},
-                                            $spec{basename}  . '.'.$cf->{dlext}.'.manifest');
+  $spec{manifest}  ||= $spec{output} . '.manifest';
   $spec{implib}    ||= File::Spec->catfile( $spec{builddir},
                                             $spec{basename}  . $cf->{lib_ext} );
   $spec{explib}    ||= File::Spec->catfile( $spec{builddir},
@@ -213,13 +231,14 @@ sub link {
 
   (my $def_base = $spec{def_file}) =~ tr/'"//d;
   $def_base =~ s/\.def$//;
-  $self->prelink( dl_name => $args{module_name},
+  $self->prelink( %args,
+                  dl_name => $args{module_name},
                   dl_file => $def_base,
                   dl_base => $spec{basename} );
 
   my @cmds = $self->format_linker_cmd(%spec);
   while ( my $cmd = shift @cmds ) {
-    $self->do_system( @$cmd );
+    $self->do_system( @$cmd ) or die "error building $output from @objects"
   }
 
   $spec{output} =~ tr/'"//d;

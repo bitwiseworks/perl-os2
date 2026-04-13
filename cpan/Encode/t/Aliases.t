@@ -5,7 +5,7 @@ BEGIN {
     chdir 't';
     unshift @INC, '../lib';
     }
-    require Config; import Config;
+    require Config; Config->import();
     if ($Config{'extensions'} !~ /\bEncode\b/) {
     print "1..0 # Skip: Encode was not built\n";
         exit 0;
@@ -42,6 +42,7 @@ sub init_a2c{
         'arabic'   => 'iso-8859-6',
         'greek'    => 'iso-8859-7',
         'hebrew'   => 'iso-8859-8',
+        'iso-8859-8-I' => 'iso-8859-8',
         'thai'     => 'iso-8859-11',
         'tis620'   => 'iso-8859-11',
         'tis-620'   => 'iso-8859-11',
@@ -81,6 +82,8 @@ sub init_a2c{
         'jis0208-raw'   => $ON_EBCDIC ? '' : 'jis0208-raw',
         'jis0212-raw'   => $ON_EBCDIC ? '' : 'jis0212-raw',
         'ksc5601-raw'   => $ON_EBCDIC ? '' : 'ksc5601-raw',
+        'cp65000' => 'UTF-7',
+        'cp65001' => 'utf-8-strict',
        );
 
     for my $i (1..11,13..16){
@@ -157,7 +160,7 @@ define_alias( sub {
     return "iso-8859-2"     if $enc =~ /hebrew/i;
     return "does-not-exist" if $enc =~ /arabic/i;  # should then use other override alias
     return "utf-8"          if $enc =~ /eight/i;
-    return;
+    return "unknown";
 });
 
 print "# alias test with alias overrides\n";

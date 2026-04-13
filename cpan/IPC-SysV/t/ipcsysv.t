@@ -1,12 +1,6 @@
 ################################################################################
 #
-#  $Revision: 15 $
-#  $Author: mhx $
-#  $Date: 2010/03/07 16:53:32 +0100 $
-#
-################################################################################
-#
-#  Version 2.x, Copyright (C) 2007-2010, Marcus Holland-Moritz <mhx@cpan.org>.
+#  Version 2.x, Copyright (C) 2007-2013, Marcus Holland-Moritz <mhx@cpan.org>.
 #  Version 1.x, Copyright (C) 1999, Graham Barr <gbarr@pobox.com>.
 #
 #  This program is free software; you can redistribute it and/or
@@ -14,9 +8,13 @@
 #
 ################################################################################
 
+use strict;
+use warnings;
+
+our %Config;
 BEGIN {
-  require Test::More; import Test::More;
-  require Config; import Config;
+  require Test::More; Test::More->import;
+  require Config; Config->import;
 
   if ($ENV{'PERL_CORE'} && $Config{'extensions'} !~ m[\bIPC/SysV\b]) {
     plan(skip_all => 'IPC::SysV was not built');
@@ -30,13 +28,12 @@ elsif ($Config{'d_msg'} ne 'define') {
   plan(skip_all => '$Config{d_msg} undefined');
 }
 
-plan(tests => 38);
+plan(tests => 39);
 
 # These constants are common to all tests.
 # Later the sem* tests will import more for themselves.
 
 use IPC::SysV qw(IPC_PRIVATE IPC_NOWAIT IPC_STAT IPC_RMID S_IRWXU);
-use strict;
 
 {
   my $did_diag = 0;
@@ -272,7 +269,7 @@ SKIP: {
 }
 
 SKIP: {
-  skip('lacking d_shm', 10) unless
+  skip('lacking d_shm', 11) unless
       $Config{'d_shm'} eq 'define';
 
   use IPC::SysV qw(shmat shmdt memread memwrite ftok);
@@ -281,7 +278,7 @@ SKIP: {
 
   # Very first time called after machine is booted value may be 0 
   unless (defined $shm && $shm >= 0) {
-    skip(skip_or_die('shmget', $!), 10);
+    skip(skip_or_die('shmget', $!), 11);
   }
 
   pass("shm acquire");
@@ -303,6 +300,8 @@ SKIP: {
   ok(memwrite($addr, pack("N", 0xbadc0de5), 0, 4), 'memwrite(0xbadc0de5)');
 
   is(unpack("N", unpack("P4", $addr)), 0xbadc0de5, 'read modified shm by addr');
+
+  is(shmat(-1, undef, 0), undef, 'shmat illegal id fails');
 
   ok(defined shmdt($addr), 'shmdt');
 }

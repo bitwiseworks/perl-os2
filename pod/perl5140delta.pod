@@ -113,7 +113,7 @@ as the latter returns a single code point.
 
 See L<charnames> for details on all these changes.
 
-=head3 New warnings categories for problematic (non-)Unicode code points.
+=head3 New warnings categories for problematic (non-)Unicode code points
 
 Three new warnings subcategories of "utf8" have been added.  These
 allow you to turn off some "utf8" warnings, while allowing
@@ -723,7 +723,7 @@ The C<*$glob> on the second line returns a new immutable glob.  That new
 glob is made an alias to C<*bar>.  Then it is discarded.  So the second
 assignment has no effect.
 
-See L<http://rt.perl.org/rt3/Public/Bug/Display.html?id=77810> for
+See L<https://github.com/Perl/perl5/issues/10625> for
 more detail.
 
 =head3 Magic variables outside the main package
@@ -1022,7 +1022,7 @@ L<Unicode::Casing>, which provides improved functionality.
 The following module will be removed from the core distribution in a
 future release, and should be installed from CPAN instead.  Distributions
 on CPAN that require this should add it to their prerequisites.  The
-core version of these module now issues a deprecation warning.
+core version of this module now issues a deprecation warning.
 
 If you ship a packaged version of Perl, either alone or as part of a
 larger system, then you should carefully consider the repercussions of
@@ -1085,7 +1085,7 @@ the regex to utf8 is necessary but this isn't known when the compilation begins.
 =head2 String appending is 100 times faster
 
 When doing a lot of string appending, perls built to use the system's
-C<malloc> could end up allocating a lot more memory than needed in a
+C<malloc> could end up allocating a lot more memory than needed in an
 inefficient way.
 
 C<sv_grow>, the function used to allocate more memory if necessary
@@ -1210,7 +1210,7 @@ generation task.
 
 L<CPAN::Meta> version 2.110440 has been added as a dual-life module.  It
 provides a standard library to read, interpret and write CPAN distribution
-metadata files (like F<META.json> and F<META.yml)> that describe a
+metadata files (like F<META.json> and F<META.yml>) that describe a
 distribution, its contents, and the requirements for building it and
 installing it.  The latest CPAN distribution metadata specification is
 included as L<CPAN::Meta::Spec> and notes on changes in the specification
@@ -2461,7 +2461,7 @@ parser's API in a detectable way.
 
 =item refcnt: fd %d%s
 
-This new error only occurs if a internal consistency check fails when a
+This new error only occurs if an internal consistency check fails when a
 pipe is about to be closed.
 
 =item Regexp modifier "/%c" may not appear twice
@@ -4441,7 +4441,7 @@ take a block as their first argument, like
 
     foo { ... $_ ...} list
 
-See also: L<http://rt.perl.org/rt3/Public/Bug/Display.html?id=67694>
+See also: L<https://github.com/Perl/perl5/issues/9798>
 
 =item *
 

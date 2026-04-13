@@ -14,6 +14,7 @@
 #endif
 
 #define  WIN32_LEAN_AND_MEAN	/* Tell windows.h to skip much */
+#include <wchar.h>
 #include <windows.h>
 #include <winioctl.h>
 
@@ -148,7 +149,7 @@ CreateFileA( sPath, uAccess, uShare, pSecAttr, uCreate, uFlags, hModel )
 	HANDLE	hModel
     CODE:
 	RETVAL= CreateFileA( sPath, uAccess, uShare,
-	  pSecAttr, uCreate, uFlags, hModel );
+	  (LPSECURITY_ATTRIBUTES)pSecAttr, uCreate, uFlags, hModel );
 	if(  INVALID_HANDLE_VALUE == RETVAL  ) {
 	    SaveErr( 1 );
 	    XSRETURN_NO;
@@ -170,7 +171,7 @@ CreateFileW( swPath, uAccess, uShare, pSecAttr, uCreate, uFlags, hModel )
 	HANDLE	hModel
     CODE:
 	RETVAL= CreateFileW( swPath, uAccess, uShare,
-	  pSecAttr, uCreate, uFlags, hModel );
+	  (LPSECURITY_ATTRIBUTES)pSecAttr, uCreate, uFlags, hModel );
 	if(  INVALID_HANDLE_VALUE == RETVAL  ) {
 	    SaveErr( 1 );
 	    XSRETURN_NO;
@@ -246,7 +247,7 @@ DeviceIoControl( hDevice, uIoControlCode, pInBuf, lInBuf, opOutBuf, lOutBuf, olR
 	}
 	grow_buf_l( opOutBuf,ST(4),char *, lOutBuf,ST(5) );
 	RETVAL= DeviceIoControl( hDevice, uIoControlCode, pInBuf, lInBuf,
-		  opOutBuf, lOutBuf, &olRetBytes, pOverlapped );
+		  opOutBuf, lOutBuf, &olRetBytes, (LPOVERLAPPED)pOverlapped );
 	SaveErr( !RETVAL );
     OUTPUT:
 	RETVAL
@@ -553,7 +554,8 @@ ReadFile( hFile, opBuffer, lBytes, olBytesRead, pOverlapped )
 	if(  0 == lBytes  &&  autosize(ST(2))  ) {
 	    lBytes= SvLEN( ST(1) ) - 1;
 	}
-	RETVAL= ReadFile( hFile, opBuffer, lBytes, &olBytesRead, pOverlapped );
+	RETVAL= ReadFile( hFile, opBuffer, lBytes, &olBytesRead,
+		  (LPOVERLAPPED)pOverlapped );
 	SaveErr( !RETVAL );
     OUTPUT:
 	RETVAL
@@ -640,7 +642,7 @@ WriteFile( hFile, pBuffer, lBytes, ouBytesWritten, pOverlapped )
 	      "Win32API::File::WriteFile", SvCUR(ST(1)), lBytes );
 	}
 	RETVAL= WriteFile( hFile, pBuffer, lBytes,
-		  &ouBytesWritten, pOverlapped );
+		  &ouBytesWritten, (LPOVERLAPPED)pOverlapped );
 	SaveErr( !RETVAL );
     OUTPUT:
 	RETVAL

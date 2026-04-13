@@ -1,6 +1,7 @@
 package ExtUtils::MM_BeOS;
 
 use strict;
+use warnings;
 
 =head1 NAME
 
@@ -12,7 +13,7 @@ ExtUtils::MM_BeOS - methods to override UN*X behaviour in ExtUtils::MakeMaker
 
 =head1 DESCRIPTION
 
-See ExtUtils::MM_Unix for a documentation of the methods provided
+See L<ExtUtils::MM_Unix> for a documentation of the methods provided
 there. This package overrides the implementation of these methods, not
 the semantics.
 
@@ -26,7 +27,8 @@ require ExtUtils::MM_Any;
 require ExtUtils::MM_Unix;
 
 our @ISA = qw( ExtUtils::MM_Any ExtUtils::MM_Unix );
-our $VERSION = '6.63_02';
+our $VERSION = '7.76';
+$VERSION =~ tr/_//d;
 
 
 =item os_flavor
@@ -48,13 +50,16 @@ libperl.a equivalent to be linked to dynamic extensions.
 sub init_linker {
     my($self) = shift;
 
-    $self->{PERL_ARCHIVE} ||= 
+    $self->{PERL_ARCHIVE} ||=
       File::Spec->catdir('$(PERL_INC)',$Config{libperl});
+    $self->{PERL_ARCHIVEDEP} ||= '';
     $self->{PERL_ARCHIVE_AFTER} ||= '';
     $self->{EXPORT_LIST}  ||= '';
 }
 
 =back
+
+=cut
 
 1;
 __END__

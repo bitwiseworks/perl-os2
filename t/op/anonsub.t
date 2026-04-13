@@ -1,8 +1,9 @@
 #!./perl -w
 
 chdir 't' if -d 't';
-@INC = '../lib';
 require './test.pl';
+set_up_inc('../lib');
+
 use strict;
 
 $|=1;
@@ -85,8 +86,40 @@ print sub { return "ok 1\n" } -> ();
 EXPECT
 ok 1
 ########
+my @void_warnings;
+{
+    use warnings;
+    local $SIG{'__WARN__'} = sub { push @void_warnings, @_ };
+    sub { 1 };
+    1
+}
+"@void_warnings"
+EXPECT
+Useless use of anonymous subroutine in void context at - line 5.
+########
 # [perl #71154] undef &$code makes $code->() die with: Not a CODE reference
+sub __ANON__ { print "42\n" }
 undef &{$x=sub{}};
 $x->();
 EXPECT
-Undefined subroutine called at - line 3.
+Undefined subroutine called at - line 4.
+########
+# NAME anon constant clobbering __ANON__
+sub __ANON__ { "42\n" }
+print __ANON__;
+sub(){3};
+EXPECT
+42
+########
+# NAME undef &anon giving it a freed GV
+$_ = sub{};
+delete $::{__ANON__};
+undef &$_; # SvREFCNT_dec + inc on a GV with a refcnt of 1
+           # so now SvTYPE(CvGV(anon)) is 0xff == freed
+if (!eval { require B }) { # miniperl, presumably
+    print "__ANON__\n";
+} else {
+    print B::svref_2object($_)->GV->NAME, "\n";
+}
+EXPECT
+__ANON__

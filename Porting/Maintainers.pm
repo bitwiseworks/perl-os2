@@ -13,16 +13,15 @@ use lib "Porting";
 use 5.008;
 
 require "Maintainers.pl";
-use vars qw(%Modules %Maintainers);
+our (%Modules, %Maintainers);
 
-use vars qw(@ISA @EXPORT_OK $VERSION);
-@ISA = qw(Exporter);
-@EXPORT_OK = qw(%Modules %Maintainers
+our @ISA = qw(Exporter);
+our @EXPORT_OK = qw(%Modules %Maintainers
 		get_module_files get_module_pat
 		show_results process_options files_to_modules
 		finish_tap_output
 		reload_manifest);
-$VERSION = 0.06;
+our $VERSION = 0.14;
 
 require Exporter;
 
@@ -41,7 +40,7 @@ sub reload_manifest {
         $manifest_path = "../MANIFEST";
     }
 
-    if (open(my $manfh,  $manifest_path )) {
+    if (open(my $manfh,  '<', $manifest_path )) {
 	while (<$manfh>) {
 	    if (/^(\S+)/) {
 		$MANIFEST{$1}++;
@@ -64,7 +63,7 @@ sub get_module_pat {
     split ' ', $Modules{$m}{FILES};
 }
 
-# exand dir/ or foo* into a full list of files
+# expand dir/ or foo* into a full list of files
 #
 sub expand_glob {
     sort { lc $a cmp lc $b }
@@ -92,8 +91,9 @@ sub expand_glob {
 sub filter_excluded {
     my ($m, @files) = @_;
 
+    my $excluded = $Modules{$m}{EXCLUDED};
     return @files
-	unless my $excluded = $Modules{$m}{EXCLUDED};
+	unless $excluded and @$excluded;
 
     my ($pat) = map { qr/$_/ } join '|' => map {
 	ref $_ ? $_ : qr/\b\Q$_\E$/
@@ -235,7 +235,7 @@ sub files_to_modules {
 	if (@ToDo) {
 	    # Try prefix matching.
 
-	    # Need to try longst prefixes first, else lib/CPAN may match
+	    # Need to try longest prefixes first, else lib/CPAN may match
 	    # lib/CPANPLUS/... and similar
 
 	    my @OrderedModuleByPat
@@ -301,6 +301,8 @@ sub show_results {
 	    }
 	}
     } elsif ($Check or $Checkmani) {
+        require Test::More;
+        Test::More->import;
         if( @Files ) {
 		    missing_maintainers(
 			$Checkmani
@@ -346,22 +348,14 @@ sub maintainers_files {
 
 sub duplicated_maintainers {
     maintainers_files();
-    for my $f (keys %files) {
-	if ($files{$f} > 1) {
-	    print  "not ok ".++$TestCounter." - File $f appears $files{$f} times in Maintainers.pl\n";
-	} else {
-	    print  "ok ".++$TestCounter." - File $f appears $files{$f} times in Maintainers.pl\n";
-	}
+    for my $f (sort keys %files) {
+        cmp_ok($files{$f}, '<=', 1, "File $f appears $files{$f} times in Maintainers.pl");
     }
 }
 
 sub warn_maintainer {
     my $name = shift;
-    if ($files{$name}) {
-	print "ok ".++$TestCounter." - $name has a maintainer\n";
-    } else {
-	print "not ok ".++$TestCounter." - $name has NO maintainer\n";
-    }
+    ok($files{$name}, "$name has a maintainer (see Porting/Maintainers.pl)");
 }
 
 sub missing_maintainers {
@@ -376,17 +370,13 @@ sub missing_maintainers {
 
 sub superfluous_maintainers {
     maintainers_files();
-    for my $f (keys %files) {
-	if ($MANIFEST{$f}) {
-	    print "ok ".++$TestCounter." - Maintained file $f appears in MANIFEST\n";
-	} else {
-	    print "not ok ".++$TestCounter." - File $f has has a maintainer but is not in MANIFEST\n";
-	}
+    for my $f (sort keys %files) {
+        ok($MANIFEST{$f}, "File $f has a maintainer and is in MANIFEST");
     }
 }
 
 sub finish_tap_output {
-    print "1..".$TestCounter."\n"; 
+    done_testing();
 }
 
 1;

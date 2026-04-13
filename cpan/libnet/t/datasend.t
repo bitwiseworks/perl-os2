@@ -1,15 +1,21 @@
-#!./perl -w
+#!perl
+
+use 5.008001;
+
+use strict;
+use warnings;
+
+use Test::More;
 
 BEGIN {
-    if ($ENV{PERL_CORE}) {
-	chdir 't' if -d 't';
-	@INC = '../lib';
+    if (!eval { require Socket }) {
+        plan skip_all => "no Socket";
     }
-    if (!eval "require Socket") {
-	print "1..0 # no Socket\n"; exit 0;
+    elsif (ord('A') == 193 && !eval { require Convert::EBCDIC }) {
+        plan skip_all => "EBCDIC but no Convert::EBCDIC";
     }
-    if (ord('A') == 193 && !eval "require Convert::EBCDIC") {
-        print "1..0 # EBCDIC but no Convert::EBCDIC\n"; exit 0;
+    else {
+        plan tests => 54;
     }
 }
 
@@ -18,7 +24,7 @@ BEGIN {
 
   use IO::File;
   use Net::Cmd;
-  @ISA = qw(Net::Cmd IO::File);
+  our @ISA = qw(Net::Cmd IO::File);
 
   sub timeout { 0 }
 
@@ -39,11 +45,6 @@ BEGIN {
     return Net::Cmd::CMD_OK;
   }
 }
-
-(my $libnet_t = __FILE__) =~ s/datasend.t/libnet_t.pl/;
-require $libnet_t or die;
-
-print "1..51\n";
 
 sub check {
   my $expect = pop;
@@ -157,3 +158,10 @@ check(
   "a\015\012..\015\012.\015\012",
 );
 
+# Test that datasend() plays nicely with bytes in an upgraded string,
+# even though the input should really be encode()d already.
+check(
+  substr("\x{100}", 0, 0) . "\x{e9}",
+
+  "\x{e9}\015\012.\015\012"
+);

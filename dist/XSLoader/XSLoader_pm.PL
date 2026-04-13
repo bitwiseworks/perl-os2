@@ -1,42 +1,25 @@
 use strict;
+use warnings;
+
 use Config;
+# We require DynaLoader to make sure that mod2fname is loaded
+eval { require DynaLoader };
 
 1 while unlink "XSLoader.pm";
-open OUT, ">XSLoader.pm" or die $!;
+open OUT, '>', 'XSLoader.pm' or die $!;
 print OUT <<'EOT';
-# Generated from XSLoader.pm.PL (resolved %Config::Config value)
+# Generated from XSLoader_pm.PL (resolved %Config::Config value)
+# This file is unique for every OS
+
+use strict;
+no strict 'refs';
 
 package XSLoader;
 
-$VERSION = "0.16";
-
-#use strict;
+our $VERSION = "0.32"; # remember to update version in POD!
 
 package DynaLoader;
 
-EOT
-
-# dlutils.c before 5.006 has this:
-#
-#    #ifdef DEBUGGING
-#        dl_debug = SvIV( perl_get_sv("DynaLoader::dl_debug", 0x04) );
-#    #endif
-#
-# where 0x04 is GV_ADDWARN, which causes a warning to be issued by the call
-# into XS below, if DynaLoader.pm hasn't been loaded.
-# It was changed to 0 in the commit(s) that added XSLoader to the core
-# (9cf41c4d23a47c8b and its parent 9426adcd48655815)
-# Hence to backport XSLoader to work silently with earlier DynaLoaders we need
-# to ensure that the variable exists:
-
-print OUT <<'EOT' if $] < 5.006;
-
-# enable debug/trace messages from DynaLoader perl code
-$dl_debug = $ENV{PERL_DL_DEBUG} || 0 unless defined $dl_debug;
-
-EOT
-
-print OUT <<'EOT';
 # No prizes for guessing why we don't say 'bootstrap DynaLoader;' here.
 # NOTE: All dl_*.xs (including dl_none.xs) define a dl_error() XSUB
 boot_DynaLoader('DynaLoader') if defined(&boot_DynaLoader) &&
@@ -46,7 +29,8 @@ package XSLoader;
 sub load {
     package DynaLoader;
 
-    my ($module, $modlibname) = caller();
+    my ($caller, $modlibname) = caller();
+    my $module = $caller;
 
     if (@_) {
         $module = $_[0];
@@ -62,14 +46,18 @@ sub load {
 
     my @modparts = split(/::/,$module);
     my $modfname = $modparts[-1];
+    my $modfname_orig = $modfname; # For .bs file search
 
 EOT
 
-print OUT <<'EOT' if defined &DynaLoader::mod2fname;
+# defined &DynaLoader::mod2fname catches most cases, except when
+# cross-compiling to a system that defines mod2fname. Using 
+# $Config{d_libname_unique} is a best attempt at catching those cases.
+print OUT <<'EOT' if defined &DynaLoader::mod2fname || $Config{d_libname_unique};
     # Some systems have restrictions on files names for DLL's etc.
     # mod2fname returns appropriate file base name (typically truncated)
     # It may also edit @modparts if required.
-    $modfname = &mod2fname(\@modparts) if defined &mod2fname;
+    $modfname = &DynaLoader::mod2fname(\@modparts) if defined &DynaLoader::mod2fname;
 
 EOT
 
@@ -82,8 +70,45 @@ EOT
 
 print OUT <<'EOT';
     my $modpname = join('/',@modparts);
-    my $c = @modparts;
+    my $c = () = split(/::/,$caller,-1);
     $modlibname =~ s,[\\/][^\\/]+$,, while $c--;    # Q&D basename
+EOT
+
+my $to_print = <<'EOT';
+    # Does this look like a relative path?
+    if ($modlibname !~ m{regexp}) {
+EOT
+
+$to_print =~ s~regexp~
+    $^O eq 'MSWin32' || $^O eq 'os2' || $^O eq 'cygwin' || $^O eq 'amigaos'
+        ? '^(?:[A-Za-z]:)?[\\\/]' # Optional drive letter
+        : '^/'
+~e;
+
+print OUT $to_print, <<'EOT';
+        # Someone may have a #line directive that changes the file name, or
+        # may be calling XSLoader::load from inside a string eval.  We cer-
+        # tainly do not want to go loading some code that is not in @INC,
+        # as it could be untrusted.
+        #
+        # We could just fall back to DynaLoader here, but then the rest of
+        # this function would go untested in the perl core, since all @INC
+        # paths are relative during testing.  That would be a time bomb
+        # waiting to happen, since bugs could be introduced into the code.
+        #
+        # So look through @INC to see if $modlibname is in it.  A rela-
+        # tive $modlibname is not a common occurrence, so this block is
+        # not hot code.
+        FOUND: {
+            for (@INC) {
+                if ($_ eq $modlibname) {
+                    last FOUND;
+                }
+            }
+            # Not found.  Fall back to DynaLoader.
+            goto \&XSLoader::bootstrap_inherit;
+        }
+    }
 EOT
 
 my $dl_dlext = quotemeta($Config::Config{'dlext'});
@@ -96,15 +121,12 @@ print OUT <<'EOT';
 
 #   print STDERR "XSLoader::load for $module ($file)\n" if $dl_debug;
 
-    my $bs = $file;
-    $bs =~ s/(\.\w+)?(;\d*)?$/\.bs/; # look for .bs 'beside' the library
+    # N.B. The .bs file does not following the naming convention used
+    # by mod2fname, so use the unedited version of the name.
 
-    if (-s $bs) { # only read file if it's not empty
-#       print STDERR "BS: $bs ($^O, $dlsrc)\n" if $dl_debug;
-        eval { do $bs; };
-        warn "$bs: $@\n" if $@;
-    }
+    my $bs = "$modlibname/auto/$modpname/$modfname_orig.bs";
 
+    # This calls DynaLoader::bootstrap, which will load the .bs file if present
     goto \&XSLoader::bootstrap_inherit if not -f $file or -s $bs;
 
     my $bootname = "boot_$module";
@@ -116,10 +138,11 @@ print OUT <<'EOT';
 EOT
 
     if ($^O eq 'darwin') {
-print OUT <<'EOT';
-        if ($boot_symbol_ref = dl_find_symbol(0, $bootname)) {
-            goto boot; #extension library has already been loaded, e.g. darwin
-        }
+      my $extra_arg = ', 1 ' if $DynaLoader::VERSION ge '1.37';
+print OUT <<"EOT";
+    if (\$boot_symbol_ref = dl_find_symbol( 0, \$bootname $extra_arg)) {
+        goto boot; #extension library has already been loaded, e.g. darwin
+    }
 EOT
     }
 
@@ -137,12 +160,20 @@ print OUT <<'EOT';
     };
     push(@DynaLoader::dl_librefs,$libref);  # record loaded object
 
+EOT
+my $dlsrc = $Config{dlsrc};
+if ($dlsrc eq 'dl_freemint.xs' || $dlsrc eq 'dl_dld.xs') {
+    print OUT <<'EOT';
     my @unresolved = dl_undef_symbols();
     if (@unresolved) {
         require Carp;
         Carp::carp("Undefined symbols present after loading $file: @unresolved\n");
     }
 
+EOT
+}
+
+print OUT <<'EOT';
     $boot_symbol_ref = dl_find_symbol($libref, $bootname) or do {
         require Carp;
         Carp::croak("Can't find '$bootname' symbol in $file\n");
@@ -157,41 +188,16 @@ print OUT <<'EOT';
     push(@DynaLoader::dl_shared_objects, $file); # record files loaded
     return &$xs(@_);
 }
-EOT
 
 # Can't test with DynaLoader->can('bootstrap_inherit') when building in the
 # core, as XSLoader gets built before DynaLoader.
-
-if ($] >= 5.006) {
-    print OUT <<'EOT';
 
 sub bootstrap_inherit {
     require DynaLoader;
     goto \&DynaLoader::bootstrap_inherit;
 }
 
-EOT
-} else {
-    print OUT <<'EOT';
-
-sub bootstrap_inherit {
-    # Versions of DynaLoader prior to 5.6.0 don't have bootstrap_inherit.
-    package DynaLoader;
-
-    my $module = $_[0];
-    local *DynaLoader::isa = *{"$module\::ISA"};
-    local @DynaLoader::isa = (@DynaLoader::isa, 'DynaLoader');
-    # Cannot goto due to delocalization.  Will report errors on a wrong line?
-    require DynaLoader;
-    DynaLoader::bootstrap(@_);
-}
-
-EOT
-}
-
-print OUT <<'EOT';
 1;
-
 
 __END__
 
@@ -201,14 +207,14 @@ XSLoader - Dynamically load C libraries into Perl code
 
 =head1 VERSION
 
-Version 0.15
+Version 0.32
 
 =head1 SYNOPSIS
 
     package YourPackage;
     require XSLoader;
 
-    XSLoader::load();
+    XSLoader::load(__PACKAGE__, $VERSION);
 
 =head1 DESCRIPTION
 
@@ -229,7 +235,7 @@ A typical module using L<DynaLoader|DynaLoader> starts like this:
 
     our @ISA = qw( OnePackage OtherPackage DynaLoader );
     our $VERSION = '0.01';
-    bootstrap YourPackage $VERSION;
+    __PACKAGE__->bootstrap($VERSION);
 
 Change this to
 
@@ -238,7 +244,7 @@ Change this to
 
     our @ISA = qw( OnePackage OtherPackage );
     our $VERSION = '0.01';
-    XSLoader::load 'YourPackage', $VERSION;
+    XSLoader::load(__PACKAGE__, $VERSION);
 
 In other words: replace C<require DynaLoader> by C<use XSLoader>, remove
 C<DynaLoader> from C<@ISA>, change C<bootstrap> by C<XSLoader::load>.  Do not
@@ -255,10 +261,9 @@ one can remove this reference to C<@ISA> together with the C<@ISA> assignment.
 
 If no C<$VERSION> was specified on the C<bootstrap> line, the last line becomes
 
-    XSLoader::load 'YourPackage';
+    XSLoader::load(__PACKAGE__);
 
-If the call to C<load> is from the YourPackage, then that can be further
-simplified to
+in which case it can be further simplified to
 
     XSLoader::load();
 
@@ -270,18 +275,17 @@ If you want to have your cake and eat it too, you need a more complicated
 boilerplate.
 
     package YourPackage;
-    use vars qw($VERSION @ISA);
 
-    @ISA = qw( OnePackage OtherPackage );
-    $VERSION = '0.01';
+    our @ISA = qw( OnePackage OtherPackage );
+    our $VERSION = '0.01';
     eval {
        require XSLoader;
-       XSLoader::load('YourPackage', $VERSION);
+	XSLoader::load(__PACKAGE__, $VERSION);
        1;
     } or do {
        require DynaLoader;
        push @ISA, 'DynaLoader';
-       bootstrap YourPackage $VERSION;
+       __PACKAGE__->bootstrap($VERSION);
     };
 
 The parentheses about C<XSLoader::load()> arguments are needed since we replaced
@@ -289,7 +293,7 @@ C<use XSLoader> by C<require>, so the compiler does not know that a function
 C<XSLoader::load()> is present.
 
 This boilerplate uses the low-overhead C<XSLoader> if present; if used with
-an antic Perl which has no C<XSLoader>, it falls back to using C<DynaLoader>.
+an antique Perl which has no C<XSLoader>, it falls back to using C<DynaLoader>.
 
 =head1 Order of initialization: early load()
 
@@ -339,7 +343,7 @@ boilerplate as
 
     package YourPackage;
     use XSLoader;
-    use vars qw($VERSION @ISA);
+    our ($VERSION, @ISA);
 
     BEGIN {
        @ISA = qw( OnePackage OtherPackage );
@@ -347,7 +351,7 @@ boilerplate as
 
        # Put Perl code used in the BOOT: section here
 
-       XSLoader::load 'YourPackage', $VERSION;
+       XSLoader::load(__PACKAGE__, $VERSION);
     }
 
     # Put Perl code making calls into XSUBs here
@@ -362,12 +366,12 @@ this:
 
     package YourPackage;
     use XSLoader;
-    use vars qw($VERSION @ISA);
+    our ($VERSION, @ISA);
 
     BEGIN {
        @ISA = qw( OnePackage OtherPackage );
        $VERSION = '0.01';
-       XSLoader::load 'YourPackage', $VERSION;
+       XSLoader::load(__PACKAGE__, $VERSION);
     }
 
     # Put Perl code used in onBOOT() function here; calls to XSUBs are

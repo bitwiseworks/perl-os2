@@ -4,7 +4,8 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
+    require './test.pl';
+    set_up_inc('../lib');
 }
 use warnings ;
 
@@ -21,9 +22,7 @@ $SIG{__WARN__} = sub {
      }
 };
 
-BEGIN { require './test.pl'; }
-
-plan(381);
+plan(400);
 
 run_tests() unless caller;
 
@@ -684,6 +683,13 @@ is($x, "\x{100}\x{200}\xFFb");
     }
 }
 
+# Also part of perl #24346; scalar(substr...) should not affect lvalueness
+{
+    my $str = "abcdef";
+    sub { $_[0] = 'dea' }->( scalar substr $str, 3, 2 );
+    is $str, 'abcdeaf', 'scalar does not affect lvalueness of substr';
+}
+
 # [perl #24200] string corruption with lvalue sub
 
 {
@@ -703,13 +709,6 @@ is($x, "\x{100}\x{200}\xFFb");
     my $a = substr($text, $pos, $pos);
     is(substr($text,$pos,1), $pos);
 
-}
-
-# [perl #23765]
-{
-    my $a = pack("C", 0xbf);
-    substr($a, -1) &= chr(0xfeff);
-    is($a, "\xbf");
 }
 
 # [perl #34976] incorrect caching of utf8 substr length
@@ -787,6 +786,59 @@ ok eval {
     is ref \$x, 'REF', '\substr does not coerce its ref arg just yet';
 }
 
+# Test that UTF8-ness of magic var changing does not confuse substr lvalue
+# assignment.
+# We use overloading for our magic var, but a typeglob would work, too.
+package o {
+    use overload '""' => sub { ++our $count; $_[0][0] }
+}
+my $refee = bless ["\x{100}a"], o::;
+my $substr = \substr $refee, -2;	# UTF8 flag still off for $$substr.
+$$substr = "b";				# UTF8 flag turns on when setsubstr
+is $refee, "b",				# magic stringifies $$substr.
+     'substr lvalue assignment when stringification turns on UTF8ness';
+
+# Test that changing UTF8-ness does not confuse 4-arg substr.
+$refee = bless [], "\x{100}a";
+# stringify without returning on UTF8 flag on $refee:
+my $string = $refee; $string = "$string";
+substr $refee, 0, 0, "\xff";
+is $refee, "\xff$string",
+  '4-arg substr with target UTF8ness turning on when stringified';
+$refee = bless [], "\x{100}";
+() = "$refee"; # UTF8 flag now on
+bless $refee, "\xff";
+$string = $refee; $string = "$string";
+substr $refee, 0, 0, "\xff";
+is $refee, "\xff$string",
+  '4-arg substr with target UTF8ness turning off when stringified';
+
+# Overload count
+$refee = bless ["foo"], o::;
+$o::count = 0;
+substr $refee, 0, 0, "";
+is $o::count, 1, '4-arg substr calls overloading once on the target';
+$refee = bless ["\x{100}"], o::;
+() = "$refee"; # turn UTF8 flag on
+$o::count = 0;
+() = substr $refee, 0;
+is $o::count, 1, 'rvalue substr calls overloading once on utf8 target';
+$o::count = 0;
+$refee = "";
+${\substr $refee, 0} = bless ["\x{100}"], o::;
+is $o::count, 1, 'assigning utf8 overload to substr lvalue calls ovld 1ce';
+
+# [perl #7678] core dump with substr reference and localisation
+{$b="abcde"; local $k; *k=\substr($b, 2, 1);}
+
+# [perl #128260] assertion failure with \substr %h, \substr @h
+{
+    my %h = 1..100;
+    my @a = 1..100;
+    is ${\substr %h, 0}, scalar %h, '\substr %h';
+    is ${\substr @a, 0}, scalar @a, '\substr @a';
+}
+
 } # sub run_tests - put tests above this line that can run in threads
 
 
@@ -817,3 +869,53 @@ is($destroyed, 1, 'Timely scalar destruction with lvalue substr');
 
     is($result_3363, "best", "ref-to-substr retains lvalue-ness under recursion [perl #3363]");
 }
+
+# failed with ASAN
+fresh_perl_is('$0 = "/usr/bin/perl"; substr($0, 0, 0, $0)', '', {}, "(perl #129340) substr() with source in target");
+
+
+# [perl #130624] - heap-use-after-free, observable under asan
+{
+    my $x = "\xE9zzzz";
+    my $y = "\x{100}";
+    my $z = substr $x, 0, 1, $y;
+    is $z, "\xE9",        "RT#130624: heap-use-after-free in 4-arg substr (ret)";
+    is $x, "\x{100}zzzz", "RT#130624: heap-use-after-free in 4-arg substr (targ)";
+}
+
+{
+    our @ta;
+    $#ta = -1;
+    substr($#ta, 0, 2) = 23;
+    is $#ta, 23;
+    $#ta = -1;
+    substr($#ta, 0, 2) =~ s/\A..\z/23/s;
+    is $#ta, 23;
+    $#ta = -1;
+    substr($#ta, 0, 2, 23);
+    is $#ta, 23;
+    sub ta_tindex :lvalue { $#ta }
+    $#ta = -1;
+    ta_tindex() = 23;
+    is $#ta, 23;
+    $#ta = -1;
+    substr(ta_tindex(), 0, 2) = 23;
+    is $#ta, 23;
+    $#ta = -1;
+    substr(ta_tindex(), 0, 2) =~ s/\A..\z/23/s;
+    is $#ta, 23;
+    $#ta = -1;
+    substr(ta_tindex(), 0, 2, 23);
+    is $#ta, 23;
+}
+
+{ # [perl #132527]
+    use feature 'refaliasing';
+    no warnings 'experimental::refaliasing';
+    my %h;
+    \$h{foo} = \(my $bar = "baz");
+    substr delete $h{foo}, 1, 1, o=>;
+    is $bar, boz => 'first arg to 4-arg substr is loose lvalue context';
+}
+
+1;

@@ -40,8 +40,8 @@ case "$osvers" in
 # gcc 4.6 doesn't support --whole-archive, but it's required for the
 # system gcc to build correctly, so check for it
 echo 'int f(void) { return 0; }' >try.c
-if ${cc:-cc} $cccdlflags -c try.c -otry.o 2>&1 &&
-   ${cc:-cc} --whole-archive $lddlflags try.o -otry.so 2>&1 ; then
+if ${cc:-cc} $cccdlflags -c try.c -otry.o >/dev/null 2>&1 &&
+   ${cc:-cc} --whole-archive $lddlflags try.o -otry.so >/dev/null 2>&1 ; then
     lddlflags="--whole-archive $lddlflags"
 fi
 rm try.c try.o try.so 2>/dev/null
@@ -89,7 +89,9 @@ case "$osvers" in
 	;;
 esac
 case "$osvers" in
-0.9*|1.*|2.*|3.*|4.*|5.*|6.*)
+0.8*)
+	;;
+*)
 	d_getprotoent_r="$undef"
 	d_getprotobyname_r="$undef"
 	d_getprotobynumber_r="$undef"
@@ -100,6 +102,12 @@ case "$osvers" in
 	d_getservbyport_r="$undef"
 	d_setservent_r="$undef"
 	d_endservent_r="$undef"
+	d_gethostbyname_r="$undef"
+	d_gethostbyaddr2_r="$undef"
+	d_gethostbyaddr_r="$undef"
+	d_sethostent_r="$undef"
+	d_gethostent_r="$undef"
+	d_endhostent_r="$undef"
 	d_getprotoent_r_proto="0"
 	d_getprotobyname_r_proto="0"
 	d_getprotobynumber_r_proto="0"
@@ -110,6 +118,12 @@ case "$osvers" in
 	d_getservbyport_r_proto="0"
 	d_setservent_r_proto="0"
 	d_endservent_r_proto="0"
+	d_gethostbyname_r_proto="0"
+	d_gethostbyaddr2_r_proto="0"
+	d_gethostbyaddr_r_proto="0"
+	d_sethostent_r_proto="0"
+	d_endhostent_r_proto="0"
+	d_gethostent_r_proto="0"
 	;;
 esac
 
@@ -240,3 +254,49 @@ esac
 case "$usemymalloc" in
 '') usemymalloc=n ;;
 esac
+
+# NetBSD 6 defines the *at() functions in libc, but either doesn't
+# implement them, or implements them only for AT_FDCWD
+case "$osver" in
+[1-6].*)
+        d_unlinkat="$undef"
+        d_renameat="$undef"
+        d_linkat="$undef"
+        d_fchmodat="$undef"
+        ;;
+esac
+
+cat >UU/uselongdouble.cbu <<'EOCBU'
+# This script UU/uselongdouble.cbu will get 'called-back' by Configure
+# after it has prompted the user for whether to use long doubles.
+#
+# See https://github.com/Perl/perl5/issues/17853 and https://github.com/Perl/perl5/issues/17854
+case "$uselongdouble" in
+$define|true|[yY]*)
+    cat >try.c <<\TRY
+#include <stdio.h>
+#include <math.h>
+
+long double x = 1.0;
+
+int main(int argc, char **argv) {
+    double e1 = exp(1.0);
+    /* as of NetBSD 9.0 expl() just calls exp(),
+       Fail here if they're equal. */
+    return expl(x) == (long double)e1;
+}
+TRY
+    if $cc -o try $ccflags $ldflags try.c -lm && $run ./try; then
+        echo "NetBSD seem to have fixed expl (and hopefully more)" >&4
+    else
+        cat <<EOM >&4
+
+Warning! NetBSD's long double support is limited enough that it will cause
+test failures, and possibly build failures, and this doesn't appear to have
+been fixed in the release you're running.
+
+EOM
+    fi
+;;
+esac
+EOCBU

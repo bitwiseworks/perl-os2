@@ -10,11 +10,12 @@ BEGIN {
     $ENV{LC_ALL} = "C"; # so that external utilities speak English
     $ENV{LANGUAGE} = 'C'; # GNU locale extension
 
-    chdir 't';
-    @INC = '../lib';
+    chdir 't' if -d 't';
     require './test.pl';
+    set_up_inc( '../lib' );
     skip_all_if_miniperl("no dynamic loading on miniperl, no POSIX");
 }
+
 use 5.010;
 use strict;
 use Config ();
@@ -24,7 +25,7 @@ skip_all('getgrgid() not implemented')
     unless eval { my($foo) = getgrgid(0); 1 };
 
 skip_all("No 'id' or 'groups'") if
-    $^O eq 'MSWin32' || $^O eq 'NetWare' || $^O eq 'VMS' || $^O =~ /lynxos/i;
+    $^O eq 'MSWin32' || $^O eq 'VMS' || $^O =~ /lynxos/i;
 
 Test();
 exit;
@@ -43,50 +44,63 @@ sub Test {
     my $pwgid = $( + 0;
     my ($pwgnam) = getgrgid($pwgid);
     $pwgnam //= '';
-    print "# pwgid=$pwgid pwgnam=$pwgnam \$(=$(\n";
+    note "pwgid=$pwgid pwgnam=$pwgnam \$(=$(";
 
     # Get perl's supplementary groups by looking at $(
     my ( $gid_count, $all_perl_groups ) = perl_groups();
     my %basegroup = basegroups( $pwgid, $pwgnam );
     my @extracted_supplementary_groups = remove_basegroup( \ %basegroup, \ @extracted_groups );
 
-    print "1..2\n";
+    plan 4;
 
+    {
+        my @warnings = do {
+            my @w;
+            local $SIG{'__WARN__'} = sub { push @w, @_ };
+
+            use warnings;
+            my $v = $( + 1;
+            $v = $) + 1;
+
+            @w;
+        };
+
+        is ("@warnings", "", 'Neither $( nor $) trigger warnings when used as number.' );
+    }
 
     # Test: The supplementary groups in $( should match the
     # getgroups(2) kernal API call.
     #
-    my $ngroups_max = posix_ngroups_max();
-    if ( defined $ngroups_max && $ngroups_max < @extracted_groups ) {
-        # Some OSes (like darwin)but conceivably others might return
-        # more groups from `id -a' than can be handled by the
-        # kernel. On darwin, NGROUPS_MAX is 16 and 12 are taken up for
-        # the system already.
-        #
-        # There is more fall-out from this than just Perl's unit
-        # tests. You may be a member of a group according to Active
-        # Directory (or whatever) but the OS won't respect it because
-        # it's the 17th (or higher) group and there's no space to
-        # store your membership.
-        print "ok 1 # SKIP Your platform's `$groups_command' is broken\n";
-    }
+    SKIP: {
+        my $ngroups_max = posix_ngroups_max();
+        if ( defined $ngroups_max && $ngroups_max < @extracted_groups ) {
+            # Some OSes (like darwin)but conceivably others might return
+            # more groups from `id -a' than can be handled by the
+            # kernel. On darwin, NGROUPS_MAX is 16 and 12 are taken up for
+            # the system already.
+            #
+            # There is more fall-out from this than just Perl's unit
+            # tests. You may be a member of a group according to Active
+            # Directory (or whatever) but the OS won't respect it because
+            # it's the 17th (or higher) group and there's no space to
+            # store your membership.
+            skip "Your platform's `$groups_command' is broken";
+        }
 
-    elsif ( darwin() ) {
-        # darwin uses getgrouplist(3) or an Open Directory API within
-        # /usr/bin/id and /usr/bin/groups which while "nice" isn't
-        # accurate for this test. The hard, real, list of groups we're
-        # running in derives from getgroups(2) and is not dynamic but
-        # the Libc API getgrouplist(3) is.
-        #
-        # In practical terms, this meant that while `id -a' can be
-        # relied on in other OSes to purely use getgroups(2) and show
-        # us what's real, darwin will use getgrouplist(3) to show us
-        # what might be real if only we'd open a new console.
-        #
-        print "ok 1 # SKIP darwin's `${groups_command}' can't be trusted\n";
-    }
-
-    else {
+        if ( darwin() ) {
+            # darwin uses getgrouplist(3) or an Open Directory API within
+            # /usr/bin/id and /usr/bin/groups which while "nice" isn't
+            # accurate for this test. The hard, real, list of groups we're
+            # running in derives from getgroups(2) and is not dynamic but
+            # the Libc API getgrouplist(3) is.
+            #
+            # In practical terms, this meant that while `id -a' can be
+            # relied on in other OSes to purely use getgroups(2) and show
+            # us what's real, darwin will use getgrouplist(3) to show us
+            # what might be real if only we'd open a new console.
+            #
+            skip "darwin's `${groups_command}' can't be trusted";
+        }
 
         # Read $( but ignore any groups in $( that we failed to parse
         # successfully out of the `id -a` mess.
@@ -100,7 +114,6 @@ sub Test {
         if ( match_groups( \ @supplementary_groups,
                            \ @extracted_supplementary_groups,
                            $pwgid ) ) {
-            print "ok 1\n";
             $ok1 = 1;
         }
         elsif ( cygwin_nt() ) {
@@ -110,23 +123,36 @@ sub Test {
             if ( match_groups( \ @supplementary_groups,
                                \ @extracted_supplementary_groups,
                                $pwgid ) ) {
-                print "ok 1 # This Cygwin behaves like Unix (Win2k?)\n";
+                note "This Cygwin behaves like Unix (Win2k?)";
                 $ok1 = 1;
             }
         }
 
-        unless ( $ok1 ) {
-
-        }
+        ok $ok1, "perl's `\$(' agrees with `${groups_command}'";
     }
 
     # multiple 0's indicate GROUPSTYPE is currently long but should be short
     $gid_count->{0} //= 0;
-    if ( 0 == $pwgid || $gid_count->{0} < 2 ) {
-        print "ok 2\n";
-    }
-    else {
-        print "not ok 2 (groupstype should be type short, not long)\n";
+    ok 0 == $pwgid || $gid_count->{0} < 2, "groupstype should be type short, not long";
+
+    SKIP: {
+        # try to add a group as supplementary group
+        my $root_uid = 0;
+        skip "uid!=0", 1 if $< != $root_uid and $> != $root_uid;
+        my @groups = split ' ', $);
+        my @sup_group;
+        setgrent;
+        while(my @ent = getgrent) {
+            next if grep { $_ == $ent[2] } @groups;
+            @sup_group = @ent;
+            last;
+        }
+        endgrent;
+        skip "No group found we could add as a supplementary group", 1
+            if (!@sup_group);
+        $) = "$) $sup_group[2]";
+        my $ok = grep { $_ == $sup_group[2] } split ' ', $);
+        ok $ok, "Group `$sup_group[0]' added as supplementary group";
     }
 
     return;
@@ -222,7 +248,7 @@ sub _system_groups {
 #
 # If these tests fail, report the particular incantation you use
 # on this platform to find *all* the groups that an arbitrary
-# user may belong to, using the 'perlbug' program.
+# user may belong to, using the issue tracker.
 EOM
         }
         return ( $cmd, $str );
@@ -257,7 +283,7 @@ sub extract_system_groups {
                 push @extracted, $+{gr_name} || $+{gid};
             }
             else {
-                print "# ignoring group entry [$_]\n";
+                note "ignoring group entry [$_]";
             }
         }
 
@@ -301,7 +327,7 @@ sub perl_groups {
 
         # Why does this test prefer to not test groups which we don't have
         # a name for? One possible answer is that my primary group comes
-        # from from my entry in the user database but isn't mentioned in
+        # from my entry in the user database but isn't mentioned in
         # the group database.  Are there more reasons?
         next if ! defined $group;
 
@@ -402,8 +428,4 @@ sub uniq {
         @_;
 }
 
-# Local variables:
-# indent-tabs-mode: nil
-# End:
-#
-# ex: set ts=8 sts=4 sw=4 noet:
+# ex: set ts=8 sts=4 sw=4 et:

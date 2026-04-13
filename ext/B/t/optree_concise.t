@@ -7,15 +7,10 @@ BEGIN {
         print "1..0 # Skip -- Perl configured without B module\n";
         exit 0;
     }
-    if (!$Config::Config{useperlio}) {
-        print "1..0 # Skip -- need perlio to walk the optree\n";
-        exit 0;
-    }
 }
 
 # import checkOptree(), and %gOpts (containing test state)
 use OptreeCheck;	# ALSO DOES @ARGV HANDLING !!!!!!
-use Config;
 
 plan tests => 41;
 
@@ -217,7 +212,7 @@ checkOptree ( name => 'cmdline invoke -basic works',
 	      strip_open_hints => 1,
 	      expect	=> <<'EOT_EOT', expect_nt => <<'EONT_EONT');
 # 7  <@> leave[1 ref] vKP/REFC ->(end)
-# 1     <0> enter ->2
+# 1     <0> enter v ->2
 # 2     <;> nextstate(main 1 -e:1) v:>,<,%,{ ->3
 # 6     <@> sort vK ->7
 # 3        <0> pushmark s ->4
@@ -225,7 +220,7 @@ checkOptree ( name => 'cmdline invoke -basic works',
 # 4           <#> gv[*a] s ->5
 EOT_EOT
 # 7  <@> leave[1 ref] vKP/REFC ->(end)
-# 1     <0> enter ->2
+# 1     <0> enter v ->2
 # 2     <;> nextstate(main 1 -e:1) v:>,<,%,{ ->3
 # 6     <@> sort vK ->7
 # 3        <0> pushmark s ->4
@@ -241,7 +236,7 @@ checkOptree ( name => 'cmdline invoke -exec works',
 	      bcopts => '-exec',
 	      strip_open_hints => 1,
 	      expect => <<'EOT_EOT', expect_nt => <<'EONT_EONT');
-1  <0> enter 
+1  <0> enter v
 2  <;> nextstate(main 1 -e:1) v:>,<,%,{
 3  <0> pushmark s
 4  <#> gv[*a] s
@@ -249,7 +244,7 @@ checkOptree ( name => 'cmdline invoke -exec works',
 6  <@> sort vK
 7  <@> leave[1 ref] vKP/REFC
 EOT_EOT
-# 1  <0> enter 
+# 1  <0> enter v
 # 2  <;> nextstate(main 1 -e:1) v:>,<,%,{
 # 3  <0> pushmark s
 # 4  <$> gv(*a) s
@@ -264,7 +259,7 @@ checkOptree
     ( name	=> 'cmdline self-strict compile err using prog',
       prog	=> 'use strict; sort @a',
       bcopts	=> [qw/ -basic -concise -exec /],
-      errs	=> 'Global symbol "@a" requires explicit package name at -e line 1.',
+      errs	=> 'Global symbol "@a" requires explicit package name (did you forget to declare "my @a"?) at -e line 1.',
       expect	=> 'nextstate',
       expect_nt	=> 'nextstate',
       noanchors => 1, # allow simple expectations to work
@@ -274,7 +269,9 @@ checkOptree
     ( name	=> 'cmdline self-strict compile err using code',
       code	=> 'use strict; sort @a',
       bcopts	=> [qw/ -basic -concise -exec /],
-      errs	=> qr/Global symbol "\@a" requires explicit package name at .*? line 1\./,
+      errs	=> qr/Global symbol "\@a" requires explicit package (?x:
+		     )name \(did you forget to declare "my \@a"\?\) at (?x:
+		     ).*? line 1\./,
       note	=> 'this test relys on a kludge which copies $@ to rendering when empty',
       expect	=> 'Global symbol',
       expect_nt	=> 'Global symbol',
@@ -288,27 +285,21 @@ checkOptree
       errs	=> ['Useless use of sort in void context at -e line 1.'],
       strip_open_hints => 1,
       expect	=> <<'EOT_EOT', expect_nt => <<'EONT_EONT');
-# 1  <0> enter 
-# 2  <;> nextstate(main 1 -e:1) v:>,<,%,{
-# 3  <#> gv[*a] s
-# 4  <1> rv2av[t3] vK/OURINTR,1
-# 5  <;> nextstate(main 2 -e:1) v:>,<,%,{
-# 6  <0> pushmark s
-# 7  <#> gv[*a] s
-# 8  <1> rv2av[t5] lK/1
-# 9  <@> sort vK
-# a  <@> leave[1 ref] vKP/REFC
+# 1  <0> enter v
+# 2  <;> nextstate(main 2 -e:1) v:>,<,%,{
+# 3  <0> pushmark s
+# 4  <#> gv[*a] s
+# 5  <1> rv2av[t5] lK/1
+# 6  <@> sort vK
+# 7  <@> leave[1 ref] vKP/REFC
 EOT_EOT
-# 1  <0> enter 
-# 2  <;> nextstate(main 1 -e:1) v:>,<,%,{
-# 3  <$> gv(*a) s
-# 4  <1> rv2av[t2] vK/OURINTR,1
-# 5  <;> nextstate(main 2 -e:1) v:>,<,%,{
-# 6  <0> pushmark s
-# 7  <$> gv(*a) s
-# 8  <1> rv2av[t3] lK/1
-# 9  <@> sort vK
-# a  <@> leave[1 ref] vKP/REFC
+# 1  <0> enter v
+# 2  <;> nextstate(main 2 -e:1) v:>,<,%,{
+# 3  <0> pushmark s
+# 4  <$> gv(*a) s
+# 5  <1> rv2av[t3] lK/1
+# 6  <@> sort vK
+# 7  <@> leave[1 ref] vKP/REFC
 EONT_EONT
 
 

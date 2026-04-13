@@ -1,14 +1,9 @@
-#!./perl
-use Test::More;
-
-plan( tests => 12 );
-
 use strict;
 use warnings;
+use Test::More;
 use Hash::Util::FieldHash qw( :all);
 
-use vars qw{ @warnings };
-
+our @warnings;
 BEGIN {
     $SIG{'__WARN__'} = sub { push @warnings, @_ };
     $| = 1;
@@ -52,3 +47,5 @@ my $fail_not_hr   = 'Not a HASH reference at ';
     cmp_ok(scalar(@warnings),'==',0,'hashref assign');
 
 }
+
+done_testing;

@@ -1,12 +1,14 @@
 #!./perl
+$|=1;
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = qw(. ../lib);
-    require 'test.pl';
+    require './test.pl';
+    set_up_inc('../lib');
 }
 use warnings;
-plan( tests => 171 );
+plan(tests => 205);
+use Tie::Array; # we need to test sorting tied arrays
 
 # these shouldn't hang
 {
@@ -62,6 +64,84 @@ $x = join('', sort @george, 'to', @harry);
 $expected = $upperfirst ?
     'AbelAxedCaincatchaseddoggonepunishedtoxyz' :
     'catchaseddoggonepunishedtoxyzAbelAxedCain' ;
+
+my @initially_sorted = ( 0 .. 260,
+                         0x3FF, 0x400, 0x401,
+                         0x7FF, 0x800, 0x801,
+                         0x3FFF, 0x4000, 0x4001,
+		         0xFFFF, 0x10000, 0x10001,
+                       );
+# It makes things easier below if there are an even number of elements in the
+# array.
+if (scalar(@initially_sorted) % 2 == 1) {
+    push @initially_sorted, $initially_sorted[-1] + 1;
+}
+
+# We convert to a chr(), but prepend a constant string to make sure things can
+# work on more than a single character.
+my $prefix = "a\xb6";
+my $prefix_len = length $prefix;
+
+my @chr_initially_sorted = @initially_sorted;
+$_ = $prefix . chr($_) for @chr_initially_sorted;
+
+# Create a very unsorted version by reversing it, and then pushing the same
+# code points again, but pair-wise reversed.
+my @initially_unsorted = reverse @chr_initially_sorted;
+for (my $i = 0; $i < @chr_initially_sorted - 1; $i += 2) {
+    push @initially_unsorted, $chr_initially_sorted[$i+1],
+                              $chr_initially_sorted[$i];
+}
+
+# And, an all-UTF-8 version
+my @utf8_initialy_unsorted = @initially_unsorted;
+utf8::upgrade($_) for @utf8_initialy_unsorted;
+
+# Sort the non-UTF-8 version
+my @non_utf8_result = sort @initially_unsorted;
+my @wrongly_utf8;
+my $ordered_correctly = 1;
+for my $i (0 .. @chr_initially_sorted -1) {
+    if (   $chr_initially_sorted[$i] ne $non_utf8_result[2*$i]
+        || $chr_initially_sorted[$i] ne $non_utf8_result[2*$i+1])
+    {
+        $ordered_correctly = 0;
+        last;
+    }
+    push @wrongly_utf8, $i if $i < 256 && utf8::is_utf8($non_utf8_result[$i]);
+}
+if (! ok($ordered_correctly, "sort of non-utf8 list worked")) {
+    diag ("This should be in numeric order (with 2 instances of every code point):\n"
+        . join " ", map { sprintf "%02x", ord substr $_, $prefix_len, 1 } @non_utf8_result);
+}
+if (! is(@wrongly_utf8, 0,
+                      "No elements were wrongly converted to utf8 in sorting"))
+{
+    diag "For code points " . join " ", @wrongly_utf8;
+}
+
+# And then the UTF-8 one
+my @wrongly_non_utf8;
+$ordered_correctly = 1;
+my @utf8_result = sort @utf8_initialy_unsorted;
+for my $i (0 .. @chr_initially_sorted -1) {
+    if (   $chr_initially_sorted[$i] ne $utf8_result[2*$i]
+        || $chr_initially_sorted[$i] ne $utf8_result[2*$i+1])
+    {
+        $ordered_correctly = 0;
+        last;
+    }
+    push @wrongly_non_utf8, $i unless utf8::is_utf8($utf8_result[$i]);
+}
+if (! ok($ordered_correctly, "sort of utf8 list worked")) {
+    diag ("This should be in numeric order (with 2 instances of every code point):\n"
+        . join " ", map { sprintf "%02x", ord substr $_, $prefix_len, 1 } @utf8_result);
+}
+if (! is(@wrongly_non_utf8, 0,
+                      "No elements were wrongly converted from utf8 in sorting"))
+{
+    diag "For code points " . join " ", @wrongly_non_utf8;
+}
 
 cmp_ok($x,'eq',$expected,'upper first 4');
 $" = ' ';
@@ -119,6 +199,12 @@ cmp_ok("@b",'eq','1 2 3 4','map then sort');
 cmp_ok("@b",'eq','1 2 3 4','reverse then sort');
 
 
+@b = sort CORE::reverse (4,1,3,2);
+cmp_ok("@b",'eq','1 2 3 4','CORE::reverse then sort');
+
+eval  { @b = sort CORE::revers (4,1,3,2); };
+like($@, qr/^Undefined sort subroutine "CORE::revers" called at /);
+
 
 sub twoface { no warnings 'redefine'; *twoface = sub { $a <=> $b }; &twoface }
 eval { @b = sort twoface 4,1,3,2 };
@@ -151,6 +237,7 @@ eval { @b = sort twoface 4,1 };
 cmp_ok(substr($@,0,4), 'eq', 'good', 'twoface eval');
 
 eval <<'CODE';
+    no warnings qw(deprecated syntax);
     my @result = sort main'Backwards 'one', 'two';
 CODE
 cmp_ok($@,'eq','',q(old skool package));
@@ -283,6 +370,8 @@ cmp_ok($x,'eq','123',q(optimized-away comparison block doesn't take any other ar
     cxt_two();
     sub cxt_three { sort &test_if_list() }
     cxt_three();
+    sub cxt_three_anna_half { sort 0, test_if_list() }
+    cxt_three_anna_half();
 
     sub test_if_scalar {
         my $gimme = wantarray;
@@ -321,7 +410,7 @@ cmp_ok($x,'eq','123',q(optimized-away comparison block doesn't take any other ar
 {
     sub routine { "one", "two" };
     @a = sort(routine(1));
-    cmp_ok("@a",'eq',"one two",'bug id 19991001.003');
+    cmp_ok("@a",'eq',"one two",'bug id 19991001.003 (#1549)');
 }
 
 
@@ -330,23 +419,22 @@ cmp_ok($x,'eq','123',q(optimized-away comparison block doesn't take any other ar
     my ($r1,$r2,@a);
     our @g;
     @g = (3,2,1); $r1 = \$g[2]; @g = sort @g; $r2 = \$g[0];
-    is "$r1-@g", "$r2-1 2 3", "inplace sort of global";
+    is "$$r1-$$r2-@g", "1-1-1 2 3", "inplace sort of global";
 
     @a = qw(b a c); $r1 = \$a[1]; @a = sort @a; $r2 = \$a[0];
-    is "$r1-@a", "$r2-a b c", "inplace sort of lexical";
+    is "$$r1-$$r2-@a", "a-a-a b c", "inplace sort of lexical";
 
     @g = (2,3,1); $r1 = \$g[1]; @g = sort { $b <=> $a } @g; $r2 = \$g[0];
-    is "$r1-@g", "$r2-3 2 1", "inplace reversed sort of global";
+    is "$$r1-$$r2-@g", "3-3-3 2 1", "inplace reversed sort of global";
 
     @g = (2,3,1);
     $r1 = \$g[1]; @g = sort { $a<$b?1:$a>$b?-1:0 } @g; $r2 = \$g[0];
-    is "$r1-@g", "$r2-3 2 1", "inplace custom sort of global";
+    is "$$r1-$$r2-@g", "3-3-3 2 1", "inplace custom sort of global";
 
     sub mysort { $b cmp $a };
     @a = qw(b c a); $r1 = \$a[1]; @a = sort mysort @a; $r2 = \$a[0];
-    is "$r1-@a", "$r2-c b a", "inplace sort with function of lexical";
+    is "$$r1-$$r2-@a", "c-c-c b a", "inplace sort with function of lexical";
 
-    use Tie::Array;
     my @t;
     tie @t, 'Tie::StdArray';
 
@@ -387,7 +475,45 @@ cmp_ok($x,'eq','123',q(optimized-away comparison block doesn't take any other ar
     no warnings 'void';
     my @m; push @m, 0 for 1 .. 1024; $#m; @m = sort @m;
     ::pass("in-place sorting segfault");
+
+    # RT #39358 - array should be preserved during sort
+
+    {
+        my @aa = qw(b c a);
+        my @copy;
+        @aa = sort { @copy = @aa; $a cmp $b } @aa;
+        is "@aa",   "a b c", "RT 39358 - aa";
+        is "@copy", "b c a", "RT 39358 - copy";
+    }
+
+    # RT #128340: in-place sort incorrectly preserves element lvalue identity
+
+    @a = (5, 4, 3);
+    my $r = \$a[2];
+    @a = sort { $a <=> $b } @a;
+    $$r = "z";
+    is ("@a", "3 4 5", "RT #128340");
+
 }
+{
+    @Tied_Array_EXTEND_Test::ISA= 'Tie::StdArray';
+    my $extend_count;
+    sub Tied_Array_EXTEND_Test::EXTEND {
+        $extend_count= $_[1];
+        return;
+    }
+    my @t;
+    tie @t, "Tied_Array_EXTEND_Test";
+    is($extend_count, undef, "test that EXTEND has not been called prior to initialization");
+    $t[0]=3;
+    $t[1]=1;
+    $t[2]=2;
+    is($extend_count, undef, "test that EXTEND has not been called during initialization");
+    @t= sort @t;
+    is($extend_count, 3, "test that EXTEND was called with an argument of 3 by pp_sort()");
+    is("@t","1 2 3","test that sorting the tied array worked even though EXTEND is a no-op");
+}
+
 
 # Test optimisations of reversed sorts. As we now guarantee stability by
 # default, # optimisations which do not provide this are bogus.
@@ -758,19 +884,12 @@ cmp_ok($answer,'eq','good','sort subr called from other package');
     }
 }
 
-
-# Bug 7567 - an array shouldn't be modifiable while it's being
-# sorted in-place.
+SKIP:
 {
-    eval { @a=(1..8); @a = sort { @a = (0) } @a; };
-
-    $fail_msg = q(Modification of a read-only value attempted);
-    cmp_ok(substr($@,0,length($fail_msg)),'eq',$fail_msg,'bug 7567');
-}
-
-{
-    local $TODO = "sort should make sure elements are not freed in the sort block";
-    eval { @nomodify_x=(1..8); our @copy = sort { @nomodify_x = (0) } (@nomodify_x, 3); };
+    skip "freed args not under PERL_RC_STACK", 1
+        unless (Internals::stack_refcounted() & 1);
+    eval { @nomodify_x=(1..8);
+	   our @copy = sort { undef @nomodify_x; 1 } (@nomodify_x, 3); };
     is($@, "");
 }
 
@@ -778,12 +897,13 @@ cmp_ok($answer,'eq','good','sort subr called from other package');
 # Sorting shouldn't increase the refcount of a sub
 {
     sub sportello {(1+$a) <=> (1+$b)}
-    my $refcnt = &Internals::SvREFCNT(\&sportello);
+    # + 1 to account for prototype-defeating &... calling convention
+    my $refcnt = &Internals::SvREFCNT(\&sportello) + 1;
     @output = sort sportello 3,7,9;
 
     {
         package Doc;
-        ::is($refcnt, &Internals::SvREFCNT(\&::sportello), "sort sub refcnt");
+        ::refcount_is \&::sportello, $refcnt, "sort sub refcnt";
         $fail_msg = q(Modification of a read-only value attempted);
         # Sorting a read-only array in-place shouldn't be allowed
         my @readonly = (1..10);
@@ -844,12 +964,12 @@ is("@b", "1 2 3 3 4 5 7", "comparison result as string");
     is($cs, 2, 'overload string called twice');
 }
 
-fresh_perl_is('sub w ($$) {my ($l, my $r) = @_; my $v = \@_; undef @_; $l <=> $r}; print join q{ }, sort w 3, 1, 2, 0',
+fresh_perl_is('sub w ($$) {my ($l, $r) = @_; my $v = \@_; undef @_; $l <=> $r}; print join q{ }, sort w 3, 1, 2, 0',
              '0 1 2 3',
              {stderr => 1, switches => ['-w']},
              'RT #72334');
 
-fresh_perl_is('sub w ($$) {my ($l, my $r) = @_; my $v = \@_; undef @_; @_ = 0..2; $l <=> $r}; print join q{ }, sort w 3, 1, 2, 0',
+fresh_perl_is('sub w ($$) {my ($l, $r) = @_; my $v = \@_; undef @_; @_ = 0..2; $l <=> $r}; print join q{ }, sort w 3, 1, 2, 0',
              '0 1 2 3',
              {stderr => 1, switches => ['-w']},
              'RT #72334');
@@ -950,13 +1070,165 @@ my $stubref = \&givemeastub;
 is join("", sort $stubref split//, '04381091'), '98431100',
     'AUTOLOAD with stubref';
 
-# [perl #90030] sort without arguments
-eval '@x = (sort); 1';
-is $@, '', '(sort) does not die';
-is @x, 0, '(sort) returns empty list';
-eval '@x = sort; 1';
-is $@, '', 'sort; does not die';
-is @x, 0, 'sort; returns empty list';
-eval '{@x = sort} 1';
-is $@, '', '{sort} does not die';
-is @x, 0, '{sort} returns empty list';
+
+# this happened while the padrange op was being added. Sort blocks
+# are executed in void context, and the padrange op was skipping pushing
+# the item in void cx. The net result was that the return value was
+# whatever was on the stack last.
+
+{
+    my @a = sort {
+	my $r = $a <=> $b;
+	if ($r) {
+	    undef; # this got returned by mistake
+	    return $r
+	}
+	return 0;
+    } 5,1,3,6,0;
+    is "@a", "0 1 3 5 6", "padrange and void context";
+}
+
+# Fatal warnings an sort sub returning a non-number
+# We need two evals, because the panic used to happen on scope exit.
+eval { eval { use warnings FATAL => 'all'; () = sort { undef } 1,2 } };
+is $@, "",
+  'no panic/crash with fatal warnings when sort sub returns undef';
+eval { eval { use warnings FATAL => 'all'; () = sort { "no thin" } 1,2 } };
+is $@, "",
+  'no panic/crash with fatal warnings when sort sub returns string';
+sub notdef($$) { undef }
+eval { eval { use warnings FATAL => 'all'; () = sort notdef 1,2 } };
+is $@, "",
+  'no panic/crash with fatal warnings when sort sub($$) returns undef';
+sub yarn($$) { "no thinking aloud" }
+eval { eval { use warnings FATAL => 'all'; () = sort yarn 1,2 } };
+is $@, "",
+  'no panic/crash with fatal warnings when sort sub($$) returns string';
+
+$#a = -1;
+() = [sort { $a = 10; $b = 10; 0 } $#a, $#a];
+is $#a, 10, 'sort block modifying $a and $b';
+
+() = sort {
+    is \$a, \$a, '[perl #78194] op return values passed to sort'; 0
+} "${\''}", "${\''}";
+
+package deletions {
+    @_=sort { delete $deletions::{a}; delete $deletions::{b}; 3 } 1..3;
+}
+pass "no crash when sort block deletes *a and *b";
+
+# make sure return args are always evaluated in scalar context
+
+{
+    package Ret;
+    no warnings 'void';
+    sub f0 { }
+    sub f1 { $b <=> $a, $a <=> $b }
+    sub f2 { return ($b <=> $a, $a <=> $b) }
+    sub f3 { for ($b <=> $a) { return ($b <=> $a, $a <=> $b) } }
+
+    {
+        no warnings 'uninitialized';
+        ::is (join('-', sort { () } 3,1,2,4), '3-1-2-4', "Ret: null blk");
+    }
+    ::is (join('-', sort { $b <=> $a, $a <=> $b } 3,1,2,4), '1-2-3-4', "Ret: blk");
+    ::is (join('-', sort { for($b <=> $a) { return ($b <=> $a, $a <=> $b) } }
+                            3,1,2,4), '1-2-3-4', "Ret: blk ret");
+    {
+        no warnings 'uninitialized';
+        ::is (join('-', sort f0 3,1,2,4), '3-1-2-4', "Ret: f0");
+    }
+    ::is (join('-', sort f1 3,1,2,4), '1-2-3-4', "Ret: f1");
+    ::is (join('-', sort f2 3,1,2,4), '1-2-3-4', "Ret: f2");
+    ::is (join('-', sort f3 3,1,2,4), '1-2-3-4', "Ret: f3");
+}
+
+{
+    @a = sort{ *a=0; 1} 0..1;
+    pass "No crash when GP deleted out from under us [perl 124097]";
+
+    no warnings 'redefine';
+    # some alternative non-solutions localized modifications to *a and *b
+    sub a { 0 };
+    @a = sort { *a = sub { 1 }; $a <=> $b } 0 .. 1;
+    ok(a(), "*a wasn't localized inadvertantly");
+}
+
+SKIP:
+{
+    eval { require Config; 1 }
+      or skip "Cannot load Config", 1;
+    $Config::Config{ivsize} == 8
+      or skip "this test can only fail with 64-bit integers", 1;
+    # sort's built-in numeric comparison wasn't careful enough in a world
+    # of integers with more significant digits than NVs
+    my @in = ( "0", "20000000000000001", "20000000000000000" );
+    my @out = sort { $a <=> $b } @in;
+    is($out[1], "20000000000000000", "check sort order");
+}
+
+# [perl #92264] refcounting of GvSV slot of *a and *b
+{
+    my $act;
+    package ReportDestruction {
+	sub new { bless({ p => $_[1] }, $_[0]) }
+	sub DESTROY { $act .= $_[0]->{p}; }
+    }
+    $act = "";
+    my $filla = \(ReportDestruction->new("[filla]"));
+    () = sort { my $r = $a cmp $b; $act .= "0"; *a = \$$filla; $act .= "1"; $r }
+	    ReportDestruction->new("[sorta]"), "foo";
+    $act .= "2";
+    $filla = undef;
+    is $act, "01[sorta]2[filla]";
+    $act = "";
+    my $fillb = \(ReportDestruction->new("[fillb]"));
+    () = sort { my $r = $a cmp $b; $act .= "0"; *b = \$$fillb; $act .= "1"; $r }
+	    "foo", ReportDestruction->new("[sortb]");
+    $act .= "2";
+    $fillb = undef;
+    is $act, "01[sortb]2[fillb]";
+}
+
+# GH #18081
+# sub call via return in sort block was called in void rather than scalar
+# context
+
+{
+    sub sort18081 { $a + 1 <=> $b + 1 }
+    my @a = sort { return &sort18081 } 6,1,2;
+    is "@a", "1 2 6", "GH #18081";
+}
+
+# make a physically empty sort a compile-time error
+# Note that it was a wierd compile time error until
+# [perl #90030], v5.15.6-390-ga46b39a853
+# which made it a NOOP.
+# Then in Jan 2022 it was made an error again, to allow future
+# use of attribuute-like syntax, e.g.
+#    @a = $cond ? sort :num 1,2,3 : ....;
+# See http://nntp.perl.org/group/perl.perl5.porters/262425
+
+{
+    my @empty = ();
+    my @sorted = sort @empty;
+    is "@sorted", "", 'sort @empty';
+
+    eval 'my @s = sort';
+    like($@, qr/Not enough arguments for sort/, 'empty sort not allowed');
+
+    eval '{my @s = sort}';
+    like($@, qr/Not enough arguments for sort/, 'empty {sort} not allowed');
+
+    eval 'my @s = sort; 1';
+    like($@, qr/Not enough arguments for sort/, 'empty sort; not allowed');
+
+    eval 'my @s = (sort); 1';
+    like($@, qr/Not enough arguments for sort/, 'empty (sort); not allowed');
+}
+
+# check that lexical sort subs are ok
+
+my sub lexcmp { $a <=> $b }
+is join('', sort lexcmp 3,4,1,2), "1234", "lexical sort sub" ;

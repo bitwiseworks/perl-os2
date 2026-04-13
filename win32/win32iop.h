@@ -13,11 +13,7 @@
 #endif
 #endif
 
-#if defined(_MSC_VER) || defined(__MINGW32__)
-#  include <sys/utime.h>
-#else
-#  include <utime.h>
-#endif
+#include <sys/utime.h>
 
 /*
  * defines for flock emulation
@@ -68,10 +64,12 @@ DllExport  int		win32_fgetpos(FILE *pf,fpos_t *p);
 DllExport  int		win32_fsetpos(FILE *pf,const fpos_t *p);
 DllExport  void		win32_rewind(FILE *pf);
 DllExport  int		win32_tmpfd(void);
+DllExport  int		win32_tmpfd_mode(int mode);
 DllExport  FILE*	win32_tmpfile(void);
 DllExport  void		win32_abort(void);
 DllExport  int  	win32_fstat(int fd,Stat_t *sbufptr);
 DllExport  int  	win32_stat(const char *name,Stat_t *sbufptr);
+DllExport  int  	win32_lstat(const char *name,Stat_t *sbufptr);
 DllExport  int		win32_pipe( int *phandles, unsigned int psize, int textmode );
 DllExport  PerlIO*	win32_popen( const char *command, const char *mode );
 DllExport  PerlIO*	win32_popenlist(const char *mode, IV narg, SV **args);
@@ -90,7 +88,7 @@ DllExport  int		win32_isatty(int fd);
 DllExport  int		win32_read(int fd, void *buf, unsigned int cnt);
 DllExport  int		win32_write(int fd, const void *buf, unsigned int cnt);
 DllExport  int		win32_spawnvp(int mode, const char *cmdname,
-			      const char *const *argv);
+                              const char *const *argv);
 DllExport  int		win32_mkdir(const char *dir, int mode);
 DllExport  int		win32_rmdir(const char *dir);
 DllExport  int		win32_chdir(const char *dir);
@@ -126,17 +124,21 @@ DllExport  void		win32_rewinddir(DIR *dirp);
 DllExport  int		win32_closedir(DIR *dirp);
 DllExport  DIR*		win32_dirp_dup(DIR *const dirp, CLONE_PARAMS *const param);
 
+DllExport  char*        win32_getenvironmentstrings(void);
+/* also see win32_freeenvironmentstrings macro */
 DllExport  char*	win32_getenv(const char *name);
 DllExport  int		win32_putenv(const char *name);
 
 DllExport  unsigned 	win32_sleep(unsigned int);
+DllExport  int		win32_pause(void);
 DllExport  int		win32_times(struct tms *timebuf);
 DllExport  unsigned 	win32_alarm(unsigned int sec);
-DllExport  int		win32_stat(const char *path, Stat_t *buf);
 DllExport  char*	win32_longpath(char *path);
 DllExport  char*	win32_ansipath(const WCHAR *path);
 DllExport  int		win32_ioctl(int i, unsigned int u, char *data);
 DllExport  int          win32_link(const char *oldname, const char *newname);
+DllExport  int          win32_symlink(const char *oldname, const char *newname);
+DllExport  int          win32_readlink(const char *path, char *buf, size_t bufsiz);
 DllExport  int		win32_unlink(const char *f);
 DllExport  int		win32_utime(const char *f, struct utimbuf *t);
 DllExport  int		win32_gettimeofday(struct timeval *tp, void *not_used);
@@ -162,6 +164,8 @@ DllExport Sighandler_t	win32_signal(int sig, Sighandler_t subcode);
 
 END_EXTERN_C
 
+/* see comment in win32_getenvironmentstrings */
+#define win32_freeenvironmentstrings(x) win32_free(x)
 #undef alarm
 #define alarm				win32_alarm
 #undef strerror
@@ -196,7 +200,7 @@ END_EXTERN_C
 
 #define stderr				win32_stderr()
 #define stdout				win32_stdout()
-#define	stdin				win32_stdin()
+#define stdin                           win32_stdin()
 #define feof(f)				win32_feof(f)
 #define ferror(f)			win32_ferror(f)
 #define errno 				(*win32_errno())
@@ -206,17 +210,17 @@ END_EXTERN_C
  * redirect to our own version
  */
 #undef fprintf
-#define	fprintf			win32_fprintf
-#define	vfprintf		win32_vfprintf
-#define	printf			win32_printf
-#define	vprintf			win32_vprintf
+#define fprintf                 win32_fprintf
+#define vfprintf                win32_vfprintf
+#define printf                  win32_printf
+#define vprintf                 win32_vprintf
 #define fread(buf,size,count,f)	win32_fread(buf,size,count,f)
 #define fwrite(buf,size,count,f)	win32_fwrite(buf,size,count,f)
 #define fopen			win32_fopen
 #undef fdopen
 #define fdopen			win32_fdopen
 #define freopen			win32_freopen
-#define	fclose(f)		win32_fclose(f)
+#define fclose(f)               win32_fclose(f)
 #define fputs(s,f)		win32_fputs(s,f)
 #define fputc(c,f)		win32_fputc(c,f)
 #define ungetc(c,f)		win32_ungetc(c,f)
@@ -232,8 +236,15 @@ END_EXTERN_C
 #define rewind(f)		win32_rewind(f)
 #define tmpfile()		win32_tmpfile()
 #define abort()			win32_abort()
+#ifdef __MINGW32__
+#  undef fstat
+#endif
 #define fstat(fd,bufptr)   	win32_fstat(fd,bufptr)
+#ifdef __MINGW32__
+#  undef stat
+#endif
 #define stat(pth,bufptr)   	win32_stat(pth,bufptr)
+#define lstat(pth,bufptr)   	win32_lstat(pth,bufptr)
 #define longpath(pth)   	win32_longpath(pth)
 #define ansipath(pth)   	win32_ansipath(pth)
 #define rename(old,new)		win32_rename(old,new)
@@ -278,7 +289,6 @@ END_EXTERN_C
 #define access(p,m)		win32_access(p,m)
 #define chmod(p,m)		win32_chmod(p,m)
 
-
 #if !defined(MYMALLOC) || !defined(PERL_CORE)
 #undef malloc
 #undef calloc
@@ -295,11 +305,13 @@ END_EXTERN_C
  */
 
 #define pipe(fd)		win32_pipe((fd), 512, O_BINARY)
-#define pause()			win32_sleep((32767L << 16) + 32767)
+#define pause			win32_pause
 #define sleep			win32_sleep
 #define times			win32_times
 #define ioctl			win32_ioctl
 #define link			win32_link
+#define symlink			win32_symlink
+#define readlink		win32_readlink
 #define unlink			win32_unlink
 #define utime			win32_utime
 #define gettimeofday		win32_gettimeofday
@@ -307,6 +319,8 @@ END_EXTERN_C
 #define wait			win32_wait
 #define waitpid			win32_waitpid
 #define kill			win32_kill
+#define killpg(pid, sig)	win32_kill(pid, -(sig))
+
 
 #define opendir			win32_opendir
 #define readdir			win32_readdir

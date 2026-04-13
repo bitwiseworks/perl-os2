@@ -1,10 +1,12 @@
 #!/usr/bin/perl -w
 
 BEGIN {
+    delete $ENV{HARNESS_OPTIONS};
     unshift @INC, 't/lib';
 }
 
 use strict;
+use warnings;
 
 use Test::More;
 
@@ -23,7 +25,7 @@ ok $ENV{HARNESS_VERSION}, 'HARNESS_VERSION env variable should be set';
 
 {
     my @output;
-    local $^W;
+    no warnings 'redefine';
     require TAP::Formatter::Base;
     local *TAP::Formatter::Base::_output = sub {
         my $self = shift;
@@ -154,7 +156,8 @@ ok $ENV{HARNESS_VERSION}, 'HARNESS_VERSION env variable should be set';
 
     chomp(@output);
     @expected = (
-        "$source_tests/harness .. ok",
+        "$source_tests/harness ..",
+        "ok",
         'All tests successful.',
     );
 

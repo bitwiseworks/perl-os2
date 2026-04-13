@@ -5,12 +5,12 @@
 #
 
 BEGIN {
-    chdir 't' if -d 't';
-    @INC = qw(. ../lib);
-    require "test.pl";
+    chdir 't' if -d 't'; 
+    require "./test.pl";
+    set_up_inc( qw(. ../lib) );
 }
 
-plan( tests => 62 );
+plan( tests => 77 );
 
 {
     my @lol = ([qw(a b c)], [], [qw(1 2 3)]);
@@ -215,6 +215,12 @@ plan( tests => 62 );
          "proper error on variable as block. [perl #37314]");
 }
 
+# [perl #78194] grep/map aliasing op return values
+grep is(\$_, \$_, '[perl #78194] \$_ == \$_ inside grep ..., "$x"'),
+     "${\''}", "${\''}";
+map is(\$_, \$_, '[perl #78194] \$_ == \$_ inside map ..., "$x"'),
+     "${\''}", "${\''}";
+
 # [perl #92254] freeing $_ in gremap block
 {
     my $y;
@@ -222,3 +228,69 @@ plan( tests => 62 );
     map { undef *_ } $y;
 }
 pass 'no double frees with grep/map { undef *_ }';
+
+# Don't mortalise PADTMPs.
+# This failed while I was messing with leave stuff (but not in a simple
+# test, so add one). The '1;' ensures the block is wrapped in ENTER/LEAVE;
+# the stringify returns a PADTMP. DAPM.
+
+{
+    my @a = map { 1; "$_" } 1,2;
+    is("@a", "1 2", "PADTMP");
+}
+
+
+package FOO {
+    my $count;
+    sub DESTROY { $count++ }
+    my @a;
+
+    # check all grep arguments are immediately released
+
+    $count = 0;
+    @a = (bless([]), bless([]), bless([]));
+    grep 1, @a;
+    ::is ($count, 0, "grep void pre");
+    @a = ();
+    ::is ($count, 3, "grep void post");
+
+    $count = 0;
+    @a = (bless([]), bless([]), bless([]));
+    my $x = grep 1, @a;
+    ::is ($count, 0, "grep scalar pre");
+    @a = ();
+    ::is ($count, 3, "grep scalar post");
+
+    $count = 0;
+    @a = (bless([]), bless([]), bless([]));
+    () = grep 1, @a;
+    ::is ($count, 0, "grep list pre");
+    @a = ();
+    ::is ($count, 3, "grep list post");
+
+    # check check map expression results are immediately released
+    # in void context
+
+    $count = 1;
+    map {
+            ::is ($count, 1, "block map void $_");
+            $count = 0;
+            bless[];
+        } 1,2,3;
+}
+
+# At one point during development, this code SEGVed on PERL_RC_STACK
+# builds, as NULL filler pointers on the stack during a map were getting
+# copied to the tmps stack, and the tmps stack can't handle NULL pointers.
+# The bug only occurred in IO::Socket::SSL rather than core. It required
+# perl doing a call_sv(.., G_EVAL) to call the sub containing the map. In
+# the original bug this was triggered by a use/require, but here we use a
+# BEGIN within an eval as simpler variant.
+
+{
+    my @res;
+    eval q{
+        BEGIN { @res = map { $_ => eval {die} || -1 } qw( ABC XYZ); }
+    };
+    is("@res", "ABC -1 XYZ -1", "no NULL tmps");
+}

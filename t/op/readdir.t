@@ -2,13 +2,13 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
     require './test.pl';
+    set_up_inc('../lib');
 }
 
 use strict;
 use warnings;
-use vars qw($fh @fh %fh);
+our ($fh, @fh, %fh);
 
 eval 'opendir(NOSUCH, "no/such/directory");';
 skip_all($@) if $@;
@@ -57,14 +57,61 @@ is(ref $fh{abc}, 'GLOB');
 isnt("$fh", "$fh[0]");
 isnt("$fh", "$fh{abc}");
 
-# See that perl does not segfault upon readdir($x="."); 
-# http://rt.perl.org/rt3/Ticket/Display.html?id=68182
-fresh_perl_like(<<'EOP', qr/^no crash/, {}, 'RT #68182');
+# See that perl does not segfault upon readdir($x=".");
+# https://github.com/Perl/perl5/issues/9813
+fresh_perl_like(<<'EOP', qr/^no crash/, {}, 'GH #9813');
   eval {
     my $x = ".";
     my @files = readdir($x);
   };
   print "no crash";
 EOP
+
+SKIP:
+{ # [perl #118651]
+  # test that readdir doesn't modify errno on successfully reaching the end of the list
+  # in scalar context, POSIX requires that readdir() not modify errno on end-of-directory
+
+  my @s;
+  ok(opendir(OP, "op"), "opendir op");
+  $! = 0;
+  while (defined(my $f = readdir OP)) {
+    push @s, $f
+      if $f =~ /^[^\.].*\.t$/i;
+  }
+  my $errno = $! + 0;
+  closedir OP;
+  is(@s, @D, "should be the same number of files, scalar or list")
+    or skip "mismatch on file count - presumably a readdir error", 1;
+  is($errno, 0, "errno preserved");
+}
+
+SKIP:
+{
+    open my $fh, "<", "op"
+      or skip "can't open a directory on this platform", 10;
+    my $warned;
+    local $SIG{__WARN__} = sub { $warned = "@_" };
+    ok(!readdir($fh), "cannot readdir file handle");
+    like($warned, qr/readdir\(\) attempted on handle \$fh opened with open/,
+         "check the message");
+    undef $warned;
+    ok(!telldir($fh), "cannot telldir file handle");
+    like($warned, qr/telldir\(\) attempted on handle \$fh opened with open/,
+         "check the message");
+    undef $warned;
+    ok(!seekdir($fh, 0), "cannot seekdir file handle");
+    like($warned, qr/seekdir\(\) attempted on handle \$fh opened with open/,
+         "check the message");
+    undef $warned;
+    ok(!rewinddir($fh), "cannot rewinddir file handle");
+    like($warned, qr/rewinddir\(\) attempted on handle \$fh opened with open/,
+         "check the message");
+    undef $warned;
+    ok(!closedir($fh), "cannot closedir file handle");
+    like($warned, qr/closedir\(\) attempted on handle \$fh opened with open/,
+         "check the message");
+    undef $warned;
+}
 
 done_testing();

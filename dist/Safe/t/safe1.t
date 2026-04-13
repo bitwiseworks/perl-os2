@@ -1,12 +1,11 @@
 #!./perl -w
 $|=1;
+use Config;
 BEGIN {
-    require Config; import Config;
     if ($Config{'extensions'} !~ /\bOpcode\b/ && $Config{'osname'} ne 'VMS') {
         print "1..0\n";
         exit 0;
     }
-
 }
 
 # Tests Todo:
@@ -14,7 +13,7 @@ BEGIN {
 
 package test;	# test from somewhere other than main
 
-use vars qw($bar);
+our $bar;
 
 use Opcode 1.00, qw(opdesc opset opset_to_ops opset_to_hex
 	opmask_add full_opset empty_opset opcodes opmask define_optag);
@@ -24,11 +23,11 @@ use Test::More;
 
 my $cpt;
 # create and destroy some automatic Safe compartments first
-$cpt = new Safe or die;
-$cpt = new Safe or die;
-$cpt = new Safe or die;
+$cpt = Safe->new or die;
+$cpt = Safe->new or die;
+$cpt = Safe->new or die;
 
-$cpt = new Safe "Root" or die;
+$cpt = Safe->new("Root") or die;
 
 foreach(1..3) {
 	$foo = 42;

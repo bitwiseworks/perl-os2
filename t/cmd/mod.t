@@ -1,6 +1,6 @@
 #!./perl
 
-print "1..13\n";
+print "1..15\n";
 
 print "ok 1\n" if 1;
 print "not ok 1\n" unless 1;
@@ -32,10 +32,11 @@ if (join(' ',@y) eq '0 2 4 6 8 10 12 14 16 18 20') {
 	print "not ok 7 @y\n";
 }
 
+# Well this is fragile...
 open(foo,'./TEST') || open(foo,'TEST') || open(foo,'t/TEST');
 $x = 0;
 $x++ while <foo>;
-print $x > 50 && $x < 1000 ? "ok 8\n" : "not ok 8\n";
+print $x > 50 && $x < 2000 ? "ok 8\n" : "not ok 8\n";
 
 $x = -0.5;
 print "not " if scalar($x) < 0 and $x >= 0;
@@ -53,3 +54,19 @@ print "not ok 12\n" if $x > 0;
 # This used to cause a segfault
 $x = "".("".do{"foo" for (1)});
 print "ok 13\n";
+
+$x = 0;
+do { ++$x } while 0;
+if ($x == 1) {
+    print "ok 14\n";
+} else {
+    print "not ok 14 # $x\n";
+}
+
+$x = 0;
+do { ++$x } until 1;
+if ($x == 1) {
+    print "ok 15\n";
+} else {
+    print "not ok 15 # $x\n";
+}

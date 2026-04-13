@@ -1,5 +1,8 @@
 #!/usr/local/bin/perl
 
+# Copy the cpan/Encode/bin/enc2xs script to utils/, while
+# prepending a suitable #! invocation.
+
 use Config;
 use File::Basename qw(&basename &dirname);
 use Cwd;
@@ -18,7 +21,7 @@ chdir dirname($0);
 my $file = basename($0, '.PL');
 $file .= '.com' if $^O eq 'VMS';
 
-open OUT,">$file" or die "Can't create $file: $!";
+open OUT, '>', $file or die "Can't create $file: $!";
 
 print "Extracting $file (with variable substitutions)\n";
 
@@ -28,14 +31,14 @@ print "Extracting $file (with variable substitutions)\n";
 print OUT <<"!GROK!THIS!";
 $Config{startperl}
     eval 'exec $Config{perlpath} -S \$0 \${1+"\$@"}'
-	if \$running_under_some_shell;
+	if 0; # ^ Run only under a shell
 !GROK!THIS!
 
 use File::Spec;
 
 my $enc2xs = File::Spec->catfile(File::Spec->catdir(File::Spec->updir, "cpan", "Encode", "bin"), "enc2xs");
 
-if (open(ENC2XS, $enc2xs)) {
+if (open(ENC2XS, '<', $enc2xs)) {
     print OUT <ENC2XS>;
     close ENC2XS;
 } else {

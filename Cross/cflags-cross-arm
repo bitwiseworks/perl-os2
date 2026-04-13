@@ -1,9 +1,9 @@
 #!/bin/sh
 
 # Extra warnings, used e.g. for gcc.
-warn="-Wall -ansi   -W -Wextra -Wdeclaration-after-statement -Wendif-labels -Wc++-compat"
+warn="-Wall -Wextra -Wendif-labels -Wc++-compat"
 # Extra standardness.
-stdflags=" -std=c89"
+stdflags=" -std=c99"
 # Extra extra.
 extra=""
 
@@ -73,12 +73,12 @@ for file do
     dl) ;;
     doio) ;;
     doop) ;;
+    dquote) ;;
     dump) ;;
     globals) ;;
     gv) ;;
     hv) ;;
     locale) ;;
-    madly) ;;
     main) ;;
     malloc) ;;
     mg) ;;
@@ -88,7 +88,6 @@ for file do
     opmini) ;;
     pad) ;;
     perl) ;;
-    perlapi) ;;
     perlmain) ;;
     perly) ;;
     pp) ;;
@@ -103,6 +102,7 @@ for file do
     scope) ;;
     sv) ;;
     taint) ;;
+    time64) ;;
     toke) ;;
     universal) ;;
     usersub) ;;
@@ -110,18 +110,6 @@ for file do
     util) ;;
     *) ;;
     esac
-
-case "$cc" in
-*g++*)
-  # Extra paranoia in case people have bad canned ccflags:
-  # bad in the sense that the flags are accepted by g++,
-  # but then whined about.
-  for f in -Wdeclaration-after-statement -std=c89
-  do
-    ccflags=`echo $ccflags|sed 's/$f/ /'`
-  done
-  ;;
-esac
 
 case "$cc" in
 *g++*)
@@ -147,7 +135,6 @@ if test -f .patch; then
   ccflags="-DPERL_PATCHNUM=`cat .patch` $ccflags"
 fi
 
-    : Can we perhaps use $ansi2knr here
     echo "$CROSSCC -c -DUSE_CROSS_COMPILE -DPERL_CORE $ccflags $stdflags $optimize $warn $extra"
     eval "$also "'"$CROSSCC -DUSE_CROSS_COMPILE -DPERL_CORE -c $ccflags $stdflags $optimize $warn $extra"'
 

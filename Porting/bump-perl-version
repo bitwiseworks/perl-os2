@@ -26,6 +26,9 @@
 #     $ Porting/bump-perl-version -u < /tmp/scan
 #
 # (so line 52 of Porting/config.sh is now updated)
+#
+# The -i option can be used to combine these two steps (if you prefer to make
+# all of the changes at once and then edit the results via git).
 
 # This utility 'knows' about certain files and formats, and so can spot
 # 'hidden' version numbers, like PERL_SUBVERSION=9.
@@ -40,7 +43,7 @@
 #
 # Note there are various files and directories that it skips; these are
 # ones that are unlikely to contain anything needing bumping, but which
-# will generate lots fo false positives (eg pod/*). These are listed on
+# will generate lots of false positives (eg pod/*). These are listed on
 # STDERR as they are skipped.
 
 use strict;
@@ -75,7 +78,7 @@ EOF
 my %opts;
 getopts('csui', \%opts) or usage;
 if ($opts{u}) {
-    @ARGV == 0 or usage('no version version numbers should be specified');
+    @ARGV == 0 or usage('no version numbers should be specified');
     # fake to stop warnings when calculating $oldx etc
     @ARGV = qw(99.99.99 99.99.99);
 }
@@ -185,23 +188,6 @@ my @maps =  (
 	"$oldx$oldy",
 	qr/win32|hints/,      # README.win32, win32/*, hints/*
     ],
-
-    # microperl locations should be bumped for major versions
-    [
-        qr{(/)(\d\.\d{2})(["'/])},
-        sub { $2, "$1$newx.$newy$3" },
-        "$oldx.$oldy",
-        qr/uconfig/,
-    ],
-
-    # rename perl-5^.15^.1.dirperl-5_15_1.dir in README.vms
-    [
-	qr{\sperl-(\d+)_(\d+)_(\d+)\.dir}x,
-	sub { " perl-${1}_${2}_${3}.dir", " perl-${newx}_${newy}_${newz}.dir" },
-	" perl-${oldx}_${oldy}_{$oldz}.dir",
-	qr/README.vms/,
-    ],
-
 );
 
 
@@ -209,9 +195,11 @@ my @maps =  (
 
 my %SKIP_FILES = map { ($_ => 1) } qw(
     Changes
+    intrpvar.h
     MANIFEST
     Porting/Maintainers.pl
     Porting/acknowledgements.pl
+    Porting/corelist-perldelta.pl
     Porting/epigraphs.pod
     Porting/how_to_write_a_perldelta.pod
     Porting/release_managers_guide.pod
@@ -220,6 +208,7 @@ my %SKIP_FILES = map { ($_ => 1) } qw(
     pp_ctl.c
 );
 my @SKIP_DIRS = qw(
+    dist
     ext
     lib
     pod
@@ -247,7 +236,7 @@ exit 0;
 
 sub do_scan {
     for my $file (@mani_files) {
-	next if grep $file =~ m{$_/}, @SKIP_DIRS;
+	next if grep $file =~ m{^$_/}, @SKIP_DIRS;
 	if ($SKIP_FILES{$file}) {
 	    warn "(skipping $file)\n";
 	    next;
@@ -261,6 +250,7 @@ sub do_scan {
 
 	while (my $line = <$fh>) {
 	    my $oldline = $line;
+	    my $line_changed = 0;
 	    for my $map (@maps) {
 		my ($pat, $sub, $expected, $file_pat) = @$map;
 
@@ -274,9 +264,13 @@ sub do_scan {
 		}
 		$line =~ s/$pat/$replacement/
 		    or die "Internal error: substitution failed: [$pat]\n";
+		if ($line ne $oldline) {
+	            $line_changed = 1;
+		    last;
+		}
 	    }
 	    $new_contents .= $line if $opts{i};
-	    if ($line ne $oldline) {
+	    if ($line_changed) {
 		$file_changed = 1;
 		if ($opts{s}) {
 		    print "\n$file\n" unless $header;

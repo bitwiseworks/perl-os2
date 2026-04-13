@@ -29,7 +29,7 @@
     
 __END__
 # pad.c
-use warnings 'misc' ;
+use warnings 'shadow' ;
 my $x ;
 my $x ;
 my $y = my $y ;
@@ -37,7 +37,7 @@ my $p ;
 package X ;
 my $p ;
 package main ;
-no warnings 'misc' ;
+no warnings 'shadow' ;
 my $x ;
 my $y ;
 my $p ;
@@ -47,46 +47,83 @@ EXPECT
 "my" variable $p masks earlier declaration in same scope at - line 8.
 ########
 # pad.c
-use warnings 'misc' ;
+use feature 'state' ;
+use warnings 'shadow' ;
 our $x ;
 my $x ;
+state $x ;
 our $y = my $y ;
-our $p ;
+our $p = state $p ;
 package X ;
 my $p ;
 package main ;
-no warnings 'misc' ;
+no warnings 'shadow' ;
 our $z ;
 my $z ;
 our $t = my $t ;
-our $q ;
+our $q = state $q ;
 package X ;
 my $q ;
+state $q;
 EXPECT
-"my" variable $x masks earlier declaration in same scope at - line 4.
-"my" variable $y masks earlier declaration in same statement at - line 5.
-"my" variable $p masks earlier declaration in same scope at - line 8.
+"my" variable $x masks earlier declaration in same scope at - line 5.
+"state" variable $x masks earlier declaration in same scope at - line 6.
+"my" variable $y masks earlier declaration in same statement at - line 7.
+"state" variable $p masks earlier declaration in same statement at - line 8.
+"my" variable $p masks earlier declaration in same scope at - line 10.
 ########
 # pad.c
-use warnings 'misc' ;
+use feature 'state' ;
+use warnings 'shadow';
+state $x ;
+state $x ;
 my $x ;
 our $x ;
+state $y = state $y ;
+state $p = my $p ;
+state $z = our $z ;
+package X ;
+state $p ;
+package main ;
+no warnings 'shadow' ;
+state $x ;
+state $y ;
+state $p ;
+EXPECT
+"state" variable $x masks earlier declaration in same scope at - line 5.
+"my" variable $x masks earlier declaration in same scope at - line 6.
+"our" variable $x masks earlier declaration in same scope at - line 7.
+"state" variable $y masks earlier declaration in same statement at - line 8.
+"my" variable $p masks earlier declaration in same statement at - line 9.
+"our" variable $z masks earlier declaration in same statement at - line 10.
+"state" variable $p masks earlier declaration in same scope at - line 12.
+########
+# pad.c
+use feature 'state';
+use warnings 'shadow' ;
+my $x ;
+our $x ;
+state $x;
 my $y = our $y ;
-my $p ;
+my $p = state $p ;
 package X ;
 our $p ;
 package main ;
-no warnings 'misc' ;
+no warnings 'shadow' ;
 my $z ;
 our $z ;
 my $t = our $t ;
-my $q ;
+my $z = state $z;
+my $q;
+state $q;
 package X ;
 our $q ;
 EXPECT
-"our" variable $x masks earlier declaration in same scope at - line 4.
-"our" variable $y masks earlier declaration in same statement at - line 5.
-"our" variable $p masks earlier declaration in same scope at - line 8.
+"our" variable $x masks earlier declaration in same scope at - line 5.
+"state" variable $x masks earlier declaration in same scope at - line 6.
+"our" variable $y masks earlier declaration in same statement at - line 7.
+"state" variable $p masks earlier declaration in same statement at - line 8.
+"our" variable $p masks earlier declaration in same scope at - line 10.
 ########
 # pad.c
 use warnings 'closure' ;
@@ -173,7 +210,7 @@ sub {
 }->();
 f();
 EXPECT
-Variable "$x" is not available at (eval 1) line 2.
+Variable "$x" is not available at (eval 1) line 1.
 ########
 # pad.c
 use warnings 'closure' ;
@@ -195,7 +232,7 @@ sub f {
 }
 f()->();
 EXPECT
-Variable "$x" is not available at (eval 1) line 2.
+Variable "$x" is not available at (eval 1) line 1.
 ########
 use warnings 'closure' ;
 {
@@ -205,7 +242,7 @@ use warnings 'closure' ;
 }
 f2();
 EXPECT
-Variable "$x" is not available at (eval 1) line 2.
+Variable "$x" is not available at (eval 1) line 1.
 ########
 use warnings 'closure' ;
 for my $x (1,2,3) {
@@ -214,7 +251,7 @@ for my $x (1,2,3) {
 }
 f();
 EXPECT
-Variable "$x" is not available at (eval 4) line 2.
+Variable "$x" is not available at (eval 4) line 1.
 ########
 # pad.c
 no warnings 'closure' ;
@@ -227,7 +264,14 @@ sub x {
 EXPECT
 
 ########
-use warnings 'misc' ;
+# pad.c
+use warnings 'closure';
+my $x;
+our $y;
+sub { $x = $y }->();  # should not warn about $y being unavailable
+EXPECT
+########
+use warnings 'shadow' ;
 my $x;
 {
     my $x;
@@ -235,7 +279,7 @@ my $x;
 EXPECT
 ########
 # pad.c
-use warnings 'misc' ;
+use warnings 'shadow' ;
 our $x ;
 our $x ;
 our $y = our $y ;
@@ -243,7 +287,7 @@ our $p ;
 package X ;
 our $p ;
 package main ;
-no warnings 'misc' ;
+no warnings 'shadow' ;
 our $a ;
 our $a ;
 our $b = our $b ;
@@ -254,13 +298,13 @@ EXPECT
 "our" variable $x redeclared at - line 4.
 "our" variable $y redeclared at - line 5.
 ########
-use warnings 'misc' ;
+use warnings 'shadow' ;
 our $x;
 {
     our $x;
 }
 our $x;
-no warnings 'misc' ;
+no warnings 'shadow' ;
 our $y;
 {
     our $y;
@@ -271,36 +315,36 @@ EXPECT
 	(Did you mean "local" instead of "our"?)
 "our" variable $x redeclared at - line 6.
 ########
-use warnings 'misc' ;
+use warnings 'shadow' ;
 our $x;
 {
     my $x;
 }
-no warnings 'misc' ;
+no warnings 'shadow' ;
 our $y;
 {
     my $y;
 }
 EXPECT
 ########
-use warnings 'misc' ;
+use warnings 'shadow' ;
 my $x;
 {
     our $x;
 }
-no warnings 'misc' ;
+no warnings 'shadow' ;
 my $y;
 {
     our $y;
 }
 EXPECT
 ########
-use warnings 'misc' ;
+use warnings 'shadow' ;
 my $x;
 {
     my $x;
 }
-no warnings 'misc' ;
+no warnings 'shadow' ;
 my $y;
 {
     my $y;
@@ -313,13 +357,13 @@ use warnings;
 our $x unless $x;
 EXPECT
 ########
-use warnings 'misc';
+use warnings 'shadow';
 our $qunckkk;
 our $_;
 package clank_est;
 our $qunckkk;
 our $_;
-no warnings 'misc';
+no warnings 'shadow';
 our $ouch;
 our $_;
 package whack;
@@ -328,7 +372,7 @@ our $_;
 EXPECT
 "our" variable $_ redeclared at - line 6.
 ########
-use warnings 'misc';
+use warnings 'shadow';
 BEGIN { binmode STDERR, 'utf8'; }
 {
     use utf8;
@@ -338,7 +382,7 @@ BEGIN { binmode STDERR, 'utf8'; }
 EXPECT
 "my" variable $ニコニコ masks earlier declaration in same scope at - line 6.
 ########
-use warnings 'misc';
+use warnings 'shadow';
 BEGIN { binmode STDERR, 'utf8'; }
 {
     use utf8;
@@ -433,7 +477,7 @@ sub {
 }->();
 f();
 EXPECT
-Variable "$に" is not available at (eval 1) line 2.
+Variable "$に" is not available at (eval 1) line 1.
 ########
 # pad.c
 # see bugid 1754
@@ -446,7 +490,7 @@ sub f {
 }
 f()->();
 EXPECT
-Variable "$に" is not available at (eval 1) line 2.
+Variable "$に" is not available at (eval 1) line 1.
 ########
 use warnings 'closure' ;
 BEGIN { binmode STDERR, 'utf8'; }
@@ -458,7 +502,7 @@ BEGIN { binmode STDERR, 'utf8'; }
 }
 f2();
 EXPECT
-Variable "$に" is not available at (eval 1) line 2.
+Variable "$に" is not available at (eval 1) line 1.
 ########
 use warnings 'closure' ;
 BEGIN { binmode STDERR, 'utf8'; }
@@ -469,7 +513,7 @@ for my $に (1,2,3) {
 }
 f();
 EXPECT
-Variable "$に" is not available at (eval 4) line 2.
+Variable "$に" is not available at (eval 4) line 1.
 ########
 # pad.c
 use warnings 'closure' ;
@@ -534,7 +578,7 @@ sub {
 }->();
 f();
 EXPECT
-Variable "$è" is not available at (eval 1) line 2.
+Variable "$è" is not available at (eval 1) line 1.
 ########
 # pad.c
 # see bugid 1754
@@ -547,7 +591,7 @@ sub f {
 }
 f()->();
 EXPECT
-Variable "$è" is not available at (eval 1) line 2.
+Variable "$è" is not available at (eval 1) line 1.
 ########
 use warnings 'closure' ;
 BEGIN { binmode STDERR, 'utf8'; }
@@ -559,7 +603,7 @@ BEGIN { binmode STDERR, 'utf8'; }
 }
 f2();
 EXPECT
-Variable "$è" is not available at (eval 1) line 2.
+Variable "$è" is not available at (eval 1) line 1.
 ########
 use warnings 'closure' ;
 BEGIN { binmode STDERR, 'utf8'; }
@@ -570,5 +614,5 @@ for my $è (1,2,3) {
 }
 f();
 EXPECT
-Variable "$è" is not available at (eval 4) line 2.
+Variable "$è" is not available at (eval 4) line 1.
 ########

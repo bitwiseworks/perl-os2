@@ -1,11 +1,14 @@
 use strict;
 use warnings;
+
 use Test::More;
 use Config;
 
 BEGIN {
     plan skip_all => 'Perl compiled without ithreads'
         unless $Config{useithreads};
+    plan skip_all => 'no threads.pm'
+        unless eval { require threads };
     plan tests => 2;
 }
 

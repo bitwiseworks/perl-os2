@@ -7,34 +7,31 @@
 #
 # VMS is probably not handled properly here, due to their own
 # rather elaborate DCL scripting.
-#
 
 use strict;
 use warnings;
 use autodie;
 
-sub usage
-{
+sub usage {
     my $err = shift and select STDERR;
     print "usage: $0 [--list] [--regen] [--default=value]\n";
     exit $err;
     } # usage
 
-use Getopt::Long;
-my $opt_l = 0;
-my $opt_r = 0;
-my $default;
-my $tap = 0;
-my $test;
+use Getopt::Long qw(:config bundling);
 GetOptions (
-    "help|?"	=> sub { usage (0); },
-    "l|list!"	=> \$opt_l,
-    "regen"	=> \$opt_r,
-    "default=s" => \$default,
-    "tap"	=> \$tap,
+    "help|?"      => sub { usage (0); },
+    "l|list!"     => \(my $opt_l = 0),
+    "regen"       => \(my $opt_r = 0),
+    "default=s"   => \ my $default,
+    "tap"         => \(my $tap   = 0),
+    "v|verbose:1" => \(my $opt_v = 0),
     ) or usage (1);
 
-require 'regen/regen_lib.pl' if $opt_r;
+$default and $default =~ s/^'(.*)'$/$1/; # Will be quoted on generation
+my $test;
+
+require './regen/regen_lib.pl' if $opt_r;
 
 my $MASTER_CFG = "config_h.SH";
 # Inclusive bounds on the main part of the file, $section == 1 below:
@@ -46,18 +43,10 @@ my @CFG = (
 	   # We can't base our check on $], because that's the version of the
 	   # perl that we are running, not the version of the source tree.
 	   "Cross/config.sh-arm-linux",
-	   "epoc/config.sh",
-	   "NetWare/config.wc",
-	   "symbian/config.sh",
-	   "uconfig.sh",
-	   "uconfig64.sh",
+	   "Cross/config.sh-arm-linux-n770",
 	   "plan9/config_sh.sample",
 	   "win32/config.gc",
-	   "win32/config.gc64",
-	   "win32/config.gc64nox",
 	   "win32/config.vc",
-	   "win32/config.vc64",
-	   "win32/config.ce",
 	   "configure.com",
 	   "Porting/config.sh",
 	  );
@@ -65,6 +54,7 @@ my @CFG = (
 my @MASTER_CFG;
 {
     my %seen;
+    $opt_v and warn "Reading $MASTER_CFG ...\n";
     open my $fh, '<', $MASTER_CFG;
     while (<$fh>) {
 	while (/[^\\]\$([a-z]\w+)/g) {
@@ -80,6 +70,7 @@ my @MASTER_CFG;
 my %MANIFEST;
 
 {
+    $opt_v and warn "Reading MANIFEST ...\n";
     open my $fh, '<', 'MANIFEST';
     while (<$fh>) {
 	$MANIFEST{$1}++ if /^(.+?)\t/;
@@ -91,14 +82,15 @@ printf "1..%d\n", 2 * @CFG if $tap;
 
 for my $cfg (sort @CFG) {
     unless (exists $MANIFEST{$cfg}) {
-	print STDERR "[skipping not-expected '$cfg']\n";
+	warn "[skipping not-expected '$cfg']\n";
 	next;
     }
     my %cfg;
     my $section = 0;
     my @lines;
 
-    open my $fh, '<', $cfg;
+    $opt_v and warn "Reading $cfg ...\n";
+    open my $fh, '<', $cfg or die "$cfg: $!\n";
 
     if ($cfg eq 'configure.com') {
 	++$cfg{startperl}; # Cheat.

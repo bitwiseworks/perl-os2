@@ -6,7 +6,7 @@ BEGIN {
 }
 
 use Config;
-use Test::More tests => 15;
+use Test::More;
 
 # these two should be kept in sync with the pragma itself
 # if hint bits are changed there, other things *will* break
@@ -57,6 +57,7 @@ SKIP: {
     my $chflags = "/usr/bin/chflags";
     my $tstfile = "filetest.tst";
     skip("No $chflags available", 4) if !-x $chflags;
+    skip("Dragonfly filetests seem non-chflags aware", 4) if $^O eq 'dragonfly';
 
     my $skip_eff_user_tests = (!$Config{d_setreuid} && !$Config{d_setresuid})
 	                                            ||
@@ -97,3 +98,5 @@ SKIP: {
     unlink $tstfile;
     warn "Can't remove $tstfile: $!" if -e $tstfile;
 }
+
+done_testing();

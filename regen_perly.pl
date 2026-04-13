@@ -35,7 +35,8 @@ sub usage { die "usage: $0 [ -b bison_executable ] [ file.y ]\n" }
 use warnings;
 use strict;
 
-BEGIN { require 'regen/regen_lib.pl'; }
+our $Verbose;
+BEGIN { require './regen/regen_lib.pl'; }
 
 my $bison = 'bison';
 
@@ -73,15 +74,20 @@ unless ($version) { die <<EOF; }
 Could not find a version of bison in your path. Please install bison.
 EOF
 
-unless ($version =~ /\b(1\.875[a-z]?|2\.[0134])\b/) { die <<EOF; }
+# Don't change this to add new bison versions without testing that the generated
+# files actually work :-) Win32 in particular may not like them. :-(
+unless ($version =~ /\b(2\.[567]|3\.[0-8])\b/) { die <<EOF; }
 
-You have the wrong version of bison in your path; currently 1.875
-2.0, 2.1, 2.3 or 2.4 is required.  Try installing
-    http://ftp.gnu.org/gnu/bison/bison-2.4.1.tar.gz
+You have the wrong version of bison in your path; currently versions
+2.5-2.7 or 3.0-3.8 are known to work.  Try installing
+    http://ftp.gnu.org/gnu/bison/bison-3.3.tar.gz
 or similar.  Your bison identifies itself as:
 
 $version
 EOF
+
+# bison's version number, not the entire string, is most useful later on.
+$version = $1;
 
 # creates $tmpc_file and $tmph_file
 my_system("$bison -d -o $tmpc_file $y_file");
@@ -95,6 +101,7 @@ close $ctmp_fh;
 
 my ($actlines, $tablines) = extract($clines);
 
+our %tokens;
 $tablines .= make_type_tab($y_file, $tablines);
 
 my ($act_fh, $tab_fh, $h_fh) = map {
@@ -113,30 +120,46 @@ unlink $tmpc_file;
 
 open my $tmph_fh, '<', $tmph_file or die "Can't open $tmph_file: $!\n";
 
+# add integer-encoded #def of the bison version
+
+{
+    $version =~ /^(\d+)\.(\d+)/
+        or die "Can't handle bison version format: '$version'";
+    my ($v1,$v2) = ($1,$2);
+    die "Unexpectedly large bison version '$v1'"    if $v1 > 99;
+    die "Unexpectedly large bison subversion '$v2'" if $v2 > 9999;
+
+    printf $h_fh "#define PERL_BISON_VERSION %2d%04d\n\n", $v1, $v2;
+}
+
 my $endcore_done = 0;
-# Token macros need to be generated manually on bison 2.4
-my $gather_tokens = ($version =~ /\b2\.4\b/ ? undef : 0);
-my $tokens;
 while (<$tmph_fh>) {
+    # bison 2.6 adds header guards, which break things because of where we
+    # insert #ifdef PERL_CORE, so strip them because they aren't important
+    next if /YY_PERLYTMP_H/;
+
     print $h_fh "#ifdef PERL_CORE\n" if $. == 1;
     if (!$endcore_done and /YYSTYPE_IS_DECLARED/) {
-	print $h_fh "#endif /* PERL_CORE */\n";
+	print $h_fh <<h;
+#ifdef PERL_IN_TOKE_C
+static bool
+S_is_opval_token(int type) {
+    switch (type) {
+h
+	print $h_fh <<i for sort grep $tokens{$_} eq 'opval', keys %tokens;
+    case $_:
+i
+	print $h_fh <<j;
+	return 1;
+    }
+    return 0;
+}
+#endif /* PERL_IN_TOKE_C */
+#endif /* PERL_CORE */
+j
 	$endcore_done = 1;
     }
     next if /^#line \d+ ".*"/;
-    if (not defined $gather_tokens) {
-	$gather_tokens = 1 if /^\s* enum \s* yytokentype \s* \{/x;
-    }
-    elsif ($gather_tokens) {
-	if (/^\# \s* endif/x) { # The #endif just after the end of the token enum
-	    $gather_tokens = 0;
-	    $_ .= "\n/* Tokens.  */\n$tokens";
-	}
-	else {
-	    my ($tok, $val) = /(\w+) \s* = \s* (\d+)/x;
-	    $tokens .= "#define $tok $val\n" if $tok;
-	}
-    }
     print $h_fh $_;
 }
 close $tmph_fh;
@@ -149,52 +172,55 @@ foreach ($act_fh, $tab_fh, $h_fh) {
 exit 0;
 
 
+# extract the symbol kinds, tables and actions from the generated .c file
+
 sub extract {
     my $clines = shift;
     my $tablines;
     my $actlines;
 
+    # extract the symbol kind table if it exists
+    $clines =~ m@
+        (?:
+            ^/\* \s* Symbol \s+ kind\. \s* \*/\n
+        )?
+        enum \s+ yysymbol_kind_t \s* \{
+        .*?
+        \} \s* ;\n
+        typedef \s+ enum \s+ \w+ \s+ \w+ ; \n+
+    @xms
+        and $tablines .= $&;
+
+    my $last_table = $version >= 3 ? 'yyr2' : 'yystos';
     $clines =~ m@
 	(?:
 	    ^/* YYFINAL[^\n]+\n		#optional comment
 	)?
 	\# \s* define \s* YYFINAL	# first #define
 	.*?				# other defines + most tables
-	yystos\[\]\s*=			# start of last table
+	$last_table\[\]\s*=		# start of last table
 	.*?
 	}\s*;				# end of last table
     @xms
 	or die "Can't extract tables from $tmpc_file\n";
-    $tablines = $&;
+    $tablines .= $&;
 
+
+    # extract all the cases in the big action switch statement
 
     $clines =~ m@
-	switch \s* \( \s* \w+ \s* \) \s* { \s*
-	(
-	    case \s* \d+ \s* :
-	    \s*
-	    (?: \s* /\* .*? \*/ \s* )*	# optional C-comments
-	    \s*
-	    \#line [^\n]+"\Q$y_file\E"
-	    .*?
-	)
-	}
-	\s*
-	(?: \s* /\* .*? \*/ \s* )*	# optional C-comments
-	\s*
-	(
-	    \#line[^\n]+\.c"
-	|
-	    \#line[^\n]+\.simple"
-	|
-	    YY_SYMBOL_PRINT
-	)
+	switch \s* \( \s* yyn \s* \) \s* { \s*
+            ( .*?  default: \s* break; \s* )
+        }
     @xms
 	or die "Can't extract actions from $tmpc_file\n";
     $actlines = $1;
 
     # Remove extraneous comments from bison 2.4
     $actlines =~ s!\s* /\* \s* Line \s* \d+ \s* of \s* yacc\.c \s* \*/!!gx;
+
+    # Remove extraneous comments from bison 3.x
+    $actlines =~ s!\s* /\* \s* yacc\.c : \d+ \s* \*/!!gx;
 
     # C<#line 188 "perlytmp.c"> gets picked up by make depend, so remove them.
     $actlines =~ s/^#line \d+ "\Q$tmpc_file\E".*$//gm;
@@ -240,12 +266,13 @@ sub extract {
 
 sub make_type_tab {
     my ($y_file, $tablines) = @_;
+    my %just_tokens;
     my %tokens;
     my %types;
     my $default_token;
     open my $fh, '<', $y_file or die "Can't open $y_file: $!\n";
     while (<$fh>) {
-	if (/(\$\d+)\s*=/) {
+	if (/(\$\d+)\s*=[^=]/) {
 	    warn "$y_file:$.: dangerous assignment to $1: $_";
 	}
 
@@ -259,26 +286,32 @@ sub make_type_tab {
 	}
 
 	next unless /^%(token|type)/;
-	s/^%(token|type)\s+<(\w+)>\s+//
+	s/^%((token)|type)\s+<(\w+)>\s+//
 	    or die "$y_file: unparseable token/type line: $_";
-	$tokens{$_} = $2 for (split ' ', $_);
-	$types{$2} = 1;
+	for (split ' ', $_) {
+	    $tokens{$_} = $3;
+	    if ($2) {
+		$just_tokens{$_} = $3;
+	    }
+	}
+	$types{$3} = 1;
     }
+    *tokens = \%just_tokens; # perly.h needs this
     die "$y_file: no __DEFAULT__ token defined\n" unless $default_token;
     $types{$default_token} = 1;
 
     $tablines =~ /^\Qstatic const char *const yytname[] =\E\n
-	    {\n
+	    \{\n
 	    (.*?)
 	    ^};
 	    /xsm
 	or die "Can't extract yytname[] from table string\n";
     my $fields = $1;
-    $fields =~ s{"([^"]+)"}
+    $fields =~ s{"((?:[^"\\]|\\.)+)"}
 		{ "toketype_" .
 		    (defined $tokens{$1} ? $tokens{$1} : $default_token)
 		}ge;
-    $fields =~ s/, \s* 0 \s* $//x
+    $fields =~ s/, \s* (?:0|YY_NULL|YY_NULLPTR) \s* $//x
 	or die "make_type_tab: couldn't delete trailing ',0'\n";
 
     return 
@@ -293,6 +326,9 @@ sub make_type_tab {
 
 
 sub my_system {
+    if ($Verbose) {
+        print "executing: @_\n";
+    }
     system(@_);
     if ($? == -1) {
 	die "failed to execute command '@_': $!\n";

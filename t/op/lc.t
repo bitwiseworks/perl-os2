@@ -1,16 +1,22 @@
 #!./perl
+use strict;
 
 # This file is intentionally encoded in latin-1.
+#
+# Test uc(), lc(), fc(), ucfirst(), lcfirst(), quotemeta() etc
 
 BEGIN {
-    chdir 't';
-    @INC = '../lib';
+    chdir 't' if -d 't';
     require './test.pl';
+    set_up_inc('../lib');
+    skip_all_without_unicode_tables();
+    require './charset_tools.pl';
+    require './loc_tools.pl';   # Contains find_utf8_ctype_locale()
 }
 
 use feature qw( fc );
 
-plan tests => 128;
+plan tests => 139 + 2 * (5 * 256) + 17;
 
 is(lc(undef),	   "", "lc(undef) is ''");
 is(lcfirst(undef), "", "lcfirst(undef) is ''");
@@ -100,17 +106,17 @@ is(uc($b)         , "\x{100}\x{100}AA",  'uc');
 is(lc($b)         , "\x{101}\x{101}aa",  'lc');
 is(fc($b)         , "\x{101}\x{101}aa",  'fc');
 
+my $sharp_s = uni_to_native("\x{DF}");
 # \x{DF} is LATIN SMALL LETTER SHARP S, its uppercase is SS or \x{53}\x{53};
 # \x{149} is LATIN SMALL LETTER N PRECEDED BY APOSTROPHE, its uppercase is
 # \x{2BC}\x{E4} or MODIFIER LETTER APOSTROPHE and N.
 
-is(latin1_to_native("\U\x{DF}aB\x{149}cD"), latin1_to_native("SSAB\x{2BC}NCD"),
-       "multicharacter uppercase");
+is("\U${sharp_s}aB\x{149}cD", "SSAB\x{2BC}NCD", "multicharacter uppercase");
 
 # The \x{DF} is its own lowercase, ditto for \x{149}.
 # There are no single character -> multiple characters lowercase mappings.
 
-is(latin1_to_native("\L\x{DF}aB\x{149}cD"), latin1_to_native("\x{DF}ab\x{149}cd"),
+is("\L${sharp_s}aB\x{149}cD", "${sharp_s}ab\x{149}cd",
        "multicharacter lowercase");
 
 # \x{DF} is LATIN SMALL LETTER SHARP S, its foldcase is ss or \x{73}\x{73};
@@ -118,8 +124,7 @@ is(latin1_to_native("\L\x{DF}aB\x{149}cD"), latin1_to_native("\x{DF}ab\x{149}cd"
 # \x{2BC}\x{6E} or MODIFIER LETTER APOSTROPHE and n.
 # Note that is this further tested in t/uni/fold.t
 
-is(latin1_to_native("\F\x{DF}aB\x{149}cD"), latin1_to_native("ssab\x{2BC}ncd"),
-       "multicharacter foldcase");
+is("\F${sharp_s}aB\x{149}cD", "ssab\x{2BC}ncd", "multicharacter foldcase");
 
 
 # titlecase is used for \u / ucfirst.
@@ -159,9 +164,10 @@ is(uc("\x{1C5}") , "\x{1C4}",      "U+01C5 uc is U+01C4");
 is(uc("\x{1C6}") , "\x{1C4}",      "U+01C6 uc is U+01C4, too");
 
 # #18107: A host of bugs involving [ul]c{,first}. AMS 20021106
-$a = "\x{3c3}foo.bar"; # \x{3c3} == GREEK SMALL LETTER SIGMA.
-$b = "\x{3a3}FOO.BAR"; # \x{3a3} == GREEK CAPITAL LETTER SIGMA.
+my $a = "\x{3c3}foo.bar"; # \x{3c3} == GREEK SMALL LETTER SIGMA.
+my $b = "\x{3a3}FOO.BAR"; # \x{3a3} == GREEK CAPITAL LETTER SIGMA.
 
+my $c;
 ($c = $b) =~ s/(\w+)/lc($1)/ge;
 is($c , $a, "Using s///e to change case.");
 
@@ -256,27 +262,187 @@ for (1, 4, 9, 16, 25) {
 }
 
 # bug #43207
-my $temp = "Hello";
+my $temp = "HellO";
 for ("$temp") {
     lc $_;
-    is($_, "Hello");
+    is($_, "HellO", '[perl #43207] lc($_) modifying $_');
 }
-
-# bug #43207
-my $temp = "Hello";
 for ("$temp") {
     fc $_;
-    is($_, "Hello");
+    is($_, "HellO", '[perl #43207] fc($_) modifying $_');
+}
+for ("$temp") {
+    uc $_;
+    is($_, "HellO", '[perl #43207] uc($_) modifying $_');
+}
+for ("$temp") {
+    ucfirst $_;
+    is($_, "HellO", '[perl #43207] ucfirst($_) modifying $_');
+}
+for ("$temp") {
+    lcfirst $_;
+    is($_, "HellO", '[perl #43207] lcfirst($_) modifying $_');
 }
 
 # new in Unicode 5.1.0
-is(lc("\x{1E9E}"), "\x{df}", "lc(LATIN CAPITAL LETTER SHARP S)");
+is(lc("\x{1E9E}"), uni_to_native("\x{df}"), "lc(LATIN CAPITAL LETTER SHARP S)");
 
 {
     use feature 'unicode_strings';
     use bytes;
-    is(lc("\xc0"), "\xc0", "lc of above-ASCII Latin1 is itself under use bytes");
-    is(lcfirst("\xc0"), "\xc0", "lcfirst of above-ASCII Latin1 is itself under use bytes");
-    is(uc("\xe0"), "\xe0", "uc of above-ASCII Latin1 is itself under use bytes");
-    is(ucfirst("\xe0"), "\xe0", "ucfirst of above-ASCII Latin1 is itself under use bytes");
+    is(lc(uni_to_native("\xc0")), uni_to_native("\xc0"), "lc of above-ASCII Latin1 is itself under use bytes");
+    is(lcfirst(uni_to_native("\xc0")), uni_to_native("\xc0"), "lcfirst of above-ASCII Latin1 is itself under use bytes");
+    is(uc(uni_to_native("\xe0")), uni_to_native("\xe0"), "uc of above-ASCII Latin1 is itself under use bytes");
+    is(ucfirst(uni_to_native("\xe0")), uni_to_native("\xe0"), "ucfirst of above-ASCII Latin1 is itself under use bytes");
+}
+
+# Brought up in ticket #117855: Constant folding applied to uc() should use
+# the right set of hints.
+fresh_perl_like(<<'constantfolding', qr/^(\d+),\1\z/, {},
+    my $function = "uc";
+    my $char = "\xff";
+    {
+        use feature 'unicode_strings';
+        print ord uc($char), ",",
+              ord eval "$function('$char')", "\n";
+    }
+constantfolding
+    'folded uc() in string eval uses the right hints');
+
+# In-place lc/uc should not corrupt string buffers when given a non-utf8-
+# flagged thingy that stringifies to utf8
+my %h;
+$h{k} = bless[], "\x{3b0}\x{3b0}\x{3b0}bcde"; # U+03B0 grows with uc()
+   # using delete marks it as TEMP, so uc-in-place is permitted
+like uc delete $h{k}, qr "^(?:\x{3a5}\x{308}\x{301}){3}BCDE=ARRAY\(.*\)",
+    'uc(TEMP ref) does not produce a corrupt string';
+$h{k} = bless[], "\x{130}bcde"; # U+0130 grows with lc()
+   # using delete marks it as TEMP, so uc-in-place is permitted
+like lc delete $h{k}, qr "^i\x{307}bcde=array\(.*\)",
+    'lc(TEMP ref) does not produce a corrupt string';
+
+# List::Util::first() etc sets $_ to an SvTEMP without raising its
+# refcount.  This was causing lc() etc to unsafely modify in-place.
+# see http://nntp.perl.org/group/perl.perl5.porters/228213
+
+SKIP: {
+    skip "no List::Util on miniperl", 5, if is_miniperl;
+    require List::Util;
+    my %hl = qw(a 1 b 2 c 3);
+    my %hu = qw(A 1 B 2 C 3);
+    my $x;
+    $x = List::Util::first(sub { uc      $_ eq 'A' }, keys %hl);
+    is($x, "a", "first { uc }");
+    $x = List::Util::first(sub { ucfirst $_ eq 'A' }, keys %hl);
+    is($x, "a", "first { ucfirst }");
+    $x = List::Util::first(sub { lc      $_ eq 'a' }, keys %hu);
+    is($x, "A", "first { lc }");
+    $x = List::Util::first(sub { lcfirst $_ eq 'a' }, keys %hu);
+    is($x, "A", "first { lcfirst }");
+    $x = List::Util::first(sub { fc      $_ eq 'a' }, keys %hu);
+    is($x, "A", "first { fc }");
+}
+
+my $non_turkic_locale = find_utf8_ctype_locale();
+my $turkic_locale = find_utf8_turkic_locale();
+
+foreach my $turkic (0 .. 1) {
+    my $type = ($turkic) ? "turkic" : "non-turkic";
+    my $locale = ($turkic) ? $turkic_locale : $non_turkic_locale;
+
+  SKIP: {
+    skip "Can't find a $type UTF-8 locale", 5*256 unless defined $locale;
+
+    use feature qw( unicode_strings );
+
+    no locale;
+
+    my @unicode_lc;
+    my @unicode_fc;
+    my @unicode_uc;
+    my @unicode_lcfirst;
+    my @unicode_ucfirst;
+
+    # Get all the values outside of 'locale'
+    for my $i (0 .. 255) {
+        push @unicode_lc, lc(chr $i);
+        push @unicode_fc, fc(chr $i);
+        push @unicode_uc, uc(chr $i);
+        push @unicode_lcfirst, lcfirst(chr $i);
+        push @unicode_ucfirst, ucfirst(chr $i);
+    }
+
+    if ($turkic) {
+        $unicode_lc[ord 'I'] = chr 0x131;
+        $unicode_fc[ord 'I'] = chr 0x131;
+        $unicode_lcfirst[ord 'I'] = chr 0x131;
+        $unicode_uc[ord 'i'] = chr 0x130;
+        $unicode_ucfirst[ord 'i'] = chr 0x130;
+    }
+
+    use locale;
+    setlocale(&POSIX::LC_CTYPE, $locale);
+
+    for my $i (0 .. 255) {
+        is(lc(chr $i), $unicode_lc[$i], "In a $type UTF-8 locale, lc(chr $i) is the same as official Unicode");
+        is(uc(chr $i), $unicode_uc[$i], "In a $type UTF-8 locale, uc(chr $i) is the same as official Unicode");
+        is(fc(chr $i), $unicode_fc[$i], "In a $type UTF-8 locale, fc(chr $i) is the same as official Unicode");
+        is(lcfirst(chr $i), $unicode_lcfirst[$i], "In a $type UTF-8 locale, lcfirst(chr $i) is the same as official Unicode");
+        is(ucfirst(chr $i), $unicode_ucfirst[$i], "In a $type UTF-8 locale, ucfirst(chr $i) is the same as official Unicode");
+    }
+  }
+}
+
+SKIP: {
+    skip "Can't find a turkic UTF-8 locale", 17 unless defined $turkic_locale;
+
+    # These are designed to stress the calculation of space needed for the
+    # strings.  $filler contains a variety of characters that have special
+    # handling in the casing functions, and some regular chars as well.
+    # (0x49 = 'I')
+    my $filler_length = 10000;
+    my $filler = uni_to_native("\x{df}\x{49}\x{69}\x{b5}\x{e0}\x{c1}\x{b6}\x{ff}") x $filler_length;
+
+    # These are the correct answers to what should happen when the given
+    # casing function is called on $filler;
+    my $filler_lc = uni_to_native("\x{df}\x{131}\x{69}\x{b5}\x{e0}\x{e1}\x{b6}\x{ff}") x $filler_length;
+    my $filler_fc = ("ss" . uni_to_native("\x{131}\x{69}\x{3bc}\x{e0}\x{e1}\x{b6}\x{ff}")) x $filler_length;
+    my $filler_uc = ("SS" . uni_to_native("\x{49}\x{130}\x{39c}\x{c0}\x{c1}\x{b6}\x{178}")) x $filler_length;
+
+    use locale;
+    setlocale(&POSIX::LC_CTYPE, $turkic_locale);
+
+    is (lc "IIIIIII$filler", "\x{131}\x{131}\x{131}\x{131}\x{131}\x{131}\x{131}$filler_lc",
+        "lc non-UTF-8, in Turkic locale, beginning with a bunch of I's");
+    is (fc "IIIIIII$filler", "\x{131}\x{131}\x{131}\x{131}\x{131}\x{131}\x{131}$filler_fc",
+        "fc non-UTF-8, in Turkic locale, beginning with a bunch of I's");
+    is (lc "${filler}IIIIIII$filler", "$filler_lc\x{131}\x{131}\x{131}\x{131}\x{131}\x{131}\x{131}$filler_lc",
+        "lc non-UTF-8, in Turkic locale, a bunch of I's, but not at the beginning");
+    is (fc "${filler}IIIIIII$filler", "$filler_fc\x{131}\x{131}\x{131}\x{131}\x{131}\x{131}\x{131}$filler_fc",
+        "fc non-UTF-8, in Turkic locale, a bunch of I's, but not at the beginning");
+    is (lc "${filler}I\x{307}$filler", "${filler_lc}i$filler_lc",
+        "lc in Turkic locale with DOT ABOVE immediately following I");
+    is (lc "${filler}I\x{307}IIIIII$filler", "${filler_lc}i\x{131}\x{131}\x{131}\x{131}\x{131}\x{131}$filler_lc",
+        "lc in Turkic locale with DOT ABOVE immediately following I, then other I's ");
+    is (lc "${filler}I\x{316}\x{307}$filler", "${filler_lc}i\x{316}$filler_lc",
+        "lc in Turkic locale with DOT ABOVE after non-ABOVE");
+    is (lc "${filler}I\x{307}\x{300}$filler", "${filler_lc}i\x{300}$filler_lc",
+        "lc in Turkic locale with DOT ABOVE followed by ABOVE");
+    is (lc "${filler}I\x{300}\x{307}$filler", "$filler_lc\x{131}\x{300}\x{307}$filler_lc",
+        "lc in Turkic locale with other ABOVE before DOT ABOVE");
+    is (lcfirst "IIIIIII$filler", "\x{131}IIIIII$filler",
+        "lcfirst in Turkic locale, only first I changed");
+    is (lcfirst "I\x{307}$filler", "i$filler",
+        "lcfirst in Turkic locale with DOT ABOVE immediately following I");
+    is (lcfirst "I\x{307}IIIIII$filler", "iIIIIII$filler",
+        "lcfirst in Turkic locale with DOT ABOVE immediately following I, then"
+      . " other I's ");
+    is (lcfirst "I\x{316}\x{307}IIIIII$filler", "i\x{316}IIIIII$filler",
+        "lcfirst in Turkic locale with DOT ABOVE after non-ABOVE");
+    is (lcfirst "I\x{307}\x{300}IIIIII$filler", "i\x{300}IIIIII$filler",
+        "lcfirst in Turkic locale with DOT ABOVE followed by ABOVE");
+    is (lcfirst "I\x{300}\x{307}IIIIII$filler", "\x{131}\x{300}\x{307}IIIIII$filler",
+        "lcfirst in Turkic locale with other ABOVE before DOT ABOVE");
+    is (uc "${filler}i$filler", "$filler_uc\x{130}$filler_uc", "long string uc in Turkic locale");
+    is (ucfirst "ii$filler", "\x{130}i$filler", "long string ucfirst in Turkic locale; only first char changes");
 }

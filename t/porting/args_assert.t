@@ -2,8 +2,13 @@
 
 use strict;
 use warnings;
+use Config;
 
 require './test.pl';
+
+if ( $Config{usecrosscompile} ) {
+  skip_all( "Not all files are available during cross-compilation" );
+}
 
 plan('no_plan');
 
@@ -26,7 +31,9 @@ unless (-d 't' && -f 'MANIFEST') {
     open my $fh, '<', $proto or die "Can't open $proto: $!";
 
     while (<$fh>) {
-	$declared{$1}++ if /^#define\s+(PERL_ARGS_ASSERT[A-Za-z0-9_]+)\s+/;
+        # The trailing '.' distinguishes real from dummy macros that have no
+        # real asserts
+	$declared{$1}++ if /^#define\s+(PERL_ARGS_ASSERT[A-Za-z0-9_]+)\s+./;
     }
 }
 
@@ -38,6 +45,8 @@ if (!@ARGV) {
     while (<$fh>) {
 	# *.c or */*.c
 	push @ARGV, $prefix . $1 if m!^((?:[^/]+/)?[^/]+\.c)\t!;
+        # Special case the *inline.h since they behave like *.c
+	push @ARGV, $prefix . $1 if m!^(([^/]+)?inline\.h)\t!;
     }
 }
 

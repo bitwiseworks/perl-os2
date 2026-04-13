@@ -20,7 +20,7 @@ sub test_fetch_absent;
 my $utf8_for_258 = chr 258;
 utf8::encode $utf8_for_258;
 
-my @testkeys = ('N', chr 198, chr 256);
+my @testkeys = ('N', chr utf8::unicode_to_native(198), chr 256);
 my @keys = (@testkeys, $utf8_for_258);
 
 foreach (@keys) {
@@ -102,11 +102,21 @@ foreach my $in ("", "N", "a\0b") {
 	foreach my $upgrade_n (0, 1) {
 	    my (%hash, %placebo);
 	    XS::APItest::Hash::bitflip_hash(\%hash);
-	    foreach my $new (["7", 65, 67, 80],
-			     ["8", 163, 171, 215],
+	    foreach my $new (["7", utf8::unicode_to_native(65),
+                                   utf8::unicode_to_native(67),
+                                   utf8::unicode_to_native(80)
+                             ],
+			     ["8", utf8::unicode_to_native(163),
+                                   utf8::unicode_to_native(171),
+                                   utf8::unicode_to_native(215)
+                             ],
 			     ["U", 2603, 2604, 2604],
-			    ) {
-		foreach my $code (78, 240, 256, 1336) {
+                ) {
+		foreach my $code (utf8::unicode_to_native(78),
+                                  utf8::unicode_to_native(240),
+                                  256,
+                                  1336
+                ) {
 		    my $key = chr $code;
 		    # This is the UTF-8 byte sequence for the key.
 		    my $key_utf8 = $key;
@@ -181,7 +191,8 @@ sub test_precomputed_hashes {
 }
 
 {
-    use Scalar::Util 'weaken';
+    no warnings 'experimental::builtin';
+    use builtin 'weaken';
     my %h;
     fill_hash_with_nulls(\%h);
     my @objs;
@@ -258,6 +269,80 @@ sub test_precomputed_hashes {
 	  warnings; # thank you!
 	  @h{85} = 1 };
     pass 'no crash when writing to hash elem with null value via slice';
+    eval { delete local $h{86} };
+    pass 'no crash during local deletion of hash elem with null value';
+    eval { delete local @h{87,88} };
+    pass 'no crash during local deletion of hash slice with null values';
+}
+
+# [perl #111000] Bug number eleventy-one thousand:
+#                hv_store should work on hint hashes
+eval q{
+    BEGIN {
+	XS::APItest::Hash::store \%^H, "XS::APItest/hash.t", undef;
+	delete $^H{"XS::APItest/hash.t"};
+    }
+};
+pass("hv_store works on the hint hash");
+
+{
+    # [perl #79074] HeSVKEY_force loses UTF8ness
+    my %hash = ( "\xff" => 1, "\x{100}" => 1 );
+    my @keys = sort ( XS::APItest::Hash::test_force_keys(\%hash) );
+    is_deeply(\@keys, [ sort keys %hash ], "check HeSVKEY_force()");
+}
+
+# Test that mg_copy is called when expected (and not called when not)
+# No (other) tests in core will fail if the implementation of `keys %tied_hash`
+# is (accidentally) changed to also call hv_iterval() and trigger mg_copy.
+# However, this behaviour is visible, and tested by Variable::Magic on CPAN.
+
+{
+    my %h;
+    my $obj = tie %h, 'Tie::StdHash';
+    sv_magic_mycopy(\%h);
+
+    is(sv_magic_mycopy_count(\%h), 0);
+
+    $h{perl} = "rules";
+
+    is(sv_magic_mycopy_count(\%h), 1);
+
+    is($h{perl}, "rules", "found key");
+
+    is(sv_magic_mycopy_count(\%h), 2);
+
+    # keys *doesn't* trigger copy magic, so the count is still 2
+    my @flat = keys %h;
+
+    is(sv_magic_mycopy_count(\%h), 2);
+
+    @flat = values %h;
+
+    is(sv_magic_mycopy_count(\%h), 3);
+
+    @flat = each %h;
+
+    is(sv_magic_mycopy_count(\%h), 4);
+}
+
+{
+    # There are two API variants - hv_delete and hv_delete_ent. The Perl
+    # interpreter exclusively uses hv_delete_ent. Only XS code uses hv_delete.
+    # Hence the problem case could only be triggered by XS code called on
+    # symbol tables, and with particular non-ASCII keys:
+
+    # Deleting a key with WASUTF from a stash used to trigger a use-after free:
+    my $key = "\xFF\x{100}";
+    chop $key;
+    ++$main::{$key};
+    is(XS::APItest::Hash::delete(\%main::, $key), 1,
+       "hv_delete doesn't trigger a use-after free");
+
+    # Perl code has always used this API, which never had the problem:
+    ++$main::{$key};
+    is(XS::APItest::Hash::delete_ent(\%main::, $key), 1,
+       "hv_delete_ent never triggered a use-after free, but test it anyway");
 }
 
 done_testing;
@@ -375,7 +460,7 @@ sub test_U_hash {
 sub main_tests {
   my ($keys, $testkeys, $description) = @_;
   foreach my $key (@$testkeys) {
-    my $lckey = ($key eq chr 198) ? chr 230 : lc $key;
+    my $lckey = ($key eq chr utf8::unicode_to_native(198)) ? chr utf8::unicode_to_native(230) : lc $key;
     my $unikey = $key;
     utf8::encode $unikey;
 
@@ -550,6 +635,7 @@ sub rot13 {
 }
 
 sub bitflip {
-    my @results = map {join '', map {chr(32 ^ ord $_)} split '', $_} @_;
+    my $flip_bit = ord("A") ^ ord("a");
+    my @results = map {join '', map {chr($flip_bit ^ ord $_)} split '', $_} @_;
     wantarray ? @results : $results[0];
 }

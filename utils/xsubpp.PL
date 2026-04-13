@@ -1,4 +1,15 @@
 #!/usr/local/bin/perl
+#
+# xsubpp.PL: this script's normal purpose is to copy
+#
+#     dist/ExtUtils-ParseXS/lib/ExtUtils/xsubpp
+# to
+#     utils/xsubpp
+#
+# while prepending the standard "eval 'exec ...'" interpreter invocation
+# boilerplate.
+# This script belongs to the perl distribution, rather than belonging to
+# ExtUtils-ParseXS.
 
 use Config;
 use File::Basename qw(&basename &dirname);
@@ -18,7 +29,7 @@ chdir dirname($0);
 my $file = basename($0, '.PL');
 $file .= '.com' if $^O eq 'VMS';
 
-open OUT,">$file" or die "Can't create $file: $!";
+open OUT, ">", $file or die "Can't create $file: $!";
 
 print "Extracting $file (with variable substitutions)\n";
 
@@ -28,7 +39,7 @@ print "Extracting $file (with variable substitutions)\n";
 print OUT <<"!GROK!THIS!";
 $Config{startperl}
     eval 'exec $Config{perlpath} -S \$0 \${1+"\$@"}'
-	if \$running_under_some_shell;
+	if 0; # ^ Run only under a shell
 !GROK!THIS!
 
 use File::Spec;
@@ -38,7 +49,7 @@ my $xsubpp = File::Spec->catfile(File::Spec->catdir(File::Spec->updir,
 						       lib ExtUtils)),
 				 'xsubpp');
 
-if (open(XSUBPP, $xsubpp)) {
+if (open(XSUBPP, '<', $xsubpp)) {
     print OUT <XSUBPP>;
     close XSUBPP;
 } else {

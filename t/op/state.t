@@ -3,13 +3,13 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
     require './test.pl';
+    set_up_inc('../lib');
 }
 
 use strict;
 
-plan tests => 131;
+plan tests => 170;
 
 # Before loading feature.pm, test it with CORE::
 ok eval 'CORE::state $x = 1;', 'CORE::state outside of feature.pm scope';
@@ -135,6 +135,16 @@ is( $xsize, 0, 'uninitialized state array' );
 $xsize = stateful_array();
 is( $xsize, 1, 'uninitialized state array after one iteration' );
 
+sub stateful_init_array {
+    state @x = qw(a b c);
+    push @x, "x";
+    return join(",", @x);
+}
+
+is stateful_init_array(), "a,b,c,x";
+is stateful_init_array(), "a,b,c,x,x";
+is stateful_init_array(), "a,b,c,x,x,x";
+
 # hash state vars
 
 sub stateful_hash {
@@ -147,6 +157,46 @@ is( $xhval, 0, 'uninitialized state hash' );
 
 $xhval = stateful_hash();
 is( $xhval, 1, 'uninitialized state hash after one iteration' );
+
+sub stateful_init_hash {
+    state %x = qw(a b c d);
+    $x{foo}++;
+    return join(",", map { ($_, $x{$_}) } sort keys %x);
+}
+
+is stateful_init_hash(), "a,b,c,d,foo,1";
+is stateful_init_hash(), "a,b,c,d,foo,2";
+is stateful_init_hash(), "a,b,c,d,foo,3";
+
+# declarations with attributes
+
+SKIP: {
+skip "no attributes in miniperl", 3, if is_miniperl;
+
+eval q{
+sub stateful_attr {
+    state $a :shared;
+    state $b :shared = 3;
+    state @c :shared;
+    state @d :shared = qw(a b c);
+    state %e :shared;
+    state %f :shared = qw(a b c d);
+    $a++;
+    $b++;
+    push @c, "x";
+    push @d, "x";
+    $e{e}++;
+    $f{e}++;
+    return join(",", $a, $b, join(":", @c), join(":", @d), join(":", %e),
+	    join(":", map { ($_, $f{$_}) } sort keys %f));
+}
+};
+
+is stateful_attr(), "1,4,x,a:b:c:x,e:1,a:b:c:d:e:1";
+is stateful_attr(), "2,5,x:x,a:b:c:x:x,e:2,a:b:c:d:e:2";
+is stateful_attr(), "3,6,x:x:x,a:b:c:x:x:x,e:3,a:b:c:d:e:3";
+}
+
 
 # Recursion
 
@@ -202,21 +252,6 @@ $y = 0;
     redo if $y < 3
 }
 
-
-#
-# Check state $_
-#
-my @stones = qw [fred wilma barny betty];
-my $first  = $stones [0];
-my $First  = ucfirst $first;
-$_ = "bambam";
-foreach my $flint (@stones) {
-    state $_ = $flint;
-    is $_, $first, 'state $_';
-    ok /$first/, '/.../ binds to $_';
-    is ucfirst, $First, '$_ default argument';
-}
-is $_, "bambam", '$_ is still there';
 
 #
 # Goto.
@@ -311,6 +346,7 @@ foreach my $x (0 .. 4) {
 #
 my @spam = qw [spam ham bacon beans];
 foreach my $spam (@spam) {
+    no warnings 'deprecated';
     given (state $spam = $spam) {
         when ($spam [0]) {ok 1, "given"}
         default          {ok 0, "given"}
@@ -355,10 +391,17 @@ foreach my $spam (@spam) {
 
 
 foreach my $forbidden (<DATA>) {
-    chomp $forbidden;
-    no strict 'vars';
-    eval $forbidden;
-    like $@, qr/Initialization of state variables in list context currently forbidden/, "Currently forbidden: $forbidden";
+    SKIP: {
+        skip_if_miniperl("miniperl can't load attributes.pm", 1)
+                if $forbidden =~ /:shared/;
+
+        chomp $forbidden;
+        no strict 'vars';
+        eval $forbidden;
+        like $@,
+            qr/Initialization of state variables in list currently forbidden/,
+            "Currently forbidden: $forbidden";
+    }
 }
 
 # [perl #49522] state variable not available
@@ -404,17 +447,128 @@ foreach my $forbidden (<DATA>) {
 }
 
 
+# [perl #117095] state var initialisation getting skipped
+# the 'if 0' code below causes a call to op_free at compile-time,
+# which used to inadvertently mark the state var as initialised.
+
+{
+    state $f = 1;
+    foo($f) if 0; # this calls op_free on padmy($f)
+    ok(defined $f, 'state init not skipped');
+}
+
+# [perl #121134] Make sure padrange doesn't mess with these
+{
+    sub thing {
+	my $expect = shift;
+        my ($x, $y);
+        state $z;
+
+        is($z, $expect, "State variable is correct");
+
+        $z = 5;
+    }
+
+    thing(undef);
+    thing(5);
+
+    sub thing2 {
+        my $expect = shift;
+        my $x;
+        my $y;
+        state $z;
+
+        is($z, $expect, "State variable is correct");
+
+        $z = 6;
+    }
+
+    thing2(undef);
+    thing2(6);
+}
+
+# [perl #123029] regression in "state" under PERL_NO_COW
+sub rt_123029 {
+    state $s;
+    $s = 'foo'x500;
+    my $c = $s;
+    return defined $s;
+}
+ok(rt_123029(), "state variables don't surprisingly disappear when accessed");
+
+# make sure multiconcat doesn't break state
+
+for (1,2) {
+    state $s = "-$_-";
+    is($s, "-1-", "state with multiconcat pass $_");
+}
+
+# This caused 'Attempt to free unreferenced scalar' because the SV holding
+# the value of the const state sub wasn't having its ref count incremented
+# when the sub was cloned.
+
+{
+    my @warnings;
+    local $SIG{__WARN__} = sub { push @warnings, @_ };
+    my $e = eval 'my $s = sub { state sub FOO () { 42 } }; 1;';
+    is($e, 1, "const state sub ran ok");
+    ok(!@warnings, "no 'Attempt to free unreferenced scalar'")
+        or diag "got these warnings:\n@warnings";
+}
+
+#  [GH #18630] Returning state hash-assign risks "Bizarre copy of HASH in subroutine exit"
+{
+    sub gh_18630H {state %h=(a=>1)}
+    my $res = join '', gh_18630H, gh_18630H;
+    is($res, "a1a1", 'HASH copied successfully in subroutine exit');
+    is(scalar gh_18630H, 1, 'gh_18630H scalar call returns key count');
+
+    sub gh_18630A {state @a = qw(b 2)}
+    $res = join '', gh_18630A , gh_18630A;
+    is($res, "b2b2", 'ARRAY copied successfully in subroutine exit');
+    is(scalar gh_18630A, 2, 'gh_18630A scalar call returns element count');
+}
+
 __DATA__
-state ($a) = 1;
 (state $a) = 1;
-state @a = 1;
-state (@a) = 1;
 (state @a) = 1;
-state %a = ();
-state (%a) = ();
+(state @a :shared) = 1;
 (state %a) = ();
+(state %a :shared) = ();
+state ($a) = 1;
+(state ($a)) = 1;
+state (@a) = 1;
+(state (@a)) = 1;
+state (@a) :shared = 1;
+(state (@a) :shared) = 1;
+state (%a) = ();
+(state (%a)) = ();
+state (%a) :shared = ();
+(state (%a) :shared) = ();
+state (undef, $a) = ();
+(state (undef, $a)) = ();
+state (undef, @a) = ();
+(state (undef, @a)) = ();
+state ($a, undef) = ();
+(state ($a, undef)) = ();
 state ($a, $b) = ();
+(state ($a, $b)) = ();
+state ($a, $b) :shared = ();
+(state ($a, $b) :shared) = ();
 state ($a, @b) = ();
+(state ($a, @b)) = ();
+state ($a, @b) :shared = ();
+(state ($a, @b) :shared) = ();
+state (@a, undef) = ();
+(state (@a, undef)) = ();
+state (@a, $b) = ();
+(state (@a, $b)) = ();
+state (@a, $b) :shared = ();
+(state (@a, $b) :shared) = ();
+state (@a, @b) = ();
+(state (@a, @b)) = ();
+state (@a, @b) :shared = ();
+(state (@a, @b) :shared) = ();
 (state $a, state $b) = ();
 (state $a, $b) = ();
 (state $a, my $b) = ();

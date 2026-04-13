@@ -42,14 +42,21 @@ sub MY::libscan
     return $path;
 }
 
-sub MY::postamble 
+sub MY::postamble
 {
-    return ''
+    my $self = shift ;
+    my %params = @_ ;
+
+    return <<EOM
+
+READMEmd:
+
+EOM
         if $ENV{PERL_CORE} ;
 
     my @files = getPerlFiles('MANIFEST');
 
-    # Note: Once you remove all the layers of shell/makefile escaping 
+    # Note: Once you remove all the layers of shell/makefile escaping
     # the regular expression below reads
     #
     #    /^\s*local\s*\(\s*\$^W\s*\)/
@@ -65,6 +72,28 @@ MyTrebleCheck:
 	@echo All is ok.
 
 ';
+
+    if (-e '.github' && exists $params{name})
+    {
+        my $name = $params{name};
+        $postamble .= <<"EOM";
+
+READMEmd: .github/$name.pod
+
+.github/$name.pod: lib/Compress/Raw/$name.pm
+	\@echo Creating .github/$name.pod from $name.pm
+	\$(NOECHO) perl -e 'while(<>){ next if 1 .. /^__END__/; print}' lib/Compress/Raw/$name.pm >.github/$name.pod
+
+EOM
+    }
+    else
+    {
+        $postamble .= <<"EOM";
+
+READMEmd:
+
+EOM
+    }
 
     return $postamble;
 }
@@ -91,6 +120,8 @@ sub getPerlFiles
 
             s/^\s+//;
             s/\s+$//;
+
+            #next if m#t/Test/More\.pm$# or m#t/Test/Builder\.pm$#;
 
             /^(\S+)\s*(.*)$/;
 
@@ -213,7 +244,7 @@ sub UpDowngrade
     foreach (@files) {
         #if (-l $_ )
           { doUpDown($our_sub, $warn_sub, $_) }
-          #else  
+          #else
           #{ doUpDownViaCopy($our_sub, $warn_sub, $_) }
     }
 
@@ -232,7 +263,7 @@ sub doUpDown
 
     local ($^I) = ($^O eq 'VMS') ? "_bak" : ".bak";
     local (@ARGV) = shift;
- 
+
     while (<>)
     {
         print, last if /^__(END|DATA)__/ ;
@@ -275,7 +306,7 @@ sub doUpDownViaCopy
                 push @keep, $_;
                 last ;
             }
-            
+
             &{ $our_sub }() if $our_sub ;
             &{ $warn_sub }() if $warn_sub ;
             push @keep, $_;
@@ -332,7 +363,7 @@ sub FindBrokenDependencies
 
                     Compress::Zlib
                     );
-    
+
     my @broken = ();
 
     foreach my $module ( grep { ! $thisModule{$_} } @modules)
@@ -340,12 +371,12 @@ sub FindBrokenDependencies
         my $hasVersion = getInstalledVersion($module);
 
         # No need to upgrade if the module isn't installed at all
-        next 
+        next
             if ! defined $hasVersion;
 
         # If already have C::Z version 1, then an upgrade to any of the
         # IO::Compress modules will not break it.
-        next 
+        next
             if $module eq 'Compress::Zlib' && $hasVersion < 2;
 
         if ($hasVersion < $version)
@@ -368,14 +399,12 @@ sub getInstalledVersion
     {
         no strict 'refs';
         $version = ${ $module . "::VERSION" };
-        $version = 0 
+        $version = 0
     }
-    
+
     return $version;
 }
 
 package MakeUtil ;
 
 1;
-
-

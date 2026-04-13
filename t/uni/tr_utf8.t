@@ -1,19 +1,17 @@
 #!perl -w
 #
 # This script is written intentionally in UTF-8
-# Requires Encode 1.83 or better
 # -- dankogai
 
 BEGIN {
+    chdir 't' if -d 't';
     require './test.pl';
-    skip_all_without_dynamic_extension('Encode');
-    skip_all("EBCDIC") if $::IS_EBCDIC;
     skip_all_without_perlio();
 }
 
 use strict;
 plan(tests => 8);
-use encoding 'utf8';
+use utf8;
 
 my @hiragana =  map {chr} ord("ぁ")..ord("ん");
 my @katakana =  map {chr} ord("ァ")..ord("ン");
@@ -44,7 +42,7 @@ is($str, $hiragana, "s/// # hiragana -> katakana");
 {
   # [perl 16843]
   my $line = 'abcdefghijklmnopqrstuvwxyz$0123456789';
-  $line =~ tr/bcdeghijklmnprstvwxyz$02578/בצדעגהיײקלמנפּרסטװשכיזשױתײחא/;
+  $line =~ tr/bcdeghijklmnprstvwxyz$02578/בצדעגהיײקלמנפּרסטװשכיזשױתײח/;
   is($line, "aבצדעfגהיײקלמנoפqּרסuטװשכיזש1ױ34ת6ײח9", "[perl #16843]");
 }
 

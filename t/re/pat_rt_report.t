@@ -4,25 +4,23 @@
 # the format supported by re/regexp.t.  If you want to add a test
 # that does fit that format, add it to re/re_tests, not here.
 
+sub run_tests;
+
+$| = 1;
+
+BEGIN {
+    chdir 't' if -d 't';
+    require './test.pl';
+    set_up_inc( '../lib', '.' );
+    skip_all_if_miniperl("miniperl can't load Tie::Hash::NamedCapture, need for %+ and %-");
+}
+
 use strict;
 use warnings;
 use 5.010;
 use Config;
 
-sub run_tests;
-
-$| = 1;
-
-
-BEGIN {
-    chdir 't' if -d 't';
-    @INC = ('../lib','.');
-    require './test.pl';
-    skip_all_if_miniperl("miniperl can't load Tie::Hash::NamedCapture, need for %+ and %-");
-}
-
-
-plan tests => 2521;  # Update this when adding/deleting tests.
+plan tests => 2514;  # Update this when adding/deleting tests.
 
 run_tests() unless caller;
 
@@ -32,15 +30,15 @@ run_tests() unless caller;
 sub run_tests {
 
     like("A \x{263a} B z C", qr/A . B (??{ "z" }) C/,
-	 "Match UTF-8 char in presence of (??{ }); Bug 20000731.001");
+	 "Match UTF-8 char in presence of (??{ }); Bug 20000731.001 (#3600)");
 
     {
         no warnings 'uninitialized';
-        ok(undef =~ /^([^\/]*)(.*)$/, "Used to cause a SEGV; Bug 20001021.005");
+        ok(undef =~ /^([^\/]*)(.*)$/, "Used to cause a SEGV; Bug 20001021.005 (#4492)");
     }
 
     {
-        my $message = 'bug id 20001008.001';
+        my $message = 'bug id 20001008.001 (#4407)';
 
         my @x = ("stra\337e 138", "stra\337e 138");
         for (@x) {
@@ -59,14 +57,14 @@ sub run_tests {
 
     {
         # Fist half of the bug.
-        my $message = 'HEBREW ACCENT QADMA matched by .*; Bug 20001028.003';
+        my $message = 'HEBREW ACCENT QADMA matched by .*; Bug 20001028.003 (#4536)';
         my $X = chr (1448);
         ok(my ($Y) = $X =~ /(.*)/, $message);
         is($Y, v1448, $message);
         is(length $Y, 1, $message);
 
         # Second half of the bug.
-        $message = 'HEBREW ACCENT QADMA in replacement; Bug 20001028.003';
+        $message = 'HEBREW ACCENT QADMA in replacement; Bug 20001028.003 (#4536)';
         $X = '';
         $X =~ s/^/chr(1488)/e;
         is(length $X, 1, $message);
@@ -74,7 +72,7 @@ sub run_tests {
     }
 
     {   
-        my $message = 'Repeated s///; Bug 20001108.001';
+        my $message = 'Repeated s///; Bug 20001108.001 (#4631)';
         my $X = "Szab\x{f3},Bal\x{e1}zs";
         my $Y = $X;
         $Y =~ s/(B)/$1/ for 0 .. 3;
@@ -83,7 +81,7 @@ sub run_tests {
     }
 
     {
-        my $message = 's/// on UTF-8 string; Bug 20000517.001';
+        my $message = 's/// on UTF-8 string; Bug 20000517.001 (#3253)';
         my $x = "\x{100}A";
         $x =~ s/A/B/;
         is($x, "\x{100}B", $message);
@@ -91,21 +89,15 @@ sub run_tests {
     }
 
     {
-        my $message = '\C and É; Bug 20001230.002';
-        ok("École" =~ /^\C\C(.)/ && $1 eq 'c', $message);
-        like("École", qr/^\C\C(c)/, $message);
-    }
-
-    {
         # The original bug report had 'no utf8' here but that was irrelevant.
 
-        my $message = "Don't dump core; Bug 20010306.008";
+        my $message = "Don't dump core; Bug 20010306.008 (#5982)";
         my $a = "a\x{1234}";
         like($a, qr/\w/, $message);  # used to core dump.
     }
 
     {
-        my $message = '/g in scalar context; Bug 20010410.006';
+        my $message = '/g in scalar context; Bug 20010410.006 (#6796)';
         for my $rx ('/(.*?)\{(.*?)\}/csg',
 		    '/(.*?)\{(.*?)\}/cg',
 		    '/(.*?)\{(.*?)\}/sg',
@@ -125,28 +117,28 @@ sub run_tests {
     {
         # Amazingly vertical tabulator is the same in ASCII and EBCDIC.
         for ("\n", "\t", "\014", "\r") {
-            unlike($_, qr/[[:print:]]/, sprintf "\\%03o not in [[:print:]]; Bug 20010619.003", ord $_);
+            unlike($_, qr/[[:print:]]/, sprintf "\\%03o not in [[:print:]]; Bug 20010619.003 (#7131)", ord $_);
         }
         for (" ") {
-            like($_, qr/[[:print:]]/, "'$_' in [[:print:]]; Bug 20010619.003");
+            like($_, qr/[[:print:]]/, "'$_' in [[:print:]]; Bug 20010619.003 (#7131)");
         }
     }
 
     {
-        # [ID 20010814.004] pos() doesn't work when using =~m// in list context
+        # [ID 20010814.004 (#7526)] pos() doesn't work when using =~m// in list context
 
         $_ = "ababacadaea";
         my $a = join ":", /b./gc;
         my $b = join ":", /a./gc;
         my $c = pos;
-        is("$a $b $c", 'ba:ba ad:ae 10', "pos() works with () = m//; Bug 20010814.004");
+        is("$a $b $c", 'ba:ba ad:ae 10', "pos() works with () = m//; Bug 20010814.004 (#7526)");
     }
 
     {
-        # [ID 20010407.006] matching utf8 return values from
+        # [ID 20010407.006 (#6767)] matching utf8 return values from
         # functions does not work
 
-        my $message = 'UTF-8 return values from functions; Bug 20010407.006';
+        my $message = 'UTF-8 return values from functions; Bug 20010407.006 (#6767)';
         package ID_20010407_006;
         sub x {"a\x{1234}"}
         my $x = x;
@@ -182,7 +174,7 @@ sub run_tests {
     }
 
     {
-        my $message = "s///eg [change 13f46d054db22cf4]; Bug 20020124.005";
+        my $message = "s///eg [change 13f46d054db22cf4]; Bug 20020124.005 (#8335)";
 
         for my $char ("a", "\x{df}", "\x{100}") {
             my $x = "$char b $char";
@@ -195,7 +187,7 @@ sub run_tests {
     }
 
     {
-        my $message = "Correct pmop flags checked when empty pattern; Bug 20020412.005";
+        my $message = "Correct pmop flags checked when empty pattern; Bug 20020412.005 (#8935)";
 
         # Requires reuse of last successful pattern.
         my $num = 123;
@@ -213,7 +205,7 @@ sub run_tests {
     }
 
     {
-        my $message = 'UTF-8 regex matches above 32k; Bug 20020630.002';
+        my $message = 'UTF-8 regex matches above 32k; Bug 20020630.002 (#10013)';
         for (['byte', "\x{ff}"], ['utf8', "\x{1ff}"]) {
             my ($type, $char) = @$_;
             for my $len (32000, 32768, 33000) {
@@ -233,57 +225,6 @@ sub run_tests {
         ok $ok && $ord == 0x100 && $len == 4, "No panic: end_shift [change 0e933229fa758625]";
     }
 
-    {
-        our $a = "x\x{100}";
-        chop $a;    # Leaves the UTF-8 flag
-        $a .= "y";  # 1 byte before 'y'.
-
-        like($a, qr/^\C/,        'match one \C on 1-byte UTF-8; Bug 15763');
-        like($a, qr/^\C{1}/,     'match \C{1}; Bug 15763');
-
-        like($a, qr/^\Cy/,       'match \Cy; Bug 15763');
-        like($a, qr/^\C{1}y/,    'match \C{1}y; Bug 15763');
-
-        unlike($a, qr/^\C\Cy/,     q {don't match two \Cy; Bug 15763});
-        unlike($a, qr/^\C{2}y/,    q {don't match \C{2}y; Bug 15763});
-
-        $a = "\x{100}y"; # 2 bytes before "y"
-
-        like($a, qr/^\C/,        'match one \C on 2-byte UTF-8; Bug 15763');
-        like($a, qr/^\C{1}/,     'match \C{1}; Bug 15763');
-        like($a, qr/^\C\C/,      'match two \C; Bug 15763');
-        like($a, qr/^\C{2}/,     'match \C{2}; Bug 15763');
-
-        like($a, qr/^\C\C\C/,    'match three \C on 2-byte UTF-8 and a byte; Bug 15763');
-        like($a, qr/^\C{3}/,     'match \C{3}; Bug 15763');
-
-        like($a, qr/^\C\Cy/,     'match two \C; Bug 15763');
-        like($a, qr/^\C{2}y/,    'match \C{2}; Bug 15763');
-
-        unlike($a, qr/^\C\C\Cy/,   q {don't match three \Cy; Bug 15763});
-        unlike($a, qr/^\C{2}\Cy/,  q {don't match \C{2}\Cy; Bug 15763});
-        unlike($a, qr/^\C{3}y/,    q {don't match \C{3}y; Bug 15763});
-
-        $a = "\x{1000}y"; # 3 bytes before "y"
-
-        like($a, qr/^\C/,        'match one \C on three-byte UTF-8; Bug 15763');
-        like($a, qr/^\C{1}/,     'match \C{1}; Bug 15763');
-        like($a, qr/^\C\C/,      'match two \C; Bug 15763');
-        like($a, qr/^\C{2}/,     'match \C{2}; Bug 15763');
-        like($a, qr/^\C\C\C/,    'match three \C; Bug 15763');
-        like($a, qr/^\C{3}/,     'match \C{3}; Bug 15763');
-
-        like($a, qr/^\C\C\C\C/,  'match four \C on three-byte UTF-8 and a byte; Bug 15763');
-        like($a, qr/^\C{4}/,     'match \C{4}; Bug 15763');
-
-        like($a, qr/^\C\C\Cy/,   'match three \Cy; Bug 15763');
-        like($a, qr/^\C{3}y/,    'match \C{3}y; Bug 15763');
-
-        unlike($a, qr/^\C\C\C\Cy/, q {don't match four \Cy; Bug 15763});
-        unlike($a, qr/^\C{4}y/,    q {don't match \C{4}y; Bug 15763});
-    }
-
-    
     {
         my $message = 'UTF-8 matching; Bug 15397';
         like("\x{100}", qr/\x{100}/, $message);
@@ -384,14 +325,7 @@ sub run_tests {
         is("@_", "a|b|c", $message);
     }
 
-    {
-        # XXX DAPM 13-Apr-06. Recursive split is still broken. It's only luck it
-        # hasn't been crashing. Disable this test until it is fixed properly.
-        # XXX also check what it returns rather than just doing ok(1,...)
-        # split /(?{ split "" })/, "abc";
-        local $::TODO = "Recursive split is still broken";
-        ok 0, 'cache_re & "(?{": it dumps core in 5.6.1 & 5.8.0';
-    }
+    is(join('-', split /(?{ split "" })/, "abc"), 'a-b-c', 'nested split');
 
     {
         $_ = "code:   'x' { '...' }\n"; study;
@@ -575,12 +509,14 @@ sub run_tests {
 
   SKIP:
     {
-        skip "In EBCDIC" if $::IS_EBCDIC;
-        no warnings 'utf8';
-        $_ = pack 'U0C2', 0xa2, 0xf8;  # Ill-formed UTF-8
-        my $ret = 0;
-        is(do {!($ret = s/[\0]+//g)}, 1,
-	   "Ill-formed UTF-8 doesn't match NUL in class; Bug 37836");
+        skip "In EBCDIC and unclear what would trigger this bug there" if $::IS_EBCDIC;
+        fresh_perl_like(
+            'no warnings "utf8";
+             $_ = pack "U0C2", 0xa2, 0xf8;  # Ill-formed UTF-8
+             my $ret = 0;
+             do {!($ret = s/[a\0]+//g)}',
+             qr/Malformed UTF-8/,
+             {}, "Ill-formed UTF-8 doesn't match NUL in class; Bug 37836");
     }
 
     {
@@ -811,14 +747,24 @@ sub run_tests {
     }
 
     {
-        my $message = 'Match is linear, not quadratic; Bug 22395';
+        my $message = 'Match is quadratic due to eval; See Bug 22395';
         our $count;
         for my $l (10, 100, 1000) {
             $count = 0;
-            ('a' x $l) =~ /(.*)(?{$count++})[bc]/;
-            local $::TODO = "Should be L+1 not L*(L+3)/2 (L=$l)";
-            is($count, $l + 1, $message);
+            ('a' x $l) =~ /(.*)(?{ $count++ })[bc]/;
+            is($count, $l*($l+3)/2+1, $message);
         }
+    }
+    {
+        my $message = 'Match is linear, not quadratic; Bug 22395.';
+        our $count;
+        my $ok= 0;
+        for my $l (10, 100, 1000) {
+            $count = 0;
+            ('a' x $l) =~ /(.*)(*{ $count++ })[bc]/;
+            $ok += is($count, $l + 1, $message);
+        }
+        is($ok,3, "Optimistic eval does not disable optimisations");
     }
 
     {
@@ -922,12 +868,16 @@ sub run_tests {
     {
          my $message = '$REGMARK in replacement; Bug 49190';
          our $REGMARK;
-         my $_ = "A";
+         local $_ = "A";
          ok(s/(*:B)A/$REGMARK/, $message);
          is($_, "B", $message);
          $_ = "CCCCBAA";
          ok(s/(*:X)A+|(*:Y)B+|(*:Z)C+/$REGMARK/g, $message);
          is($_, "ZYX", $message);
+         # Use a longer name to force reallocation of $REGMARK.
+         $_ = "CCCCBAA";
+         ok(s/(*:X)A+|(*:YYYYYYYYYYYYYYYY)B+|(*:Z)C+/$REGMARK/g, $message);
+         is($_, "ZYYYYYYYYYYYYYYYYX", $message);
     }
 
     {
@@ -973,8 +923,11 @@ sub run_tests {
         is($x, 'ab cd', $message);
     }
 
-    {
+    SKIP: {
+        skip("Can run out of memory on os390", 1) if $^O eq 'os390';
         ok (("a" x (2 ** 15 - 10)) =~ /^()(a|bb)*$/, "Recursive stack cracker; Bug 24274");
+    }
+    {
         ok ((q(a)x 100) =~ /^(??{'(.)'x 100})/, 
             "Regexp /^(??{'(.)'x 100})/ crashes older perls; Bug 24274");
     }
@@ -1101,23 +1054,29 @@ sub run_tests {
         use charnames ":full";
         # Delayed interpolation of \N'
         my $r1 = qr/\N{THAI CHARACTER SARA I}/;
+        my $r2 = qr'\N{THAI CHARACTER SARA I}';
         my $s1 = "\x{E34}\x{E34}\x{E34}\x{E34}";
 
         # Bug #56444
         ok $s1 =~ /$r1+/, 'my $r1 = qr/\N{THAI CHARACTER SARA I}/; my $s1 = "\x{E34}\x{E34}\x{E34}\x{E34}; $s1 =~ /$r1+/';
+        ok $s1 =~ /$r2+/, 'my $r2 = qr\'\N{THAI CHARACTER SARA I}\'; my $s1 = "\x{E34}\x{E34}\x{E34}\x{E34}; $s1 =~ \'$r2+\'';
 
         # Bug #62056
         ok "${s1}A" =~ m/$s1\N{LATIN CAPITAL LETTER A}/, '"${s1}A" =~ m/$s1\N{LATIN CAPITAL LETTER A}/';
 
         ok "abbbbc" =~ m/\N{1}/ && $& eq "a", '"abbbbc" =~ m/\N{1}/ && $& eq "a"';
+        ok "abbbbc" =~ m'\N{1}' && $& eq "a", '"abbbbc" =~ m\'\N{1}\' && $& eq "a"';
         ok "abbbbc" =~ m/\N{3,4}/ && $& eq "abbb", '"abbbbc" =~ m/\N{3,4}/ && $& eq "abbb"';
+        ok "abbbbc" =~ m'\N{3,4}' && $& eq "abbb", '"abbbbc" =~ m\'\N{3,4}\' && $& eq "abbb"';
     }
 
     {
         use charnames ":full";
         my $message = '[perl #74982] Period coming after \N{}';
         ok("\x{ff08}." =~ m/\N{FULLWIDTH LEFT PARENTHESIS}./ && $& eq "\x{ff08}.", $message);
+        ok("\x{ff08}." =~ m'\N{FULLWIDTH LEFT PARENTHESIS}.' && $& eq "\x{ff08}.", $message);
         ok("\x{ff08}." =~ m/[\N{FULLWIDTH LEFT PARENTHESIS}]./ && $& eq "\x{ff08}.", $message);
+        ok("\x{ff08}." =~ m'[\N{FULLWIDTH LEFT PARENTHESIS}].' && $& eq "\x{ff08}.", $message);
     }
 
 SKIP: {
@@ -1127,13 +1086,87 @@ SKIP: {
 	unless $Config{extensions} =~ / Encode /;
 
     # Test case cut down by jhi
-    fresh_perl_like(<<'EOP', qr!Malformed UTF-8 character \(unexpected end of string\) in substitution \(s///\) at!, 'Segfault using HTML::Entities');
+    fresh_perl_like(<<'EOP', qr!Malformed UTF-8 character \(unexpected end of string\)!, {}, 'Segfault using HTML::Entities');
 use Encode;
 my $t = ord('A') == 193 ? "\xEA" : "\xE9";
 Encode::_utf8_on($t);
+substr($t,0);
 $t =~ s/([^a])//ge;
 EOP
     }
+
+    {
+        # pattern must be compiled late or we can break the test file
+        my $message = '[perl #115050] repeated nothings in a trie can cause panic';
+        my $pattern;
+        $pattern = '[xyz]|||';
+        ok("blah blah" =~ /$pattern/, $message);
+        ok("blah blah" =~ /(?:$pattern)h/, $message);
+        $pattern = '|||[xyz]';
+        ok("blah blah" =~ /$pattern/, $message);
+        ok("blah blah" =~ /(?:$pattern)h/, $message);
+    }
+
+    {
+        # [perl #4289] First mention $& after a match
+	local $::TODO = "these tests fail without Copy-on-Write enabled"
+	    if $Config{ccflags} =~ /PERL_NO_COW/;
+        fresh_perl_is(
+            '$_ = "abc"; /b/g; $_ = "hello"; print eval q|$&|, "\n"',
+            "b\n", {}, '$& first mentioned after match');
+        fresh_perl_is(
+            '$_ = "abc"; /b/g; $_ = "hello"; print eval q|$`|, "\n"',
+            "a\n", {}, '$` first mentioned after match');
+        fresh_perl_is(
+            '$_ = "abc"; /b/g; $_ = "hello"; print eval q|$\'|,"\n"',
+            "c\n", {}, '$\' first mentioned after match');
+    }
+
+    {
+	# [perl #118175] threaded perl-5.18.0 fails pat_rt_report_thr.t
+	# this tests some related failures
+	#
+	# The tests in the block *only* fail when run on 32-bit systems
+	# with a malloc that allocates above the 2GB line.  On the system
+	# in the report above that only happened in a thread.
+	my $s = "\x{1ff}" . "f" x 32;
+	ok($s =~ /\x{1ff}[[:alpha:]]+/gca, "POSIXA pointer wrap");
+    }
+
+    {
+        # RT #129012 heap-buffer-overflow Perl_fbm_instr.
+        # This test is unlikely to not pass, but it used to fail
+        # ASAN/valgrind
+
+        my $s ="\x{100}0000000";
+        ok($s !~ /00000?\x80\x80\x80/, "RT #129012");
+    }
+
+    {
+        # RT #129085 heap-buffer-overflow Perl_re_intuit_start
+        # this did fail under ASAN, but didn't under valgrind
+        my $s = "\x{f2}\x{140}\x{fe}\x{ff}\x{ff}\x{ff}";
+        ok($s !~ /^0000.\34500\376\377\377\377/, "RT #129085");
+    }
+    {
+        # rt
+        fresh_perl_is(
+            'no warnings "regexp"; "foo"=~/((?1)){8,0}/; print "ok"',
+            "ok", {},  'RT #130561 - allowing impossible quantifier should not cause SEGVs');
+        my $s= "foo";
+        no warnings 'regexp';
+        ok($s=~/(foo){1,0}|(?1)/,
+            "RT #130561 - allowing impossible quantifier should not break recursion");
+    }
+	{
+		# RT #133892 Coredump in Perl_re_intuit_start
+		# Second match flips to checking floating substring before fixed
+		# substring, which triggers a pathway that failed to check there
+		# was a non-utf8 version of the string before trying to use it
+		# resulting in a SEGV.
+		my $result = grep /b\x{1c0}ss0/i, qw{ xxxx xxxx0 };
+		ok($result == 0);
+	}
 
 } # End of sub run_tests
 

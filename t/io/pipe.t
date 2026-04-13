@@ -2,16 +2,15 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
-    require Config; import Config;
     require './test.pl';
-
-    if (!$Config{'d_fork'}) {
-        skip_all("fork required to pipe");
-    }
-    else {
-        plan(tests => 24);
-    }
+    set_up_inc('../lib');
+}
+use Config;
+if (!$Config{'d_fork'}) {
+    skip_all("fork required to pipe");
+}
+else {
+    plan(tests => 27);
 }
 
 my $Perl = which_perl();
@@ -27,11 +26,7 @@ printf PIPE "oY %d -    again\n", curr_test();
 next_test();
 close PIPE;
 
-SKIP: {
-    # Technically this should be TODO.  Someone try it if you happen to
-    # have a vmesa machine.
-    skip "Doesn't work here yet", 6 if $^O eq 'vmesa';
-
+{
     if (open(PIPE, "-|")) {
 	while(<PIPE>) {
 	    s/^not //;
@@ -130,6 +125,18 @@ wait;				# Collect from $pid
 pipe(READER,WRITER) || die "Can't open pipe";
 close READER;
 
+eval {
+    # one platform at least appears to block SIGPIPE by default (see #122112)
+    # so make sure it's unblocked.
+    # The eval wrapper should ensure this does nothing if these aren't
+    # implemented.
+    require POSIX;
+    my $mask = POSIX::SigSet->new(POSIX::SIGPIPE());
+    my $old = POSIX::SigSet->new();
+    POSIX::sigprocmask(POSIX::SIG_UNBLOCK(), $mask, $old);
+    note "Yes, SIGPIPE was blocked" if $old->ismember(POSIX::SIGPIPE());
+};
+
 $SIG{'PIPE'} = 'broken_pipe';
 
 sub broken_pipe {
@@ -143,6 +150,18 @@ sleep 1;
 next_test;
 pass();
 
+SKIP: {
+    skip "no fcntl", 1 unless $Config{d_fcntl};
+    my($r, $w);
+    pipe($r, $w) || die "pipe: $!";
+    my $fdr = fileno($r);
+    my $fdw = fileno($w);
+    fresh_perl_is(qq(
+	print open(F, "<&=$fdr") ? 1 : 0, "\\n";
+	print open(F, ">&=$fdw") ? 1 : 0, "\\n";
+    ), "0\n0\n", {}, "pipe endpoints not inherited across exec");
+}
+
 # VMS doesn't like spawning subprocesses that are still connected to
 # STDOUT.  Someone should modify these tests to work with VMS.
 
@@ -151,13 +170,10 @@ SKIP: {
       if $^O eq 'VMS';
 
     SKIP: {
-        # Sfio doesn't report failure when closing a broken pipe
+        # POSIX-BC doesn't report failure when closing a broken pipe
         # that has pending output.  Go figure.
-        # BeOS will not write to broken pipes, either.
-        # Nor does POSIX-BC.
         skip "Won't report failure on broken pipe", 1
-          if $Config{d_sfio} || $^O eq 'beos' ||
-             $^O eq 'posix-bc';
+          if $^O eq 'posix-bc';
 
         local $SIG{PIPE} = 'IGNORE';
         open NIL, qq{|$Perl -e "exit 0"} or die "open failed: $!";
@@ -171,9 +187,7 @@ SKIP: {
         }
     }
 
-    SKIP: {
-        skip "Don't work yet", 9 if $^O eq 'vmesa';
-
+    {
         # check that errno gets forced to 0 if the piped program exited 
         # non-zero
         open NIL, qq{|$Perl -e "exit 23";} or die "fork failed: $!";
@@ -182,9 +196,8 @@ SKIP: {
         is($!, '',      '       errno');
         isnt($?, 0,     '       status');
 
-        SKIP: {
-            skip "Don't work yet", 6 if $^O eq 'mpeix';
-
+	# Former skip block:
+        {
             # check that status for the correct process is collected
             my $zombie;
             unless( $zombie = fork ) {
@@ -239,4 +252,22 @@ SKIP: {
   };
 
   is($child, -1, 'child reaped if piped program cannot be executed');
+}
+
+{
+    # [perl #122112] refcnt: fd -1 < 0 when a signal handler dies
+    # while a pipe close is waiting on a child process
+    my $prog = <<PROG;
+\$SIG{ALRM}=sub{die};
+alarm 1;
+\$Perl = q\0$Perl\0;
+my \$cmd = qq(\$Perl -e "sleep 3");
+my \$pid = open my \$fh, "|\$cmd" or die "\$!\n";
+close \$fh;
+PROG
+    my $out = fresh_perl($prog, {});
+    cmp_ok($out, '!~', qr/refcnt/, "no exception from PerlIO");
+    # checks that that program did something rather than failing to
+    # compile
+    cmp_ok($out, '=~', qr/Died at/, "but we did get the exception from die");
 }

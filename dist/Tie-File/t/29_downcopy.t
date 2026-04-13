@@ -1,4 +1,10 @@
 #!/usr/bin/perl
+
+use strict;
+use warnings;
+
+use File::Temp ();
+
 #
 # Unit tests of _downcopy function
 #
@@ -7,10 +13,16 @@
 # moving everything in the block forwards to make room.
 # Instead of writing the last length($data) bytes from the block
 # (because there isn't room for them any longer) return them.
-#
-#
 
-my $file = "tf$$.txt";
+# Make a temp dir under the OS's normal temp directory for creating
+# test files in. By using the OS's temp dir rather than the current
+# directory, we increase the chances that the tests are run on a tmpfs
+# file system or similar. This becomes important when the current
+# directory is on a very slow USB drive for example, as this test file
+# does lots of file creating, modifying and deleting.
+
+my $tempdir = File::Temp::tempdir("Tie-File-XXXXXX",
+                                    TMPDIR => 1, CLEANUP => 1);
 
 print "1..718\n";
 
@@ -162,7 +174,7 @@ try(    0,     0,     0);  # old=0        , new=0        ; old = new
 
 # (224-277)
 # These tests all take place at the end of the file
-$FLEN = 40960;  # Force the file to be exactly 40960 bytes long
+my $FLEN = 40960;  # Force the file to be exactly 40960 bytes long
 try(32768,  8192,  8192);  # old=<x>      , new=<x       ; old = new
 try(32768,  8192,  4026);  # old=<x>      , new=<x       ; old > new
 try(24576, 16384,  1917);  # old=<x><x>   , new=<x       ; old > new
@@ -235,13 +247,29 @@ try(35272,  6728,     0);  # old=x><x     , new=0        ; old > new
 try(32768,  9232,     0);  # old=<x><x    , new=0        ; old > new
 try(42000,     0,     0);  # old=0        , new=0        ; old = new
 
+
 sub try {
   my ($pos, $len, $newlen) = @_;
-  open F, "> $file" or die "Couldn't open file $file: $!";
-  binmode F;
+  try0($pos, $len, $newlen);
+  # if len is undef, it implies 'to the end of the string'
+  try0($pos, undef, $newlen);
+}
+
+
+sub try0 {
+  my ($pos, $len, $newlen) = @_;
+
+  my $line = (caller(1))[2];
+  my $desc = sprintf "try(%5s, %5s, %5s) FLEN=%5s called from line %d",
+                map { defined $_ ? $_ : 'undef' }
+                    $pos, $len, $newlen, $FLEN, $line;
+
+  my ($fh, $file) = File::Temp::tempfile("29-XXXXX", DIR => $tempdir);
+
+  binmode $fh;
 
   # The record has exactly 17 characters.  This will help ensure that
-  # even if _downcoopy screws up, the data doesn't coincidentally
+  # even if _downcopy screws up, the data doesn't coincidentally
   # look good because the remainder accidentally lines up.
   my $d = substr("0123456789abcdef$:", -17);
   my $recs = defined($FLEN) ?
@@ -250,8 +278,8 @@ sub try {
   my $oldfile = $d x $recs;
   my $flen = defined($FLEN) ? $FLEN : $recs * 17;
   substr($oldfile, $FLEN) = "" if defined $FLEN;  # truncate
-  print F $oldfile;
-  close F;
+  print $fh $oldfile;
+  close $fh;
 
   die "wrong length!" unless -s $file == $flen;
 
@@ -270,15 +298,17 @@ sub try {
   }
 
   my $o = tie my @lines, 'Tie::File', $file or die $!;
+  # allocate more time when are running tests in parallel
+  my $alarm_time = $ENV{TEST_JOBS} || $ENV{HARNESS_OPTIONS} ? 20 : 10;
   local $SIG{ALRM} = sub { die "Alarm clock" };
-  my $a_retval = eval { alarm(5) unless $^P; $o->_downcopy($newdata, $pos, $len) };
+  my $a_retval = eval { alarm($alarm_time) unless $^P; $o->_downcopy($newdata, $pos, $len) };
   my $err = $@;
   undef $o; untie @lines; alarm(0);
   if ($err) {
     if ($err =~ /^Alarm clock/) {
-      print "# Timeout\n";
-      print "not ok $N\n"; $N++;
-      print "not ok $N\n"; $N++;
+      print STDERR "# $0 Timeout after $alarm_time seconds at test $N - $desc\n";
+      print "not ok $N - exp $desc TIMEOUT\n"; $N++;
+      print "not ok $N - ret $desc TIMEOUT\n"; $N++;
       return;
     } else {
       $@ = $err;
@@ -286,7 +316,7 @@ sub try {
     }
   }
 
-  open F, "< $file" or die "Couldn't open file $file: $!";
+  open F, '<', $file or die "Couldn't open file $file: $!";
   binmode F;
   my $actual;
   { local $/;
@@ -300,64 +330,8 @@ sub try {
     for (@ARGS) { $_ = "UNDEF" unless defined }
     print "# try(@ARGS) expected file length $xlen, actual $alen!\n";
   }
-  print $actual eq $expected ? "ok $N\n" : "not ok $N\n";
+  print $actual eq $expected ? "ok $N - exp $desc\n" : "not ok $N - exp $desc\n";
   $N++;
-  print $a_retval eq $x_retval ? "ok $N\n" : "not ok $N\n";
+  print $a_retval eq $x_retval ? "ok $N - ret $desc\n" : "not ok $N - ret $desc\n";
   $N++;
-
-  if (defined $len) {
-    try($pos, undef, $newlen);
-  }
-}
-
-
-
-use POSIX 'SEEK_SET';
-sub check_contents {
-  my @c = @_;
-  my $x = join $:, @c, '';
-  local *FH = $o->{fh};
-  seek FH, 0, SEEK_SET;
-#  my $open = open FH, "< $file";
-  my $a;
-  { local $/; $a = <FH> }
-  $a = "" unless defined $a;
-  if ($a eq $x) {
-    print "ok $N\n";
-  } else {
-    ctrlfix($a, $x);
-    print "not ok $N\n# expected <$x>, got <$a>\n";
-  }
-  $N++;
-
-  # now check FETCH:
-  my $good = 1;
-  my $msg;
-  for (0.. $#c) {
-    my $aa = $a[$_];
-    unless ($aa eq "$c[$_]$:") {
-      $msg = "expected <$c[$_]$:>, got <$aa>";
-      ctrlfix($msg);
-      $good = 0;
-    }
-  }
-  print $good ? "ok $N\n" : "not ok $N # $msg\n";
-  $N++;
-
-  print $o->_check_integrity($file, $ENV{INTEGRITY}) 
-      ? "ok $N\n" : "not ok $N\n";
-  $N++;
-}
-
-sub ctrlfix {
-  for (@_) {
-    s/\n/\\n/g;
-    s/\r/\\r/g;
-  }
-}
-
-END {
-  undef $o;
-  untie @a;
-  1 while unlink $file;
 }

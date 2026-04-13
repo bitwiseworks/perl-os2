@@ -1,31 +1,22 @@
-# Pod::Text::Color -- Convert POD data to formatted color ASCII text
-#
-# Copyright 1999, 2001, 2004, 2006, 2008, 2009 Russ Allbery <rra@stanford.edu>
-#
-# This program is free software; you may redistribute it and/or modify it
-# under the same terms as Perl itself.
+# Convert POD data to formatted color ASCII text
 #
 # This is just a basic proof of concept.  It should later be modified to make
 # better use of color, take options changing what colors are used for what
 # text, and the like.
+#
+# SPDX-License-Identifier: GPL-1.0-or-later OR Artistic-1.0-Perl
 
 ##############################################################################
 # Modules and declarations
 ##############################################################################
 
-package Pod::Text::Color;
+package Pod::Text::Color v6.0.2;
 
-require 5.004;
+use 5.012;
+use parent qw(Pod::Text);
+use warnings;
 
-use Pod::Text ();
-use Term::ANSIColor qw(colored);
-
-use strict;
-use vars qw(@ISA $VERSION);
-
-@ISA = qw(Pod::Text);
-
-$VERSION = '2.06';
+use Term::ANSIColor qw(color colored);
 
 ##############################################################################
 # Overrides
@@ -35,6 +26,7 @@ $VERSION = '2.06';
 sub cmd_head1 {
     my ($self, $attrs, $text) = @_;
     $text =~ s/\s+$//;
+    local $Term::ANSIColor::EACHLINE = "\n";
     $self->SUPER::cmd_head1 ($attrs, colored ($text, 'bold'));
 }
 
@@ -50,9 +42,27 @@ sub cmd_b { return colored ($_[2], 'bold')   }
 sub cmd_f { return colored ($_[2], 'cyan')   }
 sub cmd_i { return colored ($_[2], 'yellow') }
 
+# Analyze a single line and return any formatting codes in effect at the end
+# of that line.
+sub end_format {
+    my ($self, $line) = @_;
+    my $reset = color ('reset');
+    my $current;
+    while ($line =~ /(\e\[[\d;]+m)/g) {
+        my $code = $1;
+        if ($code eq $reset) {
+            undef $current;
+        } else {
+            $current .= $code;
+        }
+    }
+    return $current;
+}
+
 # Output any included code in green.
 sub output_code {
     my ($self, $code) = @_;
+    local $Term::ANSIColor::EACHLINE = "\n";
     $code = colored ($code, 'green');
     $self->output ($code);
 }
@@ -75,19 +85,45 @@ sub wrap {
     my $spaces = ' ' x $$self{MARGIN};
     my $width = $$self{opt_width} - $$self{MARGIN};
 
-    # We have to do $shortchar and $longchar in variables because the
-    # construct ${char}{0,$width} didn't do the right thing until Perl 5.8.x.
-    my $char = '(?:(?:\e\[[\d;]+m)*[^\n])';
-    my $shortchar = $char . "{0,$width}";
-    my $longchar = $char . "{$width}";
+    # $codes matches a single special sequence.  $char matches any number of
+    # special sequences preceding a single character other than a newline.
+    # $shortchar matches some sequence of $char ending in codes followed by
+    # whitespace or the end of the string.  $longchar matches exactly $width
+    # $chars, used when we have to truncate and hard wrap.
+    my $code = '(?:\e\[[\d;]+m)';
+    my $char = "(?>$code*[^\\n])";
+    my $shortchar = '^(' . $char . "{0,$width}(?>$code*)" . ')(?:[ \t\n]+|\z)';
+    my $longchar = '^(' . $char . "{$width})";
     while (length > $width) {
-        if (s/^($shortchar)\s+// || s/^($longchar)//) {
+        if (s/$shortchar// || s/$longchar//) {
             $output .= $spaces . $1 . "\n";
         } else {
             last;
         }
     }
     $output .= $spaces . $_;
+
+    # less -R always resets terminal attributes at the end of each line, so we
+    # need to clear attributes at the end of lines and then set them again at
+    # the start of the next line.  This requires a second pass through the
+    # wrapped string, accumulating any attributes we see, remembering them,
+    # and then inserting the appropriate sequences at the newline.
+    if ($output =~ /\n/) {
+        my @lines = split (/\n/, $output);
+        my $start_format;
+        for my $line (@lines) {
+            if ($start_format && $line =~ /\S/) {
+                $line =~ s/^(\s*)(\S)/$1$start_format$2/;
+            }
+            $start_format = $self->end_format ($line);
+            if ($start_format) {
+                $line .= color ('reset');
+            }
+        }
+        $output = join ("\n", @lines);
+    }
+
+    # Fix up trailing whitespace and return the results.
     $output =~ s/\s+$/\n\n/;
     $output;
 }
@@ -99,12 +135,12 @@ sub wrap {
 1;
 __END__
 
+=for stopwords
+Allbery
+
 =head1 NAME
 
 Pod::Text::Color - Convert POD data to formatted color ASCII text
-
-=for stopwords
-Allbery
 
 =head1 SYNOPSIS
 
@@ -127,29 +163,50 @@ options.
 Term::ANSIColor is used to get colors and therefore must be installed to use
 this module.
 
-=head1 BUGS
+=head1 COMPATIBILITY
 
-This is just a basic proof of concept.  It should be seriously expanded to
-support configurable coloration via options passed to the constructor, and
-B<pod2text> should be taught about those.
+Pod::Text::Color 0.05 (based on L<Pod::Parser>) was the first version of this
+module included with Perl, in Perl 5.6.0.
+
+The current API based on L<Pod::Simple> was added in Pod::Text::Color 2.00.
+Pod::Text::Color 2.01 was included in Perl 5.9.3, the first version of Perl to
+incorporate those changes.
+
+Several problems with wrapping and line length were fixed as recently as
+Pod::Text::Color 6.0.0.
+
+This module inherits its API and most behavior from Pod::Text, so the details
+in L<Pod::Text/COMPATIBILITY> also apply.  Pod::Text and Pod::Text::Color have
+had the same module version since 4.00, included in Perl 5.23.7.  (They
+unfortunately diverge in confusing ways prior to that.)
+
+=head1 CAVEATS
+
+Line wrapping is done only at ASCII spaces and tabs, rather than using a
+correct Unicode-aware line wrapping algorithm.
+
+=head1 AUTHOR
+
+Russ Allbery <rra@cpan.org>.
+
+=head1 COPYRIGHT AND LICENSE
+
+Copyright 1999, 2001, 2004, 2006, 2008, 2009, 2018-2019, 2022, 2024 Russ
+Allbery <rra@cpan.org>
+
+This program is free software; you may redistribute it and/or modify it
+under the same terms as Perl itself.
 
 =head1 SEE ALSO
 
 L<Pod::Text>, L<Pod::Simple>
 
 The current version of this module is always available from its web site at
-L<http://www.eyrie.org/~eagle/software/podlators/>.  It is also part of the
+L<https://www.eyrie.org/~eagle/software/podlators/>.  It is also part of the
 Perl core distribution as of 5.6.0.
 
-=head1 AUTHOR
-
-Russ Allbery <rra@stanford.edu>.
-
-=head1 COPYRIGHT AND LICENSE
-
-Copyright 1999, 2001, 2004, 2006, 2008, 2009 Russ Allbery <rra@stanford.edu>.
-
-This program is free software; you may redistribute it and/or modify it
-under the same terms as Perl itself.
-
 =cut
+
+# Local Variables:
+# copyright-at-end-flag: t
+# End:

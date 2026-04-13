@@ -1,12 +1,6 @@
 ################################################################################
 #
-#  $Revision: 4 $
-#  $Author: mhx $
-#  $Date: 2010/03/07 16:01:42 +0100 $
-#
-################################################################################
-#
-#  Version 2.x, Copyright (C) 2007-2010, Marcus Holland-Moritz <mhx@cpan.org>.
+#  Version 2.x, Copyright (C) 2007-2013, Marcus Holland-Moritz <mhx@cpan.org>.
 #  Version 1.x, Copyright (C) 1999, Graham Barr <gbarr@pobox.com>.
 #
 #  This program is free software; you can redistribute it and/or
@@ -14,21 +8,23 @@
 #
 ################################################################################
 
+use strict;
+use warnings;
+
+our %Config;
 BEGIN {
   if ($ENV{'PERL_CORE'}) {
     chdir 't' if -d 't';
     @INC = '../lib' if -d '../lib' && -d '../ext';
   }
 
-  require Test::More; import Test::More;
-  require Config; import Config;
+  require Test::More; Test::More->import;
+  require Config; Config->import;
 
   if ($ENV{'PERL_CORE'} && $Config{'extensions'} !~ m[\bIPC/SysV\b]) {
     plan(skip_all => 'IPC::SysV was not built');
   }
 }
-
-use strict;
 
 my @pods;
 
@@ -55,12 +51,12 @@ eval {
   require Test::Pod;
   $Test::Pod::VERSION >= 0.95
       or die "Test::Pod version only $Test::Pod::VERSION";
-  import Test::Pod tests => scalar @pods;
+  Test::Pod->import( tests => scalar @pods );
 };
 
 if ($@) {
   require Test::More;
-  import Test::More skip_all => "testing pod requires Test::Pod";
+  Test::More->import( skip_all => "testing pod requires Test::Pod" );
 }
 else {
   for my $pod (@pods) {

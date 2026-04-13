@@ -70,7 +70,7 @@ else with the Pod (like counting words, scanning for index points,
 etc.).
 
 Pod content is contained in B<Pod blocks>.  A Pod block starts with a
-line that matches <m/\A=[a-zA-Z]/>, and continues up to the next line
+line that matches C<m/\A=[a-zA-Z]/>, and continues up to the next line
 that matches C<m/\A=cut/> or up to the end of the file if there is
 no C<m/\A=cut/> line.
 
@@ -82,11 +82,11 @@ no C<m/\A=cut/> line.
    actually knows to look for pod escapes even in the middle of a
    paragraph.  This means that the following secret stuff will be ignored
    by both the compiler and the translators.
-      $a=3;
+      $x=3;
       =secret stuff
        warn "Neither POD nor CODE!?"
       =cut back
-      print "got $a\n";
+      print "got $x\n";
    You probably shouldn't rely upon the warn() being podded out forever.
    Not all pod translators are well-behaved in this regard, and perhaps
    the compiler will become pickier.
@@ -97,6 +97,9 @@ no C<m/\A=cut/> line.
  Even if the "it makes parsing easier" bit were especially true,
  it wouldn't be worth the confusion of having perl and pod2whatever
  actually disagree on what can constitute a Pod block.
+
+Note that a parser is not expected to distinguish between something that
+looks like pod, but is in a quoted string, such as a here document.
 
 Within a Pod block, there are B<Pod paragraphs>.  A Pod paragraph
 consists of non-blank lines of text, separated by one or more blank
@@ -203,7 +206,7 @@ Pod commands:
 
 =over
 
-=item "=head1", "=head2", "=head3", "=head4"
+=item "=head1", "=head2", "=head3", "=head4", "=head5", "=head6"
 
 This command indicates that the text in the remainder of the paragraph
 is a heading.  That text may contain formatting codes.  Examples:
@@ -211,6 +214,11 @@ is a heading.  That text may contain formatting codes.  Examples:
   =head1 Object Attributes
 
   =head3 What B<Not> to Do!
+
+Both C<=head5> and C<=head6> were added in 2020 and might not be
+supported on all Pod parsers. L<Pod::Simple> 3.41 was released on October
+2020 and supports both of these providing support for all
+L<Pod::Simple>-based Pod parsers.
 
 =item "=pod"
 
@@ -396,7 +404,7 @@ matching ">".  Examples:
 
     That's what I<you> think!
 
-    What's C<dump()> for?
+    What's C<CORE::dump()> for?
 
     X<C<chmod> and C<unlink()> Under Different Operating Systems>
 
@@ -416,7 +424,7 @@ formatting code.  Examples:
     B<< $foo->bar(); >>
 
 With this syntax, the whitespace character(s) after the "CE<lt><<"
-and before the ">>" (or whatever letter) are I<not> renderable. They
+and before the ">>>" (or whatever letter) are I<not> renderable. They
 do not signify whitespace, are merely part of the formatting codes
 themselves.  That is, these are all synonymous:
 
@@ -459,6 +467,12 @@ See the brief discussion in L<perlpod/"Formatting Codes">.
 
 See the brief discussion in L<perlpod/"Formatting Codes">.
 
+=item C<UE<lt>textE<gt>> -- underline text
+
+See the brief discussion in L<perlpod/"Formatting Codes">.
+
+This was added in 2024 and might not be supported on all Pod parsers.
+
 =item C<CE<lt>codeE<gt>> -- code text
 
 See the brief discussion in L<perlpod/"Formatting Codes">.
@@ -480,9 +494,9 @@ the current document.
 
 Discussed briefly in L<perlpod/"Formatting Codes">.
 
-This code is unusual is that it should have no content.  That is,
+This code is unusual in that it should have no content.  That is,
 a processor may complain if it sees C<ZE<lt>potatoesE<gt>>.  Whether
-or not it complains, the I<potatoes> text should ignored.
+or not it complains, the I<potatoes> text should be ignored.
 
 =item C<LE<lt>nameE<gt>> -- a hyperlink
 
@@ -561,7 +575,7 @@ two paragraphs:
   Don't make me say it again!>
 
 ...must I<not> be parsed as two paragraphs in italics (with the I
-code starting in one paragraph and starting in another.)  Instead,
+code starting in one paragraph and ending in another.)  Instead,
 the first paragraph should generate a warning, but that aside, the
 above code must parse as if it were:
 
@@ -607,7 +621,8 @@ as signaling that the file is Unicode encoded as in UTF-16 (whether
 big-endian or little-endian) or UTF-8, Pod parsers should do the
 same.  Otherwise, the character encoding should be understood as
 being UTF-8 if the first highbit byte sequence in the file seems
-valid as a UTF-8 sequence, or otherwise as Latin-1.
+valid as a UTF-8 sequence, or otherwise as CP-1252 (earlier versions of
+this specification used Latin-1 instead of CP-1252).
 
 Future versions of this specification may specify
 how Pod can accept other encodings.  Presumably treatment of other
@@ -621,8 +636,13 @@ The well known Unicode Byte Order Marks are as follows:  if the
 file begins with the two literal byte values 0xFE 0xFF, this is
 the BOM for big-endian UTF-16.  If the file begins with the two
 literal byte value 0xFF 0xFE, this is the BOM for little-endian
-UTF-16.  If the file begins with the three literal byte values
+UTF-16.  On an ASCII platform, if the file begins with the three literal
+byte values
 0xEF 0xBB 0xBF, this is the BOM for UTF-8.
+A mechanism portable to EBCDIC platforms is to:
+
+  my $utf8_bom = "\x{FEFF}";
+  utf8::encode($utf8_bom);
 
 =for comment
  use bytes; print map sprintf(" 0x%02X", ord $_), split '', "\x{feff}";
@@ -633,15 +653,23 @@ UTF-16.  If the file begins with the three literal byte values
 
 =item *
 
-A naive but sufficient heuristic for testing the first highbit
+A naive, but often sufficient heuristic on ASCII platforms, for testing
+the first highbit
 byte-sequence in a BOM-less file (whether in code or in Pod!), to see
 whether that sequence is valid as UTF-8 (RFC 2279) is to check whether
-that the first byte in the sequence is in the range 0xC0 - 0xFD
+that the first byte in the sequence is in the range 0xC2 - 0xFD
 I<and> whether the next byte is in the range
 0x80 - 0xBF.  If so, the parser may conclude that this file is in
 UTF-8, and all highbit sequences in the file should be assumed to
 be UTF-8.  Otherwise the parser should treat the file as being
-in Latin-1.  In the unlikely circumstance that the first highbit
+in CP-1252.  (A better check, and which works on EBCDIC platforms as
+well, is to pass a copy of the sequence to
+L<utf8::decode()|utf8> which performs a full validity check on the
+sequence and returns TRUE if it is valid UTF-8, FALSE otherwise.  This
+function is always pre-loaded, is fast because it is written in C, and
+will only get called at most once, so you don't need to avoid it out of
+performance concerns.)
+In the unlikely circumstance that the first highbit
 sequence in a truly non-UTF-8 file happens to appear to be UTF-8, one
 can cater to our heuristic (as well as any more intelligent heuristic)
 by prefacing that line with a comment line containing a highbit
@@ -664,12 +692,6 @@ is sufficient to establish this file's encoding.
 
 =item *
 
-This document's requirements and suggestions about encodings
-do not apply to Pod processors running on non-ASCII platforms,
-notably EBCDIC platforms.
-
-=item *
-
 Pod processors must treat a "=for [label] [content...]" paragraph as
 meaning the same thing as a "=begin [label]" paragraph, content, and
 an "=end [label]" paragraph.  (The parser may conflate these two
@@ -684,13 +706,13 @@ text identifying its name and version number, and the name and
 version numbers of any modules it might be using to process the Pod.
 Minimal examples:
 
-  %% POD::Pod2PS v3.14159, using POD::Parser v1.92
+ %% POD::Pod2PS v3.14159, using POD::Parser v1.92
 
-  <!-- Pod::HTML v3.14159, using POD::Parser v1.92 -->
+ <!-- Pod::HTML v3.14159, using POD::Parser v1.92 -->
 
-  {\doccomm generated by Pod::Tree::RTF 3.14159 using Pod::Tree 1.08}
+ {\doccomm generated by Pod::Tree::RTF 3.14159 using Pod::Tree 1.08}
 
-  .\" Pod::Man version 3.14159, using POD::Parser version 1.92
+ .\" Pod::Man version 3.14159, using POD::Parser version 1.92
 
 Formatters may also insert additional comments, including: the
 release date of the Pod formatter program, the contact address for
@@ -829,23 +851,26 @@ is noncompliant behavior.)
 Authors of Pod formatters/processors should make every effort to
 avoid writing their own Pod parser.  There are already several in
 CPAN, with a wide range of interface styles -- and one of them,
-Pod::Parser, comes with modern versions of Perl.
+Pod::Simple, comes with modern versions of Perl.
 
 =item *
 
 Characters in Pod documents may be conveyed either as literals, or by
 number in EE<lt>n> codes, or by an equivalent mnemonic, as in
-EE<lt>eacute> which is exactly equivalent to EE<lt>233>.
+EE<lt>eacute> which is exactly equivalent to EE<lt>233>.  The numbers
+are the Latin1/Unicode values, even on EBCDIC platforms.
 
-Characters in the range 32-126 refer to those well known US-ASCII
-characters (also defined there by Unicode, with the same meaning),
-which all Pod formatters must render faithfully.  Characters
-in the ranges 0-31 and 127-159 should not be used (neither as
-literals, nor as EE<lt>number> codes), except for the
-literal byte-sequences for newline (13, 13 10, or 10), and tab (9).
+When referring to characters by using a EE<lt>n> numeric code, numbers
+in the range 32-126 refer to those well known US-ASCII characters (also
+defined there by Unicode, with the same meaning), which all Pod
+formatters must render faithfully.  Characters whose EE<lt>E<gt> numbers
+are in the ranges 0-31 and 127-159 should not be used (neither as
+literals,
+nor as EE<lt>number> codes), except for the literal byte-sequences for
+newline (ASCII 13, ASCII 13 10, or ASCII 10), and tab (ASCII 9).
 
-Characters in the range 160-255 refer to Latin-1 characters (also
-defined there by Unicode, with the same meaning).  Characters above
+Numbers in the range 160-255 refer to Latin-1 characters (also
+defined there by Unicode, with the same meaning).  Numbers above
 255 should be understood to refer to Unicode characters.
 
 =item *
@@ -893,17 +918,17 @@ character 34 (doublequote, "), "EE<lt>amp>" for character 38
 
 =item *
 
-Note that in all cases of "EE<lt>whatever>", I<whatever> (whether
+Note that in all cases of "EE<lt>whateverE<gt>", I<whatever> (whether
 an htmlname, or a number in any base) must consist only of
-alphanumeric characters -- that is, I<whatever> must watch
-C<m/\A\w+\z/>.  So "EE<lt> 0 1 2 3 >" is invalid, because
+alphanumeric characters -- that is, I<whatever> must match
+C<m/\A\w+\z/>.  So S<"EE<lt> 0 1 2 3 E<gt>"> is invalid, because
 it contains spaces, which aren't alphanumeric characters.  This
 presumably does not I<need> special treatment by a Pod processor;
-" 0 1 2 3 " doesn't look like a number in any base, so it would
+S<" 0 1 2 3 "> doesn't look like a number in any base, so it would
 presumably be looked up in the table of HTML-like names.  Since
-there isn't (and cannot be) an HTML-like entity called " 0 1 2 3 ",
+there isn't (and cannot be) an HTML-like entity called S<" 0 1 2 3 ">,
 this will be treated as an error.  However, Pod processors may
-treat "EE<lt> 0 1 2 3 >" or "EE<lt>e-acute>" as I<syntactically>
+treat S<"EE<lt> 0 1 2 3 E<gt>"> or "EE<lt>e-acute>" as I<syntactically>
 invalid, potentially earning a different error message than the
 error message (or warning, or event) generated by a merely unknown
 (but theoretically valid) htmlname, as in "EE<lt>qacute>"
@@ -1127,7 +1152,7 @@ four attributes:
 
 =item First:
 
-The link-text.  If there is none, this must be undef.  (E.g., in
+The link-text.  If there is none, this must be C<undef>.  (E.g., in
 "LE<lt>Perl Functions|perlfunc>", the link-text is "Perl Functions".
 In "LE<lt>Time::HiRes>" and even "LE<lt>|Time::HiRes>", there is no
 link text.  Note that link text may contain formatting.)
@@ -1140,13 +1165,13 @@ text, then this is the text that we'll infer in its place.  (E.g., for
 
 =item Third:
 
-The name or URL, or undef if none.  (E.g., in "LE<lt>Perl
+The name or URL, or C<undef> if none.  (E.g., in "LE<lt>Perl
 Functions|perlfunc>", the name (also sometimes called the page)
-is "perlfunc".  In "LE<lt>/CAVEATS>", the name is undef.)
+is "perlfunc".  In "LE<lt>/CAVEATS>", the name is C<undef>.)
 
 =item Fourth:
 
-The section (AKA "item" in older perlpods), or undef if none.  E.g.,
+The section (AKA "item" in older perlpods), or C<undef> if none.  E.g.,
 in "LE<lt>Getopt::Std/DESCRIPTIONE<gt>", "DESCRIPTION" is the section.  (Note
 that this is not the same as a manpage section like the "5" in "man 5
 crontab".  "Section Foo" in the Pod sense means the part of the text
@@ -1178,60 +1203,61 @@ a requirement that these be passed as an actual list or array.)
 For example:
 
   L<Foo::Bar>
-    =>  undef,                          # link text
-        "Foo::Bar",                     # possibly inferred link text
-        "Foo::Bar",                     # name
-        undef,                          # section
-        'pod',                          # what sort of link
-        "Foo::Bar"                      # original content
+    =>  undef,                         # link text
+        "Foo::Bar",                    # possibly inferred link text
+        "Foo::Bar",                    # name
+        undef,                         # section
+        'pod',                         # what sort of link
+        "Foo::Bar"                     # original content
 
   L<Perlport's section on NL's|perlport/Newlines>
-    =>  "Perlport's section on NL's",   # link text
-        "Perlport's section on NL's",   # possibly inferred link text
-        "perlport",                     # name
-        "Newlines",                     # section
-        'pod',                          # what sort of link
-        "Perlport's section on NL's|perlport/Newlines" # orig. content
+    =>  "Perlport's section on NL's",  # link text
+        "Perlport's section on NL's",  # possibly inferred link text
+        "perlport",                    # name
+        "Newlines",                    # section
+        'pod',                         # what sort of link
+        "Perlport's section on NL's|perlport/Newlines"
+                                       # original content
 
   L<perlport/Newlines>
-    =>  undef,                          # link text
-        '"Newlines" in perlport',       # possibly inferred link text
-        "perlport",                     # name
-        "Newlines",                     # section
-        'pod',                          # what sort of link
-        "perlport/Newlines"             # original content
+    =>  undef,                         # link text
+        '"Newlines" in perlport',      # possibly inferred link text
+        "perlport",                    # name
+        "Newlines",                    # section
+        'pod',                         # what sort of link
+        "perlport/Newlines"            # original content
 
   L<crontab(5)/"DESCRIPTION">
-    =>  undef,                          # link text
-        '"DESCRIPTION" in crontab(5)',  # possibly inferred link text
-        "crontab(5)",                   # name
-        "DESCRIPTION",                  # section
-        'man',                          # what sort of link
-        'crontab(5)/"DESCRIPTION"'      # original content
+    =>  undef,                         # link text
+        '"DESCRIPTION" in crontab(5)', # possibly inferred link text
+        "crontab(5)",                  # name
+        "DESCRIPTION",                 # section
+        'man',                         # what sort of link
+        'crontab(5)/"DESCRIPTION"'     # original content
 
   L</Object Attributes>
-    =>  undef,                          # link text
-        '"Object Attributes"',          # possibly inferred link text
-        undef,                          # name
-        "Object Attributes",            # section
-        'pod',                          # what sort of link
-        "/Object Attributes"            # original content
+    =>  undef,                         # link text
+        '"Object Attributes"',         # possibly inferred link text
+        undef,                         # name
+        "Object Attributes",           # section
+        'pod',                         # what sort of link
+        "/Object Attributes"           # original content
 
-  L<http://www.perl.org/>
-    =>  undef,                          # link text
-        "http://www.perl.org/",         # possibly inferred link text
-        "http://www.perl.org/",         # name
-        undef,                          # section
-        'url',                          # what sort of link
-        "http://www.perl.org/"          # original content
+  L<https://www.perl.org/>
+    =>  undef,                         # link text
+        "https://www.perl.org/",       # possibly inferred link text
+        "https://www.perl.org/",       # name
+        undef,                         # section
+        'url',                         # what sort of link
+        "https://www.perl.org/"         # original content
 
-  L<Perl.org|http://www.perl.org/>
-    =>  "Perl.org",                     # link text
-        "http://www.perl.org/",         # possibly inferred link text
-        "http://www.perl.org/",         # name
-        undef,                          # section
-        'url',                          # what sort of link
-        "Perl.org|http://www.perl.org/" # original content
+  L<Perl.org|https://www.perl.org/>
+    =>  "Perl.org",                    # link text
+        "https://www.perl.org/",       # possibly inferred link text
+        "https://www.perl.org/",       # name
+        undef,                         # section
+        'url',                         # what sort of link
+        "Perl.org|https://www.perl.org/" # original content
 
 Note that you can distinguish URL-links from anything else by the
 fact that they match C<m/\A\w+:[^:\s]\S*\z/>.  So
@@ -1337,7 +1363,7 @@ either the name of a Pod page like C<LE<lt>Foo::BarE<gt>> (which
 might be a real Perl module or program in an @INC / PATH
 directory, or a .pod file in those places); or the name of a Unix
 man page, like C<LE<lt>crontab(5)E<gt>>.  In theory, C<LE<lt>chmodE<gt>>
-in ambiguous between a Pod page called "chmod", or the Unix man page
+is ambiguous between a Pod page called "chmod", or the Unix man page
 "chmod" (in whatever man-section).  However, the presence of a string
 in parens, as in "crontab(5)", is sufficient to signal that what
 is being discussed is not a Pod page, and so is presumably a

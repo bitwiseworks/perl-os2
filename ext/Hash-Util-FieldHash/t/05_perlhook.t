@@ -1,10 +1,17 @@
-#!perl
-use strict; use warnings;
+use strict;
+use warnings;
 use Test::More;
-my $n_tests;
 
 use Hash::Util::FieldHash;
-use Scalar::Util qw( weaken);
+no warnings 'experimental::builtin';
+use builtin qw(weaken);
+
+sub numbers_first { # Sort helper: All digit entries sort in front of others
+                    # Makes sorting portable across ASCII/EBCDIC
+    return $a cmp $b if ($a =~ /^\d+$/) == ($b =~ /^\d+$/);
+    return -1 if $a =~ /^\d+$/;
+    return 1;
+}
 
 # The functions in Hash::Util::FieldHash
 # _test_uvar_get, _test_uvar_get and _test_uvar_both
@@ -31,7 +38,7 @@ use Scalar::Util qw( weaken);
 
     weaken $magref;
     is( $counter, 1, "weaken doesn't trigger magic");
-    
+
     { my $x = $magref }
     is( $counter, 1, "read doesn't trigger magic");
 
@@ -47,13 +54,11 @@ use Scalar::Util qw( weaken);
 
     $magref = my $other_ref = [];
     is( $counter, 2, "overwrite triggers");
-    
+
     undef $ref;
     is( $counter, 2, "ref expiry doesn't trigger after overwrite");
 
     is( $magref, $other_ref, "weak ref doesn't kill overwritten value");
-
-    BEGIN { $n_tests += 10 }
 }
 
 # magical hash (patches to mg.c and hv.c)
@@ -96,9 +101,9 @@ use Scalar::Util qw( weaken);
     is( $counter, 1, "list each doesn't trigger");
     is( "@x", "abc 123", "the return is correct");
 
-    $x = %h;
+    $x = scalar %h;
     is( $counter, 1, "hash in scalar context doesn't trigger");
-    like( $x, qr!^\d+/\d+$!, "correct result");
+    is( $x, 1, "correct result");
 
     (@x) = %h;
     is( $counter, 1, "hash in list context doesn't trigger");
@@ -108,7 +113,7 @@ use Scalar::Util qw( weaken);
     $h{ def} = 456;
     is( $counter, 2, "lvalue assign triggers");
 
-    (@x) = sort %h;
+    (@x) = sort numbers_first %h;
     is( $counter, 2, "hash in list context doesn't trigger");
     is( "@x", "123 456 abc def", "correct result");
 
@@ -121,14 +126,14 @@ use Scalar::Util qw( weaken);
     delete $h{ def};
     is( $counter, 5, "good delete triggers");
 
-    (@x) = sort %h;
+    (@x) = sort numbers_first %h;
     is( $counter, 5, "hash in list context doesn't trigger");
     is( "@x", "123 abc", "correct result");
 
     delete $h{ xyz};
     is( $counter, 6, "bad delete triggers");
 
-    (@x) = sort %h;
+    (@x) = sort numbers_first %h;
     is( $counter, 6, "hash in list context doesn't trigger");
     is( "@x", "123 abc", "correct result");
 
@@ -138,7 +143,7 @@ use Scalar::Util qw( weaken);
     $x = $h{ xyz};
     is( $counter, 8, "bad read triggers");
 
-    (@x) = sort %h;
+    (@x) = sort numbers_first %h;
     is( $counter, 8, "hash in list context doesn't trigger");
     is( "@x", "123 abc", "correct result");
 
@@ -168,7 +173,7 @@ use Scalar::Util qw( weaken);
     () = values %i;
     $x = each %i;
     () = each %i;
-    
+
     is( $counter, 0, "normal set magic never triggers");
 
     bless \ %i, 'abc';
@@ -199,9 +204,6 @@ use Scalar::Util qw( weaken);
 
     bless \ %j, 'abc';
     is( $counter, 1, "...except for bless");
-
-    BEGIN { $n_tests += 43 }
 }
 
-BEGIN { plan tests => $n_tests }
-
+done_testing;

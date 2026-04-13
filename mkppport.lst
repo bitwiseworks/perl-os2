@@ -7,7 +7,14 @@
 
 cpan/DB_File
 cpan/IPC-SysV
-cpan/List-Util
-cpan/Time-HiRes
 cpan/Win32API-File
-dist/Cwd
+dist/Data-Dumper
+dist/Devel-PPPort
+dist/ExtUtils-ParseXS
+dist/IO
+dist/PathTools
+dist/Storable
+dist/threads
+dist/threads-shared
+dist/Time-HiRes
+dist/Unicode-Normalize

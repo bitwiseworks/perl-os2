@@ -1,34 +1,57 @@
 package strict;
 
-$strict::VERSION = "1.07";
+$strict::VERSION = "1.14";
 
-# Verify that we're called correctly so that strictures will work.
-unless ( __FILE__ =~ /(^|[\/\\])\Q${\__PACKAGE__}\E\.pmc?$/ ) {
+my ( %bitmask, %explicit_bitmask );
+
+BEGIN {
+    # Verify that we're called correctly so that strictures will work.
     # Can't use Carp, since Carp uses us!
-    my (undef, $f, $l) = caller;
-    die("Incorrect use of pragma '${\__PACKAGE__}' at $f line $l.\n");
+    # see also warnings.pm.
+    die sprintf "Incorrect use of pragma '%s' at %s line %d.\n", __PACKAGE__, +(caller)[1,2]
+        if __FILE__ !~ ( '(?x) \b     '.__PACKAGE__.'  \.pmc? \z' )
+        && __FILE__ =~ ( '(?x) \b (?i:'.__PACKAGE__.') \.pmc? \z' );
+
+    # which strictures are actually in force
+    %bitmask = (
+        refs => 0x00000002,
+        subs => 0x00000200,
+        vars => 0x00000400,
+    );
+
+    # which strictures have at some point been turned on or off explicitly
+    # and must therefore not be touched by any subsequent `use VERSION` or `no VERSION`
+    %explicit_bitmask = (
+        refs => 0x00000020,
+        subs => 0x00000040,
+        vars => 0x00000080,
+    );
+
+    my $bits = 0;
+    $bits |= $_ for values %bitmask;
+
+    my $inline_all_bits = $bits;
+    *all_bits = sub () { $inline_all_bits };
+
+    $bits = 0;
+    $bits |= $_ for values %explicit_bitmask;
+
+    my $inline_all_explicit_bits = $bits;
+    *all_explicit_bits = sub () { $inline_all_explicit_bits };
 }
 
-my %bitmask = (
-refs => 0x00000002,
-subs => 0x00000200,
-vars => 0x00000400
-);
-my %explicit_bitmask = (
-refs => 0x00000020,
-subs => 0x00000040,
-vars => 0x00000080
-);
-
 sub bits {
+    my $do_explicit = caller eq __PACKAGE__;
     my $bits = 0;
     my @wrong;
     foreach my $s (@_) {
-	if (exists $bitmask{$s}) {
-	    $^H |= $explicit_bitmask{$s};
-	}
-	else { push @wrong, $s };
-        $bits |= $bitmask{$s} || 0;
+        if (exists $bitmask{$s}) {
+            $bits |= $explicit_bitmask{$s} if $do_explicit;
+            $bits |= $bitmask{$s};
+        }
+        else {
+            push @wrong, $s;
+        }
     }
     if (@wrong) {
         require Carp;
@@ -37,19 +60,27 @@ sub bits {
     $bits;
 }
 
-my @default_bits = qw(refs subs vars);
-
 sub import {
     shift;
-    $^H |= bits(@_ ? @_ : @default_bits);
+    $^H |= @_ ? &bits : all_bits | all_explicit_bits;
 }
 
 sub unimport {
     shift;
-    $^H &= ~ bits(@_ ? @_ : @default_bits);
+
+    if (@_) {
+        my $bits = &bits;
+        $^H &= ~$bits;
+        $^H |= all_explicit_bits & $bits;
+    }
+    else {
+        $^H &= ~all_bits;
+        $^H |= all_explicit_bits;
+    }
 }
 
 1;
+
 __END__
 
 =head1 NAME
@@ -68,6 +99,10 @@ strict - Perl pragma to restrict unsafe constructs
     no strict "vars";
 
 =head1 DESCRIPTION
+
+The C<strict> pragma disables certain Perl expressions that could behave
+unexpectedly or are difficult to debug, turning them into errors. The
+effect of this pragma is limited to the current file or scope block.
 
 If no import list is supplied, all possible restrictions are assumed.
 (This is the safest mode to operate in, but is sometimes too strict for
@@ -125,13 +160,14 @@ exempted from this check.
 
 This disables the poetry optimization, generating a compile-time error if
 you try to use a bareword identifier that's not a subroutine, unless it
-is a simple identifier (no colons) and that it appears in curly braces or
-on the left hand side of the C<< => >> symbol.
+is a simple identifier (no colons) and that it appears in curly braces,
+on the left hand side of the C<< => >> symbol, or has the unary minus
+operator applied to it.
 
     use strict 'subs';
-    $SIG{PIPE} = Plumber;   	# blows up
-    $SIG{PIPE} = "Plumber"; 	# just fine: quoted string is always ok
-    $SIG{PIPE} = \&Plumber; 	# preferred form
+    $SIG{PIPE} = Plumber;   # blows up
+    $SIG{PIPE} = "Plumber"; # fine: quoted string is always ok
+    $SIG{PIPE} = \&Plumber; # preferred form
 
 =back
 
@@ -151,5 +187,11 @@ if unknown restrictions are used, the strict pragma will abort with
 As of version 1.04 (Perl 5.10), strict verifies that it is used as
 "strict" to avoid the dreaded Strict trap on case insensitive file
 systems.
+
+Beginning with Perl 5.12, use of "use VERSION" (where VERSION >= 5.11.0) now
+lexically enables strictures just like "use strict" (in addition to the normal
+"use VERSION" effects and features.)  In other words, "use v5.011" or higher
+now implies "use strict" automatically, as noted in
+L<perl5120delta/"Implicit strictures"> and L<C<use VERSION>|perlfunc/use VERSION>.
 
 =cut

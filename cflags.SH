@@ -1,3 +1,28 @@
+#!/bin/sh
+
+# Generate the cflags script, which is used to determine what cflags
+# to pass to the compiler for compiling the core perl.
+#
+# This does NOT affect the XS compilation (ext, dist, cpan)
+# since that uses %Config values directly.
+#
+# For example, since -Wall adds -Wunused-*, a bare -Wall (without
+# amending that with -Wno-unused-..., or with the PERL_UNUSED_...)
+# would be too much for XS code because there are too many generated
+# but often unused things.
+#
+# We create a temporary test C program and repeatedly compile it with
+# various candidate flags, and from the compiler output, determine what
+# flags are supported.
+#
+# From this we initialise the following variables in the cflags script:
+#
+#   $myccflags (possibly edited version of $Config{ccflags})
+#   $warn
+#   $stdflags
+#   $extra
+#   $_exe
+
 case $PERL_CONFIG_SH in
 '')
 	if test -f config.sh; then TOP=.;
@@ -11,8 +36,8 @@ case $PERL_CONFIG_SH in
 	. $TOP/config.sh
 	;;
 esac
-: This forces SH files to create target in same directory as SH file.
-: This is so that make depend always knows where to find SH derivatives.
+# This forces SH files to create target in same directory as SH file.
+# This is so that make depend always knows where to find SH derivatives.
 case "$0" in
 */*) cd `expr X$0 : 'X\(.*\)/'` ;;
 esac
@@ -48,18 +73,10 @@ cat >_cflags.c <<__EOT__
 #include <setjmp.h>
 /* Just in case the inclusion of perl.h did not
  * pull in enough system headers, let's try again. */
-#ifdef I_STDLIB
 #include <stdlib.h>
-#endif
-#ifdef I_STDDEF
 #include <stddef.h>
-#endif
-#ifdef I_STDARG
 #include <stdarg.h>
-#endif
-#ifdef I_LIMITS
 #include <limits.h>
-#endif
 #ifdef I_DIRENT
 #include <dirent.h>
 #endif
@@ -107,7 +124,9 @@ int main(int argc, char *argv[]) {
   IV iv;
   Off_t t0a = 2;
   STRLEN t0b = 3;
-  int t0c = t0a == t0b;
+  int t0c = (STRLEN)t0a == t0b;
+
+  printf("%s: %d\n", argv[0], argc);
 
 /* In FreeBSD 6.2 (and probably other releases too), with -Duse64bitint,
    perl will use atoll(3).  However, that declaration is hidden in <stdlib.h>
@@ -125,36 +144,117 @@ stdflags=''
 # Note that some problems may only show up with combinations of options,
 # e.g. a warning might show up only with -Wall -ansi, not with either
 # one individually.
-# TODO:  Ponder whether to migrate this back to Configure so hints files can 
+# TODO:  Ponder whether to migrate this back to Configure so hints files can
 # tweak it.  Also, be paranoid about whether results we've deduced in Configure
-# (especially about things like long long, which are not in C89) will still be 
-# valid if we now add flags like -std=c89.
+# will still be valid if we now add flags like -std=c99.
+
+pedantic=''
+case "$gccansipedantic" in
+define) pedantic='-pedantic' ;;
+esac
 
 case "$gccversion" in
 '') ;;
-[12]*) ;; # gcc versions 1 (gasp!) and 2 are not good for this.
+[12].*) ;; # gcc versions 1 (gasp!) and 2 are not good for this.
 Intel*) ;; # # Is that you, Intel C++?
-*)  for opt in -ansi -std=c89 -W -Wextra -Wdeclaration-after-statement \
-		-Wendif-labels -Wc++-compat -Wwrite-strings
+#
+# These comments are adapted from the originals, which were for -std=c89.
+# I believe that my updates close to correct, and better than throwing the
+# entire comments away, but please check for discrepencies.
+#
+# NOTE 1: the -std=c99 without -pedantic is a bit pointless.
+# Just -std=c99 means "if there is room for interpretation,
+# interpret the C99 way."  It does NOT mean "strict C99" on its own.
+# You need to add the -pedantic for that.  To do this with Configure,
+# do -Dgccansipedantic (note that this is named from the time when we also
+# added the -ansi option. That forces -std=c89, so we no longer use it.)
+# *Because* we aren't adding -std=c99 if we don't have to, but will add -W,
+# some versions of gcc will accept C99 code but warn about not-C89 features.
+# (If we added -std=c99 then the warnings enabled by -W would be consistent)
+# Hence we add -Wno-long-long and -Wno-declaration-after-statement to cover
+# these cases.
+#
+# NOTE 2: -pedantic necessitates adding a couple of flags:
+# * -PERL_GCC_PEDANTIC so that the perl code can adapt: there's nothing
+#   added by gcc itself to indicate pedanticness.
+# * -Wno-overlength-strings under -DDEBUGGING because quite many of
+#   the LEAVE_with_name() and assert() calls generate string literals
+#   longer then the ANSI C99 minimum of 4095 bytes.
+#
+# NOTE 3: the relative order of these options matters:
+# -Wextra before -Wno-long-long -Wno-declaration-after-statement
+#
+*) warns="$pedantic \
+	-Werror=pointer-arith \
+	-Werror=vla \
+	-Wextra \
+	-Wno-long-long -Wno-declaration-after-statement \
+	-Wc++-compat -Wwrite-strings"
+   case " $ccflags " in
+   *" -std="*) ;; # Already have -std=...
+   *) warns="-std=c99 $warns" ;;
+   esac
+   for opt in $warns
     do
        case " $ccflags " in
        *" $opt "*) ;; # Skip if already there.
        *) rm -f _cflags$_exe
-          case "`$cc $cflags $warn $stdflags $opt _cflags.c -o _cflags$_exe 2>&1`" in
+	  flags="-DPERL_NO_INLINE_FUNCTIONS $ccflags $warn $stdflags $opt"
+	  case "$opt" in
+	  *-pedantic*) flags="$flags -DPERL_GCC_PEDANTIC" ;;
+	  esac
+          # echo "opt = $opt, flags = $flags"
+          cmd="$cc $flags _cflags.c -o _cflags$_exe"
+          out="`$cmd 2>&1`"
+          # echo "$cmd --> $out"
+          case "$out" in
           *"unrecognized"*) ;;
+          *"unknown"*) ;;
           *"implicit declaration"*) ;; # Was something useful hidden?
           *"Invalid"*) ;;
           *"is valid for C"*) ;;
           *) if test -x _cflags$_exe
              then
                case "$opt" in
-               -std*) stdflags="$stdflags $opt" ;;
-               *) warn="$warn $opt" ;;
+               -std*)
+                 echo "cflags.SH: Adding $opt."
+                 stdflags="$stdflags $opt"
+                 ;;
+               -Werror=pointer-arith)
+                  # -pedantic* covers -Werror=p-a
+                  case "$warn" in
+                  *-pedantic*) ;;
+                  *)
+                     echo "cflags.SH: Adding $opt."
+                     warn="$warn $opt"
+                     ;;
+                  esac
+                  ;;
+               *)
+                  echo "cflags.SH: Adding $opt."
+                  warn="$warn $opt"
+                  ;;
                esac
              fi
              ;;
           esac
           ;;
+       esac
+       case "$ccflags$warn" in
+       *-pedantic*)
+         overlength=''
+         case "$ccflags$optimize" in
+         *-DDEBUGGING*) overlength='-Wno-overlength-strings' ;;
+         esac
+         for opt2 in -DPERL_GCC_PEDANTIC $overlength
+         do
+	   case "$ccflags$warn" in
+	   *"$opt2"*) ;;
+	   *) echo "cflags.SH: Adding $opt2 because of -pedantic."
+	      warn="$warn $opt2" ;;
+           esac
+         done
+         ;;
        esac
     done
     ;;
@@ -164,49 +264,149 @@ rm -f _cflags.c _cflags$_exe
 case "$gccversion" in
 '') ;;
 *)
-  if [ "$gccansipedantic" = "" ]; then
-    # If we have -Duse64bitint (or equivalent) in effect and the quadtype
-    # has become 'long long', gcc -pedantic becomes unbearable (moreso
-    # when combined with -Wall) because long long and LL and %lld|%Ld
-    # become warn-worthy.  So let's drop the -pedantic in that case.
-    case "$quadtype:$sPRId64" in
-    "long long"*|*lld*|*Ld*)
-      ccflags="`echo $ccflags|sed 's/-pedantic/ /'`"
-      warn="`echo $warn|sed 's/-pedantic/ /'`"
+  case "$warn$ccflags" in
+  *-pedantic*)
+    # For -std=c99 -pedantic, only the %Ld format seems to be warn-worthy.
+    # 'long long' and '%lld' are now kosher.
+    #
+    # usedtrace (DTrace) uses unportable features (dollars in identifiers,
+    # and gcc statement expressions), it is just easier to turn off pedantic.
+    remove=''
+    case "$quadtype:$ivtype:$sPRId64:$usedtrace" in
+    **Ld*) remove='Ld' ;;
+    *) case "$usedtrace" in
+       define) remove='usedtrace' ;;
+       esac
+       ;;
+    esac
+    case "$remove" in
+    '') ;;
+    *) echo "cflags.SH: Removing -pedantic* -ansi because of $remove."
+      ccflags=`echo $ccflags|sed -e 's/-pedantic-errors/ /' -e 's/-pedantic/ /'`
+      warn=`echo $warn|sed -e 's/-pedantic-errors/ /' -e 's/-pedantic/ /'`
       ;;
     esac
-    # Similarly, since 'long long' isn't part of C89, FreeBSD 6.2 headers
-    # don't declare atoll() under -std=c89, but we need it.  In general,
-    # insisting on -std=c89 is inconsistent with insisting on using
-    # 'long long'. So drop -std=c89 and -ansi as well if we're using 
-    # 'long long' as our main integral type.
-    case "$ivtype" in
-    "long long")
-	ccflags=`echo $ccflags|sed -e 's/-pedantic/ /' -e 's/-std=c89/ /' -e 's/-ansi/ /'`
-	warn=`echo $warn|sed -e 's/-pedantic/ /' -e 's/-ansi/ /'`
-	stdflags=`echo $stdflags|sed -e 's/-std=c89/ /'`
-	;;
-    esac
-  fi
-  # Using certain features (like the gcc statement expressions)
-  # requires knowing whether -pedantic has been specified.
-  case "$warn$ccflags" in
-  *-pedantic*) warn="$warn -DPERL_GCC_PEDANTIC" ;;
+    ;;
   esac
   ;;
 esac
 
+# Older clang releases are not wise enough for -Wunused-value.
+case "$gccversion" in
+*"Apple LLVM "[34]*|*"Apple LLVM version "[34]*)
+  for f in -Wno-unused-value
+  do
+    echo "cflags.SH: Adding $f because clang version '$gccversion'" 
+    warn="$warn $f"
+  done
+  ;;
+esac
+
+# The quadmath Q format specifier will cause -Wformat to whine.
+case "$gccversion" in
+'') ;;
+*) case "$usequadmath" in
+   define)
+     for f in -Wno-format
+     do
+       echo "cflags.SH: Adding $f because of usequadmath."
+       warn="$warn $f"
+     done
+    ;;
+  esac
+  ;;
+esac
+
+case "$cc" in
+*g++*)
+  # Extra paranoia in case people have bad canned ccflags:
+  # bad in the sense that the flags are accepted by g++,
+  # but then whined about.
+  for f in -Wc++-compat -std=c99
+  do
+    case "$ccflags$warn" in
+    *"$f"*)
+      echo "cflags.SH: Removing $f because of g++."
+      ccflags=`echo $ccflags|sed 's/$f/ /'`
+      warn=`echo $warn|sed 's/$f/ /'`
+      ;;
+    esac
+  done
+  ;;
+esac
+
+for f in -Wpointer-arith -Werror=pointer-arith
+do
+  case "$cppflags" in
+  *"$f"*)
+    echo "cflags.SH: Removing $f from cppflags."
+    cppflags=`echo $cppflags|sed 's/$f/ /'` ;;
+  esac
+done
+
+# If usethreads and clang, add -Wthread-safety for clang 3.6 or later.
+# gccversion is defined also for clang, because compat, use that for matching.
+# Apple overwrites clang version with XCode version, see hints/darwin.sh
+# for the gory details.  Aggressively forward-proofing.
+case "$usethreads" in
+define)
+case "$gccversion" in
+*" Clang 3."[56789]*|*" Clang "[456]*|*"Apple LLVM 6.1"*|*"Apple LLVM "[789]*)
+  for f in -Wthread-safety
+  do
+    case " $warn " in
+    *" $f "*) ;; # Skip if already there.
+    *)
+      echo "cflags.SH: Adding $f because usethreads and clang and gccversion '$gccversion'"
+      warn="$warn $f"
+      ;;
+    esac
+  done
+;;
+esac
+;;
+esac
+
+# gcc version 12 and 13 are overly aggressive with use-after-free warnings
+# and have false positives on code that shouldn't warn, and they haven't
+# sorted it out yet. See https://gcc.gnu.org/bugzilla/show_bug.cgi?id=108115
+case "$gccversion" in
+"1"[23]*)
+    for f in -Wno-use-after-free
+    do
+        echo "cflags.SH: Adding $f because of false positives in gccversion '$gccversion'"
+        warn="$warn $f"
+    done
+;;
+esac
+
+echo "cflags.SH: cc       = $cc"
+echo "cflags.SH: ccflags  = $ccflags"
+echo "cflags.SH: stdflags = $stdflags"
+echo "cflags.SH: optimize = $optimize"
+echo "cflags.SH: warn     = $warn"
+
 # Code to set any extra flags here.
 extra=''
 
+# Protect double or single quotes for better restoring of ccflags.
+myccflags=`echo $ccflags | sed -e 's/"/\\\"/g' -e "s/'/\\\'/g"`
+
 echo "Extracting cflags (with variable substitutions)"
-: This section of the file will have variable substitutions done on it.
-: Move anything that needs config subs from !NO!SUBS! section to !GROK!THIS!.
-: Protect any dollar signs and backticks that you do not want interpreted
-: by putting a backslash in front.  You may delete these comments.
+# This section of the file will have variable substitutions done on it.
+# Move anything that needs config subs from !NO!SUBS! section to !GROK!THIS!.
+# Protect any dollar signs and backticks that you do not want interpreted
+# by putting a backslash in front.  You may delete these comments.
 rm -f cflags
 $spitshell >cflags <<!GROK!THIS!
 $startsh
+
+# !!!!!!!   DO NOT EDIT THIS FILE   !!!!!!!
+
+# This file is generated by cflags.SH
+
+# Used to restore possible edits by cflags.SH.
+myccflags="$myccflags"
 
 # Extra warnings, used e.g. for gcc.
 warn="$warn"
@@ -219,7 +419,7 @@ _exe="$_exe"
 
 !GROK!THIS!
 
-: In the following dollars and backticks do not need the extra backslash.
+# In the following dollars and backticks do not need the extra backslash.
 $spitshell >>cflags <<'!NO!SUBS!'
 case $PERL_CONFIG_SH in
 '')
@@ -232,22 +432,23 @@ case $PERL_CONFIG_SH in
 		echo "Can't find config.sh."; exit 1
 	fi
 	. $TOP/config.sh
+        ccflags="$myccflags"  # Restore possible edits by cflags.SH.
 	;;
 esac
 
-: syntax: cflags [optimize=XXX] [file[.suffix]]
-: displays the compiler command line for file
+# syntax: cflags [optimize=XXX] [file[.suffix]] ...
+#   displays the proposed compiler command line for each 'file'
+#
+#   with no file, dispalys it for all *.c files.
+#   The optimise=XXX arg (if present) is evalled, setting the default
+#   value of the $optimise variable, which is output on the command line
+#   (but which may be overridden for specific files below)
 
 case "X$1" in
 Xoptimize=*|X"optimize=*")
 	eval "$1"
 	shift
 	;;
-esac
-
-also=': '
-case $# in
-1) also='echo 1>&2 "	  CCCMD = "'
 esac
 
 case $# in
@@ -263,103 +464,39 @@ for file do
     *) echo $n "    $file.c	$c" ;;
     esac
 
-    : allow variables like toke_cflags to be evaluated
-
-    if echo $file | grep -v / >/dev/null
-    then
-      eval 'eval ${'"${file}_cflags"'-""}'
-    fi
-
-    : or customize here
+    # allow variables like toke_cflags to be evaluated
 
     case "$file" in
-    DB_File) ;;
-    GDBM_File) ;;
-    NDBM_File) ;;
-    ODBM_File) ;;
-    POSIX) ;;
-    SDBM_File) ;;
-    av) ;;
-    byterun) ;;
-    deb) ;;
-    dl) ;;
-    doio) ;;
-    doop) ;;
-    dump) ;;
-    globals) ;;
-    gv) ;;
-    hv) ;;
-    locale) ;;
-    madly) ;;
-    main) ;;
-    malloc) ;;
-    mg) ;;
-    miniperlmain) ;;
-    numeric) ;;
-    op) ;;
-    opmini) ;;
-    pad) ;;
-    perl) ;;
-    perlapi) ;;
-    perlmain) ;;
-    perly) ;;
-    pp) ;;
-    pp_ctl) ;;
-    pp_hot) ;;
-    pp_pack) ;;
-    pp_sort) ;;
-    pp_sys) ;;
-    regcomp) ;;
-    regexec) ;;
-    run) ;;
-    scope) ;;
-    sv) ;;
-    taint) ;;
-    toke) ;;
-    universal) ;;
-    usersub) ;;
-    utf8) ;;
-    util) ;;
+    */*) ;;
+    *) eval 'eval ${'"${file}_cflags"'-""}' ;;
+    esac
+
+    # or customize here
+
+    case "$file" in
+    regcomp) : work around http://bugs.debian.org/754054
+        case $archname in
+        mips-*|mipsel-*)
+            optimize="$optimize -fno-tree-vrp";;
+        esac;;
     *) ;;
+
+    # Customization examples follow.
+    #
+    # The examples are intentionally unreachable as the '*)' case above always
+    # matches. To use them, move before the '*)' and edit as appropriate.
+    # It is not a good idea to set ccflags to an absolute value here, as it
+    # often contains general -D defines which are needed for correct
+    # compilation. It is better to edit ccflags as shown, using interpolation
+    # to add flags, or sed to remove flags.
+
+    av) ccflags=`echo $ccflags | sed -e s/-pipe//` ;;
+    deb) ccflags="$ccflags -fno-jump-tables" ;;
+    hv) warn=`echo $warn | sed -e s/-Wextra//` ;;
+    toke) optimize=-O0 ;;
     esac
 
-    case "$cc" in
-    *g++*)
-      # Extra paranoia in case people have bad canned ccflags:
-      # bad in the sense that the flags are accepted by g++,
-      # but then whined about.
-      for f in -Wdeclaration-after-statement -std=c89
-      do
-        ccflags=`echo $ccflags|sed 's/$f/ /'`
-      done
-      ;;
-    esac
-    cppflags=`echo $cppflags|sed 's/-Wdeclaration-after-statement/ /'`
-
-    case "$cc" in
-    *g++*)
-      # Without -Wno-unused-variable g++ 4.x compiles are rather unwatchable
-      # because of all the warnings about Perl___notused, and g++ doesn't do
-      # __attribute__((unused)) (and even if at some stage it may, people do
-      # have older gcc installations), and ((void)x) isn't enough to silence
-      # the noises about XS functions not using their cv parameter, so we need
-      # the -Wno-unused-parameter too.
-      # Yes, we lose some valid warnings, but hopefully other compilers
-      # (like gcc) will still pick up those warnings.
-      for o in -Wno-unused-variable -Wno-unused-parameter
-      do
-        case "$warn" in
-        *$o*) ;;
-        *) warn="$warn $o" ;;
-        esac
-      done
-      ;;
-    esac
-
-
-    : Can we perhaps use $ansi2knr here
     echo "$cc -c -DPERL_CORE $ccflags $stdflags $optimize $warn $extra"
-    eval "$also "'"$cc -DPERL_CORE -c $ccflags $stdflags $optimize $warn $extra"'
 
     . $TOP/config.sh
 

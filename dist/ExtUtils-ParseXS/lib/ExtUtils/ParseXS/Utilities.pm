@@ -3,27 +3,24 @@ use strict;
 use warnings;
 use Exporter;
 use File::Spec;
-use lib qw( lib );
 use ExtUtils::ParseXS::Constants ();
 
-our $VERSION = '3.16';
+our $VERSION = '3.57';
 
 our (@ISA, @EXPORT_OK);
 @ISA = qw(Exporter);
 @EXPORT_OK = qw(
   standard_typemap_locations
   trim_whitespace
-  tidy_type
   C_string
   valid_proto_string
   process_typemaps
-  make_targetable
   map_type
   standard_XS_defs
-  assign_func_args
-  analyze_preprocessor_statements
+  analyze_preprocessor_statement
   set_cond
   Warn
+  WarnHint
   current_line_number
   blurt
   death
@@ -41,15 +38,12 @@ ExtUtils::ParseXS::Utilities - Subroutines used with ExtUtils::ParseXS
   use ExtUtils::ParseXS::Utilities qw(
     standard_typemap_locations
     trim_whitespace
-    tidy_type
     C_string
     valid_proto_string
     process_typemaps
-    make_targetable
     map_type
     standard_XS_defs
-    assign_func_args
-    analyze_preprocessor_statements
+    analyze_preprocessor_statement
     set_cond
     Warn
     blurt
@@ -129,26 +123,35 @@ Array holding list of directories to be searched for F<typemap> files.
 
 =cut
 
-sub standard_typemap_locations {
-  my $include_ref = shift;
-  my @tm = qw(typemap);
+SCOPE: {
+  my @tm_template;
 
-  my $updir = File::Spec->updir();
-  foreach my $dir (
-      File::Spec->catdir(($updir) x 1),
-      File::Spec->catdir(($updir) x 2),
-      File::Spec->catdir(($updir) x 3),
-      File::Spec->catdir(($updir) x 4),
-  ) {
-    unshift @tm, File::Spec->catfile($dir, 'typemap');
-    unshift @tm, File::Spec->catfile($dir, lib => ExtUtils => 'typemap');
+  sub standard_typemap_locations {
+    my $include_ref = shift;
+
+    if (not @tm_template) {
+      @tm_template = qw(typemap);
+
+      my $updir = File::Spec->updir();
+      foreach my $dir (
+          File::Spec->catdir(($updir) x 1),
+          File::Spec->catdir(($updir) x 2),
+          File::Spec->catdir(($updir) x 3),
+          File::Spec->catdir(($updir) x 4),
+      ) {
+        unshift @tm_template, File::Spec->catfile($dir, 'typemap');
+        unshift @tm_template, File::Spec->catfile($dir, lib => ExtUtils => 'typemap');
+      }
+    }
+
+    my @tm = @tm_template;
+    foreach my $dir (@{ $include_ref}) {
+      my $file = File::Spec->catfile($dir, ExtUtils => 'typemap');
+      unshift @tm, $file if -e $file;
+    }
+    return @tm;
   }
-  foreach my $dir (@{ $include_ref}) {
-    my $file = File::Spec->catfile($dir, ExtUtils => 'typemap');
-    unshift @tm, $file if -e $file;
-  }
-  return @tm;
-}
+} # end SCOPE
 
 =head2 C<trim_whitespace()>
 
@@ -173,45 +176,6 @@ None.  Remember:  this is an I<in-place> modification of the argument.
 
 sub trim_whitespace {
   $_[0] =~ s/^\s+|\s+$//go;
-}
-
-=head2 C<tidy_type()>
-
-=over 4
-
-=item * Purpose
-
-Rationalize any asterisks (C<*>) by joining them into bunches, removing
-interior whitespace, then trimming leading and trailing whitespace.
-
-=item * Arguments
-
-    ($ret_type) = tidy_type($_);
-
-String to be cleaned up.
-
-=item * Return Value
-
-String cleaned up.
-
-=back
-
-=cut
-
-sub tidy_type {
-  local ($_) = @_;
-
-  # rationalise any '*' by joining them into bunches and removing whitespace
-  s#\s*(\*+)\s*#$1#g;
-  s#(\*+)# $1 #g;
-
-  # change multiple whitespace into a single space
-  s/\s+/ /g;
-
-  # trim leading & trailing whitespace
-  trim_whitespace($_);
-
-  $_;
 }
 
 =head2 C<C_string()>
@@ -266,7 +230,7 @@ Upon failure, returns C<0>.
 =cut
 
 sub valid_proto_string {
-  my($string) = @_;
+  my ($string) = @_;
 
   if ( $string =~ /^$ExtUtils::ParseXS::Constants::PrototypeRegexp+$/ ) {
     return $string;
@@ -286,7 +250,7 @@ Process all typemap files.
 =item * Arguments
 
   my $typemaps_object = process_typemaps( $args{typemap}, $pwd );
-      
+
 List of two elements:  C<typemap> element from C<%args>; current working
 directory.
 
@@ -323,104 +287,26 @@ sub process_typemaps {
   return $typemap;
 }
 
-=head2 C<make_targetable()>
 
-=over 4
+=head2 C<map_type($self, $type, $varname)>
 
-=item * Purpose
-
-Populate C<%targetable>.  This constitutes a refinement of the output of
-C<process_typemaps()> with respect to its fourth output, C<$output_expr_ref>.
-
-=item * Arguments
-
-  %targetable = make_targetable($output_expr_ref);
-      
-Single hash reference:  the fourth such ref returned by C<process_typemaps()>.
-
-=item * Return Value
-
-Hash.
-
-=back
-
-=cut
-
-sub make_targetable {
-  my $output_expr_ref = shift;
-
-  our $bal; # ()-balanced
-  $bal = qr[
-    (?:
-      (?>[^()]+)
-      |
-      \( (??{ $bal }) \)
-    )*
-  ]x;
-
-  # matches variations on (SV*)
-  my $sv_cast = qr[
-    (?:
-      \( \s* SV \s* \* \s* \) \s*
-    )?
-  ]x;
-
-  my $size = qr[ # Third arg (to setpvn)
-    , \s* (??{ $bal })
-  ]x;
-
-  my %targetable;
-  foreach my $key (keys %{ $output_expr_ref }) {
-    # We can still bootstrap compile 're', because in code re.pm is
-    # available to miniperl, and does not attempt to load the XS code.
-    use re 'eval';
-
-    my ($type, $with_size, $arg, $sarg) =
-      ($output_expr_ref->{$key} =~
-        m[^
-          \s+
-          sv_set([iunp])v(n)?    # Type, is_setpvn
-          \s*
-          \( \s*
-            $sv_cast \$arg \s* , \s*
-            ( (??{ $bal }) )    # Set from
-          ( (??{ $size }) )?    # Possible sizeof set-from
-          \) \s* ; \s* $
-        ]x
-    );
-    $targetable{$key} = [$type, $with_size, $arg, $sarg] if $type;
-  }
-  return %targetable;
-}
-
-=head2 C<map_type()>
-
-=over 4
-
-=item * Purpose
-
-Performs a mapping at several places inside C<PARAGRAPH> loop.
-
-=item * Arguments
-
-  $type = map_type($self, $type, $varname);
-
-List of three arguments.
-
-=item * Return Value
-
-String holding augmented version of second argument.
-
-=back
+Returns a mapped version of the C type C<$type>. In particular, it
+converts C<Foo::bar> to C<Foo__bar>, converts the special C<array(type,n)>
+into C<type *>, and inserts C<$varname> (if present) into any function
+pointer type. So C<...(*)...> becomes C<...(* foo)...>.
 
 =cut
 
 sub map_type {
-  my ($self, $type, $varname) = @_;
+  my ExtUtils::ParseXS $self = shift;
+  my ($type, $varname) = @_;
 
   # C++ has :: in types too so skip this
-  $type =~ tr/:/_/ unless $self->{hiertype};
+  $type =~ tr/:/_/ unless $self->{config_RetainCplusplusHierarchicalTypes};
+
+  # map the special return type 'array(type, n)' to 'type *'
   $type =~ s/^array\(([^,]*),(.*)\).*/$1 */s;
+
   if ($varname) {
     if ($type =~ / \( \s* \* (?= \s* \) ) /xg) {
       (substr $type, pos $type, 0) = " $varname ";
@@ -431,6 +317,7 @@ sub map_type {
   }
   return $type;
 }
+
 
 =head2 C<standard_XS_defs()>
 
@@ -557,10 +444,10 @@ EOF
 
 /* prototype to pass -Wmissing-prototypes */
 STATIC void
-S_croak_xs_usage(pTHX_ const CV *const cv, const char *const params);
+S_croak_xs_usage(const CV *const cv, const char *const params);
 
 STATIC void
-S_croak_xs_usage(pTHX_ const CV *const cv, const char *const params)
+S_croak_xs_usage(const CV *const cv, const char *const params)
 {
     const GV *const gv = CvGV(cv);
 
@@ -572,21 +459,17 @@ S_croak_xs_usage(pTHX_ const CV *const cv, const char *const params)
         const char *const hvname = stash ? HvNAME(stash) : NULL;
 
         if (hvname)
-            Perl_croak(aTHX_ "Usage: %s::%s(%s)", hvname, gvname, params);
+	    Perl_croak_nocontext("Usage: %s::%s(%s)", hvname, gvname, params);
         else
-            Perl_croak(aTHX_ "Usage: %s(%s)", gvname, params);
+	    Perl_croak_nocontext("Usage: %s(%s)", gvname, params);
     } else {
         /* Pants. I don't think that it should be possible to get here. */
-        Perl_croak(aTHX_ "Usage: CODE(0x%"UVxf")(%s)", PTR2UV(cv), params);
+	Perl_croak_nocontext("Usage: CODE(0x%" UVxf ")(%s)", PTR2UV(cv), params);
     }
 }
 #undef  PERL_ARGS_ASSERT_CROAK_XS_USAGE
 
-#ifdef PERL_IMPLICIT_CONTEXT
-#define croak_xs_usage(a,b)    S_croak_xs_usage(aTHX_ a,b)
-#else
 #define croak_xs_usage        S_croak_xs_usage
-#endif
 
 #endif
 
@@ -599,102 +482,108 @@ S_croak_xs_usage(pTHX_ const CV *const cv, const char *const params)
 #define newXSproto_portable(name, c_impl, file, proto) (PL_Sv=(SV*)newXS(name, c_impl, file), sv_setpv(PL_Sv, proto), (CV*)PL_Sv)
 #endif /* !defined(newXS_flags) */
 
+#if PERL_VERSION_LE(5, 21, 5)
+#  define newXS_deffile(a,b) Perl_newXS(aTHX_ a,b,file)
+#else
+#  define newXS_deffile(a,b) Perl_newXS_deffile(aTHX_ a,b)
+#endif
+
+/* simple backcompat versions of the TARGx() macros with no optimisation */
+#ifndef TARGi
+#  define TARGi(iv, do_taint) sv_setiv_mg(TARG, iv)
+#  define TARGu(uv, do_taint) sv_setuv_mg(TARG, uv)
+#  define TARGn(nv, do_taint) sv_setnv_mg(TARG, nv)
+#endif
+
 EOF
   return 1;
 }
 
-=head2 C<assign_func_args()>
+=head2 C<analyze_preprocessor_statement()>
 
 =over 4
 
 =item * Purpose
 
-Perform assignment to the C<func_args> attribute.
+Process a CPP conditional line (C<#if> etc), to keep track of conditional
+nesting. In particular, it updates C<< @{$self->{XS_parse_stack}} >> which
+contains the current list of nested conditions, and
+C<< $self->{XS_parse_stack_top_if_idx} >> which indicates the most recent
+C<if> in that stack. So an C<#if> pushes, an C<#endif> pops, an C<#else>
+modifies etc. Each element is a hash of the form:
+
+  {
+    type      => 'if',
+    varname   => 'XSubPPtmpAAAA', # maintained by caller
+
+                  # XS functions defined within this branch of the
+                  # conditional (maintained by caller)
+    functions =>  {
+                    'Foo::Bar::baz' => 1,
+                    ...
+                  }
+                  # XS functions seen within any previous branch
+    other_functions => {... }
+
+It also updates C<< $self->{bootcode_early} >> and
+C<< $self->{bootcode_late} >> with extra CPP directives.
 
 =item * Arguments
 
-  $string = assign_func_args($self, $argsref, $class);
-
-List of three elements.  Second is an array reference; third is a string.
-
-=item * Return Value
-
-String.
+      $self->analyze_preprocessor_statement($statement);
 
 =back
 
 =cut
 
-sub assign_func_args {
-  my ($self, $argsref, $class) = @_;
-  my @func_args = @{$argsref};
-  shift @func_args if defined($class);
+sub analyze_preprocessor_statement {
+  my ExtUtils::ParseXS $self = shift;
+  my ($statement) = @_;
 
-  for my $arg (@func_args) {
-    $arg =~ s/^/&/ if $self->{in_out}->{$arg};
-  }
-  return join(", ", @func_args);
-}
-
-=head2 C<analyze_preprocessor_statements()>
-
-=over 4
-
-=item * Purpose
-
-Within each function inside each Xsub, print to the F<.c> output file certain
-preprocessor statements.
-
-=item * Arguments
-
-      ( $self, $XSS_work_idx, $BootCode_ref ) =
-        analyze_preprocessor_statements(
-          $self, $statement, $XSS_work_idx, $BootCode_ref
-        );
-
-List of four elements.
-
-=item * Return Value
-
-Modifed values of three of the arguments passed to the function.  In
-particular, the C<XSStack> and C<InitFileCode> attributes are modified.
-
-=back
-
-=cut
-
-sub analyze_preprocessor_statements {
-  my ($self, $statement, $XSS_work_idx, $BootCode_ref) = @_;
+  my $ix = $self->{XS_parse_stack_top_if_idx};
 
   if ($statement eq 'if') {
-    $XSS_work_idx = @{ $self->{XSStack} };
-    push(@{ $self->{XSStack} }, {type => 'if'});
+    # #if or #ifdef
+    $ix = @{ $self->{XS_parse_stack} };
+    push(@{ $self->{XS_parse_stack} }, {type => 'if'});
   }
   else {
+    # An #else/#elsif/#endif.
+
     $self->death("Error: '$statement' with no matching 'if'")
-      if $self->{XSStack}->[-1]{type} ne 'if';
-    if ($self->{XSStack}->[-1]{varname}) {
-      push(@{ $self->{InitFileCode} }, "#endif\n");
-      push(@{ $BootCode_ref },     "#endif");
+      if $self->{XS_parse_stack}->[-1]{type} ne 'if';
+
+    if ($self->{XS_parse_stack}->[-1]{varname}) {
+      # close any '#ifdef XSubPPtmpAAAA' inserted earlier into boot code.
+      push(@{ $self->{bootcode_early} }, "#endif\n");
+      push(@{ $self->{bootcode_later} }, "#endif\n");
     }
 
-    my(@fns) = keys %{$self->{XSStack}->[-1]{functions}};
+    my(@fns) = keys %{$self->{XS_parse_stack}->[-1]{functions}};
+
     if ($statement ne 'endif') {
-      # Hide the functions defined in other #if branches, and reset.
-      @{$self->{XSStack}->[-1]{other_functions}}{@fns} = (1) x @fns;
-      @{$self->{XSStack}->[-1]}{qw(varname functions)} = ('', {});
+      # Add current functions to the hash of functions seen in previous
+      # branch limbs, then reset for this next limb of the branch.
+      @{$self->{XS_parse_stack}->[-1]{other_functions}}{@fns} = (1) x @fns;
+      @{$self->{XS_parse_stack}->[-1]}{qw(varname functions)} = ('', {});
     }
     else {
-      my($tmp) = pop(@{ $self->{XSStack} });
-      0 while (--$XSS_work_idx
-           && $self->{XSStack}->[$XSS_work_idx]{type} ne 'if');
-      # Keep all new defined functions
+      # #endif - pop stack and update new top entry
+      my($tmp) = pop(@{ $self->{XS_parse_stack} });
+      0 while (--$ix
+           && $self->{XS_parse_stack}->[$ix]{type} ne 'if');
+
+      # For all functions declared within any limb of the just-popped
+      # if/endif, mark them as having appeared within this limb of the
+      # outer nested branch.
       push(@fns, keys %{$tmp->{other_functions}});
-      @{$self->{XSStack}->[$XSS_work_idx]{functions}}{@fns} = (1) x @fns;
+      @{$self->{XS_parse_stack}->[$ix]{functions}}{@fns}  =  (1) x @fns;
     }
   }
-  return ($self, $XSS_work_idx, $BootCode_ref);
+
+  $self->{XS_parse_stack_top_if_idx} = $ix;
 }
+
 
 =head2 C<set_cond()>
 
@@ -702,9 +591,21 @@ sub analyze_preprocessor_statements {
 
 =item * Purpose
 
+Return a string containing a snippet of C code which tests for the 'wrong
+number of arguments passed' condition, depending on whether there are
+default arguments or ellipsis.
+
 =item * Arguments
 
+C<ellipsis> true if the xsub's signature has a trailing C<, ...>.
+
+C<$min_args> the smallest number of args which may be passed.
+
+C<$num_args> the number of parameters in the signature.
+
 =item * Return Value
+
+The text of a short C code snippet.
 
 =back
 
@@ -746,70 +647,118 @@ The current line number.
 =cut
 
 sub current_line_number {
-  my $self = shift;
+  my ExtUtils::ParseXS $self = shift;
   my $line_number = $self->{line_no}->[@{ $self->{line_no} } - @{ $self->{line} } -1];
   return $line_number;
 }
 
-=head2 C<Warn()>
 
-=over 4
 
-=item * Purpose
+=head2 Error handling methods
 
-=item * Arguments
+There are four main methods for reporting warnings and errors.
 
-=item * Return Value
+=over
+
+=item C<< $self->Warn(@messages) >>
+
+This is equivalent to:
+
+  warn "@messages in foo.xs, line 123\n";
+
+The file and line number are based on the file currently being parsed. It
+is intended for use where you wish to warn, but can continue parsing and
+still generate a correct C output file.
+
+=item C<< $self->blurt(@messages) >>
+
+This is equivalent to C<Warn>, except that it also increments the internal
+error count (which can be retrieved with C<report_error_count()>). It is
+used to report an error, but where parsing can continue (so typically for
+a semantic error rather than a syntax error). It is expected that the
+caller will eventually signal failure in some fashion. For example,
+C<xsubpp> has this as its last line:
+
+  exit($self->report_error_count() ? 1 : 0);
+
+=item C<< $self->death(@messages) >>
+
+This normally equivalent to:
+
+  $self->Warn(@messages);
+  exit(1);
+
+It is used for something like a syntax error, where parsing can't
+continue.  However, this is inconvenient for testing purposes, as the
+error can't be trapped. So if C<$self> is created with the C<die_on_error>
+flag, or if C<$ExtUtils::ParseXS::DIE_ON_ERROR> is true when process_file()
+is called, then instead it will die() with that message.
+
+=item C<< $self->WarnHint(@messages, $hints) >>
+
+This is a more obscure twin to C<Warn>, which does the same as C<Warn>,
+but afterwards, outputs any lines contained in the C<$hints> string, with
+each line wrapped in parentheses. For example:
+
+  $self->WarnHint(@messages,
+    "Have you set the foo switch?\nSee the manual for further info");
 
 =back
 
 =cut
+
+
+# see L</Error handling methods> above
 
 sub Warn {
-  my $self = shift;
-  my $warn_line_number = $self->current_line_number();
-  print STDERR "@_ in $self->{filename}, line $warn_line_number\n";
+  my ExtUtils::ParseXS $self = shift;
+  $self->WarnHint(@_,undef);
 }
 
-=head2 C<blurt()>
 
-=over 4
+# see L</Error handling methods> above
 
-=item * Purpose
+sub WarnHint {
+  warn _MsgHint(@_);
+}
 
-=item * Arguments
 
-=item * Return Value
+# see L</Error handling methods> above
 
-=back
+sub _MsgHint {
+  my ExtUtils::ParseXS $self = shift;
+  my $hint = pop;
+  my $warn_line_number = $self->current_line_number();
+  my $ret = join("",@_) . " in $self->{in_filename}, line $warn_line_number\n";
+  if ($hint) {
+    $ret .= "    ($_)\n" for split /\n/, $hint;
+  }
+  return $ret;
+}
 
-=cut
+
+# see L</Error handling methods> above
 
 sub blurt {
-  my $self = shift;
+  my ExtUtils::ParseXS $self = shift;
   $self->Warn(@_);
-  $self->{errors}++
+  $self->{error_count}++
 }
 
-=head2 C<death()>
 
-=over 4
-
-=item * Purpose
-
-=item * Arguments
-
-=item * Return Value
-
-=back
-
-=cut
+# see L</Error handling methods> above
 
 sub death {
-  my $self = shift;
-  $self->Warn(@_);
+  my ExtUtils::ParseXS $self = $_[0];
+  my $message = _MsgHint(@_,"");
+  if ($self->{config_die_on_error}) {
+    die $message;
+  } else {
+    warn $message;
+  }
   exit 1;
 }
+
 
 =head2 C<check_conditional_preprocessor_statements()>
 
@@ -817,16 +766,23 @@ sub death {
 
 =item * Purpose
 
+Warn if the lines in C<< @{ $self->{line} } >> don't have balanced C<#if>,
+C<endif> etc.
+
 =item * Arguments
 
+None
+
 =item * Return Value
+
+None
 
 =back
 
 =cut
 
 sub check_conditional_preprocessor_statements {
-  my ($self) = @_;
+  my ExtUtils::ParseXS $self = $_[0];
   my @cpp = grep(/^\#\s*(?:if|e\w+)/, @{ $self->{line} });
   if (@cpp) {
     my $cpplevel;
@@ -837,7 +793,7 @@ sub check_conditional_preprocessor_statements {
       elsif (!$cpplevel) {
         $self->Warn("Warning: #else/elif/endif without #if in this function");
         print STDERR "    (precede it with a blank line if the matching #if is outside the function)\n"
-          if $self->{XSStack}->[-1]{type} eq 'if';
+          if $self->{XS_parse_stack}->[-1]{type} eq 'if';
         return;
       }
       elsif ($cpp =~ /^\#\s*endif/) {
@@ -906,7 +862,8 @@ fatal.
 =cut
 
 sub report_typemap_failure {
-  my ($self, $tm, $ctype, $error_method) = @_;
+  my ExtUtils::ParseXS $self = shift;
+  my ($tm, $ctype, $error_method) = @_;
   $error_method ||= 'blurt';
 
   my @avail_ctypes = $tm->list_mapped_ctypes;
@@ -918,6 +875,7 @@ sub report_typemap_failure {
   $self->$error_method($err);
   return();
 }
+
 
 1;
 

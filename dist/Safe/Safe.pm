@@ -3,7 +3,7 @@ package Safe;
 use 5.003_11;
 use Scalar::Util qw(reftype refaddr);
 
-$Safe::VERSION = "2.31_01";
+$Safe::VERSION = "2.47";
 
 # *** Don't declare any lexicals above this point ***
 #
@@ -21,7 +21,7 @@ sub lexless_anon_sub {
     # Uses a closure (on $__ExPr__) to pass in the code to be executed.
     # (eval on one line to keep line numbers as expected by caller)
     eval sprintf
-    'package %s; %s sub { @_=(); eval q[my $__ExPr__;] . $__ExPr__; }',
+    'package %s; %s sub { @_=(); local *SIG; eval q[my $__ExPr__;] . $__ExPr__; }',
                 $_[0], $_[1] ? 'use strict;' : '';
 }
 
@@ -67,7 +67,7 @@ require utf8;
 # particular code points don't cause it to load.
 # (Swashes are cached internally by perl in PL_utf8_* variables
 # independent of being inside/outside of Safe. So once loaded they can be)
-do { my $a = pack('U',0x100); my $b = chr 0x101; utf8::upgrade $b; $a =~ /$b/i };
+do { my $a = pack('U',0x100); $a =~ m/\x{1234}/; $a =~ tr/\x{1234}//; };
 # now we can safely include utf8::SWASHNEW in $default_share defined below.
 
 my $default_root  = 0;
@@ -77,8 +77,10 @@ my $default_root  = 0;
 my $default_share = [qw[
     *_
     &PerlIO::get_layers
+    &UNIVERSAL::import
     &UNIVERSAL::isa
     &UNIVERSAL::can
+    &UNIVERSAL::unimport
     &UNIVERSAL::VERSION
     &utf8::is_utf8
     &utf8::valid
@@ -140,6 +142,9 @@ my $default_share = [qw[
     &Tie::Hash::NamedCapture::SCALAR
     &Tie::Hash::NamedCapture::flags
 ])];
+if (defined $Devel::Cover::VERSION) {
+    push @$default_share, '&Devel::Cover::use_file';
+}
 
 sub new {
     my($class, $root, $mask) = @_;
@@ -352,14 +357,22 @@ sub _clean_stash {
 
 sub reval {
     my ($obj, $expr, $strict) = @_;
+    die "Bad Safe object" unless $obj->isa('Safe');
+
     my $root = $obj->{Root};
 
     my $evalsub = lexless_anon_sub($root, $strict, $expr);
     # propagate context
     my $sg = sub_generation();
-    my @subret = (wantarray)
+    my @subret;
+    if (defined wantarray) {
+        @subret = (wantarray)
                ?        Opcode::_safe_call_sv($root, $obj->{Mask}, $evalsub)
                : scalar Opcode::_safe_call_sv($root, $obj->{Mask}, $evalsub);
+    }
+    else {
+        Opcode::_safe_call_sv($root, $obj->{Mask}, $evalsub);
+    }
     _clean_stash($root.'::') if $sg != sub_generation();
     $obj->wrap_code_refs_within(@subret);
     return (wantarray) ? @subret : $subret[0];
@@ -402,6 +415,7 @@ sub _find_code_refs {
 
 sub wrap_code_ref {
     my ($obj, $sub) = @_;
+    die "Bad safe object" unless $obj->isa('Safe');
 
     # wrap code ref $sub with _safe_call_sv so that, when called, the
     # execution will happen with the compartment fully 'in effect'.
@@ -437,6 +451,8 @@ sub wrap_code_ref {
 
 sub rdo {
     my ($obj, $file) = @_;
+    die "Bad Safe object" unless $obj->isa('Safe');
+
     my $root = $obj->{Root};
 
     my $sg = sub_generation();
@@ -520,7 +536,7 @@ outside the compartment) placed into the compartment. For example,
 
     $cpt = new Safe;
     sub wrapper {
-        # vet arguments and perform potentially unsafe operations
+      # vet arguments and perform potentially unsafe operations
     }
     $cpt->share('&wrapper');
 
@@ -528,6 +544,13 @@ outside the compartment) placed into the compartment. For example,
 
 
 =head1 WARNING
+
+The Safe module does not implement an effective sandbox for
+evaluating untrusted code with the perl interpreter.
+
+Bugs in the perl interpreter that could be abused to bypass
+Safe restrictions are not treated as vulnerabilities. See
+L<perlsecpolicy> for additional information.
 
 The authors make B<no warranty>, implied or otherwise, about the
 suitability of this software for safety or security purposes.
@@ -582,9 +605,7 @@ Deny I<only> the listed operators from being used when compiling code
 in the compartment (I<all> other operators will be permitted, so you probably
 don't want to use this method).
 
-=head2 trap (OP, ...)
-
-=head2 untrap (OP, ...)
+=head2 trap (OP, ...), untrap (OP, ...)
 
 The trap and untrap methods are synonyms for deny and permit
 respectfully.
@@ -705,6 +726,9 @@ called from a compartment but not compiled within it.
 =head2 rdo (FILENAME)
 
 This evaluates the contents of file FILENAME inside the compartment.
+It uses the same rules as perl's built-in C<do> to locate the file,
+poossibly using C<@INC>.
+
 See above documentation on the B<reval> method for further details.
 
 =head2 root (NAMESPACE)
@@ -738,7 +762,7 @@ any I<further> compilation that the already compiled code may try to perform.
 This is particularly useful when applied to code references returned from reval().
 
 (It also provides a kind of workaround for RT#60374: "Safe.pm sort {} bug with
--Dusethreads". See L<http://rt.perl.org/rt3//Public/Bug/Display.html?id=60374>
+-Dusethreads". See L<https://rt.perl.org/rt3//Public/Bug/Display.html?id=60374>
 for I<much> more detail.)
 
 =head2 wrap_code_refs_within (...)
@@ -800,4 +824,3 @@ Reworked to use the Opcode module and other changes added by Tim Bunce.
 Currently maintained by the Perl 5 Porters, <perl5-porters@perl.org>.
 
 =cut
-

@@ -6,7 +6,9 @@ BEGIN {
 }
 
 use strict;
-use Test::More tests => 21;
+use warnings;
+
+use Test::More;
 use Getopt::Std;
 
 our ($warning, $opt_f, $opt_i, $opt_o, $opt_x, $opt_y, %opt);
@@ -52,22 +54,65 @@ $SIG{__WARN__} = sub { $warning = $_[0] };
 ok( !getopts("xf:y"),		'getopts fails for an illegal option' );
 ok( $warning eq "Unknown option: h\n", 'user warned' );
 
-# Then try the Getopt::Long module
+# Tests for RT #41359
+undef %opt;
+my $expected;
+{
+    local @ARGV = ( '-a', '-b', 'foo', '-c' );
+    getopts('ab:c:', \%opt);
+    $expected = { 'a' => 1, 'b' => 'foo', 'c' => undef };
+    is_deeply(\%opt, $expected,
+        "getopts: multiple switches; switch expected argument, none provided; value undef");
+    undef %opt;
+}
 
-use Getopt::Long;
+{
+    local @ARGV = ( '-c' );
+    getopts('c:', \%opt);
+    $expected = { 'c' => undef };
+    is_deeply(\%opt, $expected,
+        "getopts: single switch; switch expected argument, none provided; value undef");
+    undef %opt;
+}
 
-@ARGV = qw(--help --file foo --foo --nobar --num=5 -- file);
+# GH21466: Test `\my %opt` syntax with getopts()
 
-our ($HELP, $FILE, $FOO, $BAR, $NO);
+{
+    local @ARGV = ( '-a', '-b', 'foo', '-c' );
+    getopts('ab:c:', \my %opt);
+    $expected = { 'a' => 1, 'b' => 'foo', 'c' => undef };
+    is_deeply(\%opt, $expected,
+        "getopts (scoped): multiple switches; switch expected argument, none provided; value undef");
+    undef %opt;
+}
 
-ok( GetOptions(
-	'help'   => \$HELP,
-	'file:s' => \$FILE,
-	'foo!'   => \$FOO,
-	'bar!'   => \$BAR,
-	'num:i'  => \$NO,
-    ),
-    'Getopt::Long::GetOptions succeeded'
-);
-is( "@ARGV", 'file', 'options removed from @ARGV (5)' );
-ok( $HELP && $FOO && !$BAR && $FILE eq 'foo' && $NO == 5, 'options set' );
+{
+    local @ARGV = ( '-b', 'foo', '-c' );
+    getopt('bc', \%opt);
+    $expected = { 'b' => 'foo', 'c' => undef };
+    is_deeply(\%opt, $expected,
+        "getopt: multiple switches; switch expected argument, none provided; value undef");
+    undef %opt;
+}
+
+{
+    local @ARGV = ( '-c' );
+    getopt('c', \%opt);
+    $expected = { 'c' => undef };
+    is_deeply(\%opt, $expected,
+        "getopt: single switch; switch expected argument, none provided; value undef");
+    undef %opt;
+}
+
+# GH21466: Test `\my %opt` syntax with getopt()
+
+{
+    local @ARGV = ( '-b', 'foo', '-c' );
+    getopt('bc', \my %opt);
+    $expected = { 'b' => 'foo', 'c' => undef };
+    is_deeply(\%opt, $expected,
+        "getopt (scoped): multiple switches; switch expected argument, none provided; value undef");
+    undef %opt;
+}
+
+done_testing();

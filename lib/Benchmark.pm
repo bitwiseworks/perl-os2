@@ -5,13 +5,13 @@ use strict;
 
 =head1 NAME
 
-Benchmark - benchmark running times of Perl code
+Benchmark - Benchmark running times of Perl code
 
 =head1 SYNOPSIS
 
-    use Benchmark qw(:all) ;
+    use Benchmark qw(:all);
 
-    timethis ($count, "code");
+    timethis($count, "code");
 
     # Use Perl code in strings...
     timethese($count, {
@@ -37,39 +37,39 @@ Benchmark - benchmark running times of Perl code
     });
 
     # ...or in two stages
-    $results = timethese($count, 
+    $results = timethese($count,
         {
 	    'Name1' => sub { ...code1... },
 	    'Name2' => sub { ...code2... },
         },
 	'none'
     );
-    cmpthese( $results ) ;
+    cmpthese( $results );
 
-    $t = timeit($count, '...other code...')
-    print "$count loops of other code took:",timestr($t),"\n";
+    my $t1 = timeit($count, '...other code...');
+    print "$count loops of other code took:", timestr($t1),"\n";
 
-    $t = countit($time, '...other code...')
-    $count = $t->iters ;
-    print "$count loops of other code took:",timestr($t),"\n";
+    my $t2 = countit($time, '...other code...');
+    $count = $t2->iters;
+    print "$count loops of other code took:", timestr($t2),"\n";
 
-    # enable hires wallclock timing if possible
+    # Enable hires wallclock timing if possible
     use Benchmark ':hireswallclock';
 
 =head1 DESCRIPTION
 
-The Benchmark module encapsulates a number of routines to help you
-figure out how long it takes to execute some code.
+The C<Benchmark> module encapsulates a number of routines to
+help you figure out how long it takes to execute some code.
 
-timethis - run a chunk of code several times
+C<timethis> - Run a chunk of code several times
 
-timethese - run several chunks of code several times
+C<timethese> - Run several chunks of code several times
 
-cmpthese - print results of timethese as a comparison chart
+C<cmpthese> - Print results of C<timethese> as a comparison chart
 
-timeit - run a chunk of code and see how long it goes
+C<timeit> - Run a chunk of code and see how long it goes
 
-countit - see how many times a chunk of code runs in a given time
+C<countit> - See how many times a chunk of code runs in a given time
 
 
 =head2 Methods
@@ -81,10 +81,10 @@ countit - see how many times a chunk of code runs in a given time
 Returns the current time.   Example:
 
     use Benchmark;
-    $t0 = Benchmark->new;
+    my $t0 = Benchmark->new;
     # ... your code here ...
-    $t1 = Benchmark->new;
-    $td = timediff($t1, $t0);
+    my $t1 = Benchmark->new;
+    my $td = timediff($t1, $t0);
     print "the code took:",timestr($td),"\n";
 
 =item debug
@@ -92,7 +92,7 @@ Returns the current time.   Example:
 Enables or disable debugging by setting the C<$Benchmark::Debug> flag:
 
     Benchmark->debug(1);
-    $t = timeit(10, ' 5 ** $Global ');
+    my $t = timeit(10, ' 5 ** $Global ');
     Benchmark->debug(0);
 
 =item iters
@@ -128,11 +128,11 @@ The COUNT can be zero or negative: this means the I<minimum number of
 CPU seconds> to run.  A zero signifies the default of 3 seconds.  For
 example to run at least for 10 seconds:
 
-	timethis(-10, $code)
+	timethis(-10, $code);
 
 or to run two pieces of code tests for at least 3 seconds:
 
-	timethese(0, { test1 => '...', test2 => '...'})
+	timethese(0, { test1 => '...', test2 => '...'});
 
 CPU seconds is, in UNIX terms, the user time plus the system time of
 the process itself, as opposed to the real (wallclock) time and the
@@ -155,7 +155,7 @@ and either a string to eval or a code reference for each value.
 For each (KEY, VALUE) pair in the CODEHASHREF, this routine will
 call
 
-	timethis(COUNT, VALUE, KEY, STYLE)
+	timethis(COUNT, VALUE, KEY, STYLE);
 
 The routines are called in string comparison order of KEY.
 
@@ -208,7 +208,7 @@ Clear all cached times.
 
 Optionally calls timethese(), then outputs comparison chart.  This:
 
-    cmpthese( -1, { a => "++\$i", b => "\$i *= 2" } ) ;
+    cmpthese( -1, { a => "++\$i", b => "\$i *= 2" } );
 
 outputs a chart like:
 
@@ -221,7 +221,8 @@ difference between each pair of tests.
 
 C<cmpthese> can also be passed the data structure that timethese() returns:
 
-    $results = timethese( -1, { a => "++\$i", b => "\$i *= 2" } ) ;
+    my $results = timethese( -1,
+        { a => "++\$i", b => "\$i *= 2" } );
     cmpthese( $results );
 
 in case you want to see both sets of results.
@@ -231,7 +232,8 @@ that is RESULTSHASHREF; otherwise that is COUNT.
 Returns a reference to an ARRAY of rows, each row is an ARRAY of cells from the
 above chart, including labels. This:
 
-    my $rows = cmpthese( -1, { a => '++$i', b => '$i *= 2' }, "none" );
+    my $rows = cmpthese( -1,
+        { a => '++$i', b => '$i *= 2' }, "none" );
 
 returns a data structure like:
 
@@ -290,6 +292,46 @@ wallclock time to be measured in microseconds, instead of integer
 seconds.  Note though that the speed computations are still conducted
 in CPU time, not wallclock time.
 
+=head1 Benchmark Object
+
+Many of the functions in this module return a Benchmark object,
+or in the case of C<timethese()>, a reference to a hash, the values of
+which are Benchmark objects.  This is useful if you want to store or
+further process results from Benchmark functions.
+
+Internally the Benchmark object holds timing values,
+described in L</"NOTES"> below.
+The following methods can be used to access them:
+
+=over 4
+
+=item cpu_p
+
+Total CPU (User + System) of the main (parent) process.
+
+=item cpu_c
+
+Total CPU (User + System) of any children processes.
+
+=item cpu_a
+
+Total CPU of parent and any children processes.
+
+=item real
+
+Real elapsed time "wallclock seconds".
+
+=item iters
+
+Number of iterations run.
+
+=back
+
+The following illustrates use of the Benchmark object:
+
+    my $result = timethis(100000, sub { ... });
+    print "total CPU = ", $result->cpu_a, "\n";
+
 =head1 NOTES
 
 The data is stored as a list of values from the time and times
@@ -325,7 +367,7 @@ accuracy and does not usually noticeably affect runtimes.
 For example,
 
     use Benchmark qw( cmpthese ) ;
-    $x = 3;
+    my $x = 3;
     cmpthese( -5, {
         a => sub{$x*$x},
         b => sub{$x**2},
@@ -339,11 +381,11 @@ outputs something like this:
    a 4152037/s 166%   --
 
 
-while 
+while
 
     use Benchmark qw( timethese cmpthese ) ;
-    $x = 3;
-    $r = timethese( -5, {
+    my $x = 3;
+    my $r = timethese( -5, {
         a => sub{$x*$x},
         b => sub{$x**2},
     } );
@@ -362,7 +404,7 @@ outputs something like this:
 =head1 INHERITANCE
 
 Benchmark inherits from no other class, except of course
-for Exporter.
+from Exporter.
 
 =head1 CAVEATS
 
@@ -402,8 +444,8 @@ documentation.
 April 04-07th, 1997: by Jarkko Hietaniemi, added the run-for-some-time
 functionality.
 
-September, 1999; by Barrie Slaymaker: math fixes and accuracy and 
-efficiency tweaks.  Added cmpthese().  A result is now returned from 
+September, 1999; by Barrie Slaymaker: math fixes and accuracy and
+efficiency tweaks.  Added cmpthese().  A result is now returned from
 timethese().  Exposed countit() (was runfor()).
 
 December, 2001; by Nicholas Clark: make timestr() recognise the style 'none'
@@ -440,7 +482,7 @@ our(@ISA, @EXPORT, @EXPORT_OK, %EXPORT_TAGS, $VERSION);
 	      clearcache clearallcache disablecache enablecache);
 %EXPORT_TAGS=( all => [ @EXPORT, @EXPORT_OK ] ) ;
 
-$VERSION = 1.13;
+$VERSION = 1.27;
 
 # --- ':hireswallclock' special handling
 
@@ -450,9 +492,8 @@ sub mytime () { time }
 
 init();
 
-sub BEGIN {
-    if (eval 'require Time::HiRes') {
-	import Time::HiRes qw(time);
+BEGIN {
+    if (eval { require Time::HiRes }) {
 	$hirestime = \&Time::HiRes::time;
     }
 }
@@ -485,7 +526,7 @@ sub init {
 
 sub debug { $Debug = ($_[1] != 0); }
 
-sub usage { 
+sub usage {
     my $calling_sub = (caller(1))[3];
     $calling_sub =~ s/^Benchmark:://;
     return $_Usage{$calling_sub} || '';
@@ -498,18 +539,18 @@ $_Usage{clearcache} = <<'USAGE';
 usage: clearcache($count);
 USAGE
 
-sub clearcache    { 
+sub clearcache    {
     die usage unless @_ == 1;
-    delete $Cache{"$_[0]c"}; delete $Cache{"$_[0]s"}; 
+    delete $Cache{"$_[0]c"}; delete $Cache{"$_[0]s"};
 }
 
 $_Usage{clearallcache} = <<'USAGE';
 usage: clearallcache();
 USAGE
 
-sub clearallcache { 
+sub clearallcache {
     die usage if @_;
-    %Cache = (); 
+    %Cache = ();
 }
 
 $_Usage{enablecache} = <<'USAGE';
@@ -518,7 +559,7 @@ USAGE
 
 sub enablecache   {
     die usage if @_;
-    $Do_Cache = 1; 
+    $Do_Cache = 1;
 }
 
 $_Usage{disablecache} = <<'USAGE';
@@ -527,7 +568,7 @@ USAGE
 
 sub disablecache  {
     die usage if @_;
-    $Do_Cache = 0; 
+    $Do_Cache = 0;
 }
 
 
@@ -542,6 +583,17 @@ sub cpu_c { my($r,$pu,$ps,$cu,$cs) = @{$_[0]};         $cu+$cs ; }
 sub cpu_a { my($r,$pu,$ps,$cu,$cs) = @{$_[0]}; $pu+$ps+$cu+$cs ; }
 sub real  { my($r,$pu,$ps,$cu,$cs) = @{$_[0]}; $r              ; }
 sub iters { $_[0]->[5] ; }
+
+# return the sum of various times: which ones depending on $style
+
+sub elapsed {
+    my ($self, $style) = @_;
+    $style = "" unless defined $style;
+
+    return $self->cpu_c if $style eq 'nop';
+    return $self->cpu_p if $style eq 'noc';
+    return $self->cpu_a;
+}
 
 
 $_Usage{timediff} = <<'USAGE';
@@ -605,11 +657,7 @@ sub timestr {
 			    $r,$pu,$ps,$pt) if $style eq 'noc';
     $s = sprintf("$w wallclock secs (%$f cusr + %$f csys = %$f CPU)",
 			    $r,$cu,$cs,$ct) if $style eq 'nop';
-    my $elapsed = do {
-	if ($style eq 'nop') {$cu+$cs}
-	elsif ($style eq 'noc') {$pu+$ps}
-	else {$cu+$cs+$pu+$ps}
-    };
+    my $elapsed = $tr->elapsed($style);
     $s .= sprintf(" @ %$f/s (n=$n)",$n/($elapsed)) if $n && $elapsed;
     $s;
 }
@@ -634,9 +682,9 @@ sub runloop {
     my($t0, $t1, $td); # before, after, difference
 
     # find package of caller so we can execute code there
-    my($curpack) = caller(0);
+    my $curpack = caller(0);
     my($i, $pack)= 0;
-    while (($pack) = caller(++$i)) {
+    while ($pack = caller(++$i)) {
 	last if $pack ne $curpack;
     }
 
@@ -652,14 +700,24 @@ sub runloop {
     croak "runloop unable to compile '$c': $@\ncode: $subcode\n" if $@;
     print STDERR "runloop $n '$subcode'\n" if $Debug;
 
-    # Wait for the user timer to tick.  This makes the error range more like 
+    # Wait for the user timer to tick.  This makes the error range more like
     # -0.01, +0.  If we don't wait, then it's more like -0.01, +0.01.  This
     # may not seem important, but it significantly reduces the chances of
     # getting a too low initial $n in the initial, 'find the minimum' loop
     # in &countit.  This, in turn, can reduce the number of calls to
     # &runloop a lot, and thus reduce additive errors.
+    #
+    # Note that its possible for the act of reading the system clock to
+    # burn lots of system CPU while we burn very little user clock in the
+    # busy loop, which can cause the loop to run for a very long wall time.
+    # So gradually ramp up the duration of the loop. See RT #122003
+    #
     my $tbase = Benchmark->new(0)->[1];
-    while ( ( $t0 = Benchmark->new(0) )->[1] == $tbase ) {} ;
+    my $limit = 1;
+    while ( ( $t0 = Benchmark->new(0) )->[1] == $tbase ) {
+        for (my $i=0; $i < $limit; $i++) { my $x = $i / 1.5 } # burn user CPU
+        $limit *= 1.1;
+    }
     $subref->();
     $t1 = Benchmark->new($n);
     $td = &timediff($t1, $t0);
@@ -730,11 +788,23 @@ sub countit {
     # First find the minimum $n that gives a significant timing.
     my $zeros=0;
     for ($n = 1; ; $n *= 2 ) {
+	my $t0 = Benchmark->new(0);
 	my $td = timeit($n, $code);
+	my $t1 = Benchmark->new(0);
 	$tc = $td->[1] + $td->[2];
 	if ( $tc <= 0 and $n > 1024 ) {
-	    ++$zeros > 16
-	        and die "Timing is consistently zero in estimation loop, cannot benchmark. N=$n\n";
+	    my $d = timediff($t1, $t0);
+	    # note that $d is the total CPU time taken to call timeit(),
+	    # while $tc is the difference in CPU secs between the empty run
+	    # and the code run. If the code is trivial, its possible
+	    # for $d to get large while $tc is still zero (or slightly
+	    # negative). Bail out once timeit() starts taking more than a
+	    # few seconds without noticeable difference.
+	    if ($d->[1] + $d->[2] > 8
+		|| ++$zeros > 16)
+	    {
+	        die "Timing is consistently zero in estimation loop, cannot benchmark. N=$n\n";
+            }
 	} else {
 	    $zeros = 0;
 	}
@@ -748,7 +818,7 @@ sub countit {
     while ( $tc < $tpra ) {
 	# The 5% fudge is to keep us from iterating again all
 	# that often (this speeds overall responsiveness when $tmax is big
-	# and we guess a little low).  This does not noticably affect 
+	# and we guess a little low).  This does not noticeably affect
 	# accuracy since we're not counting these times.
 	$n = int( $tpra * 1.05 * $n / $tc ); # Linear approximation.
 	my $td = timeit($n, $code);
@@ -833,6 +903,16 @@ sub timethis{
 
     $n = $forn if defined $forn;
 
+    if ($t->elapsed($style) < 0) {
+        # due to clock granularity and variable CPU speed and load,
+        # on quick code with a small number of loops, it's possible for
+        # the empty loop to appear to take longer than the real loop
+        # (e.g. 1 tick versus 0 ticks). This leads to a negative elapsed
+        # time. In this case, floor it at zero, to stop bizarre results.
+        print "            (warning: too few iterations for a reliable count)\n";
+        $t->[$_] = 0 for 1..4;
+    }
+
     # A conservative warning to spot very silly tests.
     # Don't assume that your benchmark is ok simply because
     # you don't get this warning!
@@ -909,13 +989,11 @@ sub cmpthese{
     my @vals = map{ [ $_, @{$results->{$_}} ] } keys %$results;
 
     for (@vals) {
+        # recreate the pre-flattened Benchmark object
+        my $tmp_bm = bless [ @{$_}[1..$#$_] ];
+	my $elapsed = $tmp_bm->elapsed($style);
 	# The epsilon fudge here is to prevent div by 0.  Since clock
 	# resolutions are much larger, it's below the noise floor.
-	my $elapsed = do {
-	    if ($style eq 'nop') {$_->[4]+$_->[5]}
-	    elsif ($style eq 'noc') {$_->[2]+$_->[3]}
-	    else {$_->[2]+$_->[3]+$_->[4]+$_->[5]}
-	};
 	my $rate = $_->[6]/(($elapsed)+0.000000000000001);
 	$_->[7] = $rate;
     }
@@ -929,10 +1007,10 @@ sub cmpthese{
     my @rows;
     my @col_widths;
 
-    my @top_row = ( 
-        '', 
-	$display_as_rate ? 'Rate' : 's/iter', 
-	map { $_->[0] } @vals 
+    my @top_row = (
+        '',
+	$display_as_rate ? 'Rate' : 's/iter',
+	map { $_->[0] } @vals
     );
 
     push @rows, \@top_row;
@@ -958,9 +1036,9 @@ sub cmpthese{
 
 	# Only give a few decimal places before switching to sci. notation,
 	# since the results aren't usually that accurate anyway.
-	my $format = 
-	   $rate >= 100 ? 
-	       "%0.0f" : 
+	my $format =
+	   $rate >= 100 ?
+	       "%0.0f" :
 	   $rate >= 10 ?
 	       "%0.1f" :
 	   $rate >= 1 ?
@@ -997,7 +1075,7 @@ sub cmpthese{
 	    $col_widths[$col_num+2] = length( $out )
 		if length( $out ) > $col_widths[$col_num+2];
 
-	    # A little wierdness to set the first column width properly
+	    # A little weirdness to set the first column width properly
 	    $col_widths[$col_num+2] = length( $col_val->[0] )
 		if length( $col_val->[0] ) > $col_widths[$col_num+2];
 	}
@@ -1008,7 +1086,7 @@ sub cmpthese{
 
     # Equalize column widths in the chart as much as possible without
     # exceeding 80 characters.  This does not use or affect cols 0 or 1.
-    my @sorted_width_refs = 
+    my @sorted_width_refs =
        sort { $$a <=> $$b } map { \$_ } @col_widths[2..$#col_widths];
     my $max_width = ${$sorted_width_refs[-1]};
 
@@ -1021,7 +1099,7 @@ sub cmpthese{
 	last
 	   if $min_width == $max_width;
 	for ( @sorted_width_refs ) {
-	    last 
+	    last
 		if $$_ > $min_width;
 	    ++$$_;
 	    ++$total;

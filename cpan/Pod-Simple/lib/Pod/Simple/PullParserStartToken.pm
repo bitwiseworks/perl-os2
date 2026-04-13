@@ -1,11 +1,9 @@
-
-require 5;
 package Pod::Simple::PullParserStartToken;
-use Pod::Simple::PullParserToken ();
 use strict;
-use vars qw(@ISA $VERSION);
-@ISA = ('Pod::Simple::PullParserToken');
-$VERSION = '3.20';
+use warnings;
+use Pod::Simple::PullParserToken ();
+our @ISA = ('Pod::Simple::PullParserToken');
+our $VERSION = '3.45';
 
 sub new {  # Class->new(tagname, optional_attrhash);
   my $class = shift;
@@ -124,8 +122,8 @@ pod-people@perl.org mail list. Send an empty email to
 pod-people-subscribe@perl.org to subscribe.
 
 This module is managed in an open GitHub repository,
-L<http://github.com/theory/pod-simple/>. Feel free to fork and contribute, or
-to clone L<git://github.com/theory/pod-simple.git> and send patches!
+L<https://github.com/perl-pod/pod-simple/>. Feel free to fork and contribute, or
+to clone L<https://github.com/perl-pod/pod-simple.git> and send patches!
 
 Patches against Pod::Simple are welcome. Please send bug reports to
 <bug-pod-simple@rt.cpan.org>.

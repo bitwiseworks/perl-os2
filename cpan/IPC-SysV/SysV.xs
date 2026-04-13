@@ -1,12 +1,6 @@
 /*******************************************************************************
 *
-*  $Revision: 33 $
-*  $Author: mhx $
-*  $Date: 2010/03/07 16:01:40 +0100 $
-*
-********************************************************************************
-*
-*  Version 2.x, Copyright (C) 2007-2010, Marcus Holland-Moritz <mhx@cpan.org>.
+*  Version 2.x, Copyright (C) 2007-2013, Marcus Holland-Moritz <mhx@cpan.org>.
 *  Version 1.x, Copyright (C) 1999, Graham Barr <gbarr@pobox.com>.
 *
 *  This program is free software; you can redistribute it and/or
@@ -18,9 +12,11 @@
 #include "perl.h"
 #include "XSUB.h"
 
-#define NEED_sv_2pv_flags
-#define NEED_sv_pvn_force_flags
-#include "ppport.h"
+#ifndef NO_PPPORT_H
+#  define NEED_sv_2pv_flags
+#  define NEED_sv_pvn_force_flags
+#  include "ppport.h"
+#endif
 
 #include <sys/types.h>
 
@@ -352,8 +348,8 @@ void
 memread(addr, sv, pos, size)
     SV *addr
     SV *sv
-    int pos
-    int size
+    UV pos
+    UV size
   CODE:
     char *caddr = (char *) sv2addr(addr);
     char *dst;
@@ -377,13 +373,13 @@ void
 memwrite(addr, sv, pos, size)
     SV *addr
     SV *sv
-    int pos
-    int size
+    UV pos
+    UV size
   CODE:
     char *caddr = (char *) sv2addr(addr);
     STRLEN len;
     const char *src = SvPV_const(sv, len);
-    int n = ((int) len > size) ? size : (int) len;
+    unsigned int n = ((unsigned int) len > size) ? size : (unsigned int) len;
     Copy(src, caddr + pos, n, char);
     if (n < size)
     {
@@ -398,10 +394,15 @@ shmat(id, addr, flag)
     int flag
   CODE:
 #ifdef HAS_SHM
-    void *caddr = SvOK(addr) ? sv2addr(addr) : NULL;
-    void *shm = (void *) shmat(id, caddr, flag);
-    ST(0) = shm == (void *) -1 ? &PL_sv_undef
-                               : sv_2mortal(newSVpvn((char *) &shm, sizeof(void *)));
+    if (id >= 0) {
+      void *caddr = SvOK(addr) ? sv2addr(addr) : NULL;
+      void *shm = (void *) shmat(id, caddr, flag);
+      ST(0) = shm == (void *) -1 ? &PL_sv_undef
+                                 : sv_2mortal(newSVpvn((char *) &shm, sizeof(void *)));
+    } else {
+      SETERRNO(EINVAL,LIB_INVARG);
+      ST(0) = &PL_sv_undef;
+    }
     XSRETURN(1);
 #else
     Perl_die(aTHX_ PL_no_func, "shmat"); return;

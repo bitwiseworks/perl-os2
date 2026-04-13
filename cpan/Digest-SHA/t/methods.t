@@ -1,38 +1,24 @@
 use strict;
 use FileHandle;
-
-my $MODULE;
-
-BEGIN {
-	$MODULE = (-d "src") ? "Digest::SHA" : "Digest::SHA::PurePerl";
-	eval "require $MODULE" || die $@;
-	$MODULE->import(qw());
-}
-
-BEGIN {
-	if ($ENV{PERL_CORE}) {
-		chdir 't' if -d 't';
-		@INC = '../lib';
-	}
-}
+use Digest::SHA;
 
 my @out = (
 	"ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0",
 	"248d6a61d20638b8e5c026930c3e6039a33ce45964ff2167f6ecedd419db06c1",
 );
 
-my $numtests = 8 + scalar @out;
+my $numtests = 6 + scalar @out;
 print "1..$numtests\n";
 
 	# attempt to use an invalid algorithm, and check for failure
 
 my $testnum = 1;
 my $NSA = "SHA-42";	# No Such Algorithm
-print "not " if $MODULE->new($NSA);
+print "not " if Digest::SHA->new($NSA);
 print "ok ", $testnum++, "\n";
 
 my $tempfile = "methods.tmp";
-END { 1 while unlink $tempfile }
+END { unlink $tempfile if $tempfile }
 
 	# test OO methods using first two SHA-256 vectors from NIST
 
@@ -41,7 +27,7 @@ binmode($fh);
 print $fh "bcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq";
 $fh->close;
 
-my $sha = $MODULE->new()->reset("SHA-256")->new();
+my $sha = Digest::SHA->new()->reset("SHA-256")->new();
 $sha->add_bits("a", 5)->add_bits("001");
 
 my $rsp = shift(@out);
@@ -72,34 +58,23 @@ $fh->close;
 print "not " unless $sha->addfile($tempfile, "b")->hexdigest eq $rsp;
 print "ok ", $testnum++, "\n";
 
-	# test addfile portable mode
+	# test addfile "universal newlines" mode
 
 $fh = FileHandle->new($tempfile, "w");
 binmode($fh);
-print $fh "abc\012" x 2048;		# using UNIX newline
+print $fh "MacOS\r" . "MSDOS\r\n" . "UNIX\n" . "Quirky\r\r\n";
 $fh->close;
 
-print "not " unless $sha->new(1)->addfile($tempfile, "p")->hexdigest eq
-	"d449e19c1b0b0c191294c8dc9fa2e4a6ff77fc51";
-print "ok ", $testnum++, "\n";
-
-$fh = FileHandle->new($tempfile, "w");
-binmode($fh);
-print $fh "abc\015\012" x 2048;		# using DOS/Windows newline
-$fh->close;
-
-print "not " unless $sha->new(1)->addfile($tempfile, "p")->hexdigest eq
-	"d449e19c1b0b0c191294c8dc9fa2e4a6ff77fc51";
-print "ok ", $testnum++, "\n";
-
-$fh = FileHandle->new($tempfile, "w");
-binmode($fh);
-print $fh "abc\015" x 2048;		# using early-Mac newline
-$fh->close;
-
-print "not " unless $sha->new(1)->addfile($tempfile, "p")->hexdigest eq
-	"d449e19c1b0b0c191294c8dc9fa2e4a6ff77fc51";
-print "ok ", $testnum++, "\n";
+my $d = $sha->new(1)->addfile($tempfile, "U")->hexdigest;
+if ($d eq "f4c6855783c737c7e224873c90e80a9df5c2bc97") {
+	print "ok ", $testnum++, "\n";
+}
+elsif ($d eq "42335d4a517a5e31399e948e9d842bafd9194d8f") {
+	print "ok ", $testnum++, " # skip:  flaky -T\n";
+}
+else {
+	print "not ok ", $testnum++, "\n";
+}
 
 	# test addfile BITS mode
 

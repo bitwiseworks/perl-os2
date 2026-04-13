@@ -39,14 +39,15 @@ been tested on NeXT platforms.
 
 */
 
+#define PERL_EXT
 #include "EXTERN.h"
+#define PERL_IN_DL_DYLD_XS
 #include "perl.h"
 #include "XSUB.h"
 
 #include "dlutils.c"	/* for SaveError() etc */
 
 #undef environ
-#undef bool
 #import <mach-o/dyld.h>
 
 static char *dlerror()
@@ -102,7 +103,7 @@ static void TranslateError
     sv_setpv(MY_CXT.x_dl_last_error, error);
 }
 
-static char *dlopen(char *path, int mode /* mode is ignored */)
+static char *dlopen(char *path)
 {
     int dyld_result;
     NSObjectFileImage ofile;
@@ -157,15 +158,13 @@ void *
 dl_load_file(filename, flags=0)
     char *	filename
     int		flags
-    PREINIT:
-    int mode = 1;
     CODE:
     DLDEBUG(1,PerlIO_printf(Perl_debug_log, "dl_load_file(%s,%x):\n", filename,flags));
     if (flags & 0x01)
 	Perl_warn(aTHX_ "Can't make loaded symbols global on this platform while loading %s",filename);
-    RETVAL = dlopen(filename, mode) ;
+    RETVAL = dlopen(filename);
     DLDEBUG(2,PerlIO_printf(Perl_debug_log, " libref=%x\n", RETVAL));
-    ST(0) = sv_newmortal() ;
+    ST(0) = newSV_type_mortal(SVt_IV);
     if (RETVAL == NULL)
 	SaveError(aTHX_ "%s",dlerror()) ;
     else
@@ -173,9 +172,10 @@ dl_load_file(filename, flags=0)
 
 
 void *
-dl_find_symbol(libhandle, symbolname)
+dl_find_symbol(libhandle, symbolname, ign_err=0)
     void *		libhandle
     char *		symbolname
+    int	        	ign_err
     CODE:
     symbolname = Perl_form_nocontext("_%s", symbolname);
     DLDEBUG(2, PerlIO_printf(Perl_debug_log,
@@ -184,10 +184,11 @@ dl_find_symbol(libhandle, symbolname)
     RETVAL = dlsym(libhandle, symbolname);
     DLDEBUG(2, PerlIO_printf(Perl_debug_log,
 			     "  symbolref = %lx\n", (unsigned long) RETVAL));
-    ST(0) = sv_newmortal() ;
-    if (RETVAL == NULL)
-	SaveError(aTHX_ "%s",dlerror()) ;
-    else
+    ST(0) = newSV_type_mortal(SVt_IV);
+    if (RETVAL == NULL) {
+        if (!ign_err)
+	    SaveError(aTHX_ "%s",dlerror()) ;
+    } else
 	sv_setiv( ST(0), PTR2IV(RETVAL) );
 
 
@@ -213,11 +214,11 @@ dl_install_xsub(perl_name, symref, filename="$Package")
 					      XS_DYNAMIC_FILENAME)));
 
 
-char *
+SV *
 dl_error()
     CODE:
     dMY_CXT;
-    RETVAL = dl_last_error ;
+    RETVAL = newSVsv(MY_CXT.x_dl_last_error);
     OUTPUT:
     RETVAL
 
@@ -228,11 +229,13 @@ CLONE(...)
     CODE:
     MY_CXT_CLONE;
 
+    PERL_UNUSED_VAR(items);
+
     /* MY_CXT_CLONE just does a memcpy on the whole structure, so to avoid
      * using Perl variables that belong to another thread, we create our 
      * own for this thread.
      */
-    MY_CXT.x_dl_last_error = newSVpvn("", 0);
+    MY_CXT.x_dl_last_error = newSVpvs("");
 
 #endif
 

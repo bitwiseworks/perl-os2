@@ -1,12 +1,9 @@
 #!/usr/bin/perl
 use strict;
 use warnings;
-use Carp;
-use Cwd;
 use File::Spec;
-use File::Temp qw( tempdir );
+use lib (-d 't' ? File::Spec->catdir(qw(t lib)) : 'lib');
 use Test::More tests => 13;
-use lib qw( lib t/lib );
 use ExtUtils::ParseXS;
 use ExtUtils::ParseXS::Utilities qw(
     check_conditional_preprocessor_statements
@@ -15,8 +12,8 @@ use PrimitiveCapture;
 
 my $self = bless({} => 'ExtUtils::ParseXS');
 $self->{line} = [];
-$self->{XSStack} = [];
-$self->{XSStack}->[0] = {};
+$self->{XS_parse_stack} = [];
+$self->{XS_parse_stack}->[0] = {};
 
 {
     $self->{line} = [
@@ -29,8 +26,8 @@ $self->{XSStack}->[0] = {};
         "#endif this_is_an_endif_statement",
     ];
     $self->{line_no} = [ 17 .. 23 ];
-    $self->{XSStack}->[-1]{type} = 'if';
-    $self->{filename} = 'myfile1';
+    $self->{XS_parse_stack}->[-1]{type} = 'if';
+    $self->{in_filename} = 'myfile1';
 
     my $rv;
     my $stderr = PrimitiveCapture::capture_stderr(sub {
@@ -52,8 +49,8 @@ $self->{XSStack}->[0] = {};
         "#endif this_is_an_endif_statement",
     ];
     $self->{line_no} = [ 17 .. 23 ];
-    $self->{XSStack}->[-1]{type} = 'if';
-    $self->{filename} = 'myfile1';
+    $self->{XS_parse_stack}->[-1]{type} = 'if';
+    $self->{in_filename} = 'myfile1';
 
     my $rv;
     my $stderr = PrimitiveCapture::capture_stderr(sub {
@@ -73,8 +70,8 @@ $self->{XSStack}->[0] = {};
         "#endif this_is_an_endif_statement",
     ];
     $self->{line_no} = [ 17 .. 22 ];
-    $self->{XSStack}->[-1]{type} = 'if';
-    $self->{filename} = 'myfile1';
+    $self->{XS_parse_stack}->[-1]{type} = 'if';
+    $self->{in_filename} = 'myfile1';
 
     my $rv;
     my $stderr = PrimitiveCapture::capture_stderr(sub {
@@ -102,8 +99,8 @@ $self->{XSStack}->[0] = {};
         "#endif this_is_an_endif_statement",
     ];
     $self->{line_no} = [ 17 .. 22 ];
-    $self->{XSStack}->[-1]{type} = 'file';
-    $self->{filename} = 'myfile1';
+    $self->{XS_parse_stack}->[-1]{type} = 'file';
+    $self->{in_filename} = 'myfile1';
 
     my $rv;
     my $stderr = PrimitiveCapture::capture_stderr(sub {
@@ -131,8 +128,8 @@ $self->{XSStack}->[0] = {};
         "Gamma this is not an if/elif/elsif/endif",
     ];
     $self->{line_no} = [ 17 .. 22 ];
-    $self->{XSStack}->[-1]{type} = 'if';
-    $self->{filename} = 'myfile1';
+    $self->{XS_parse_stack}->[-1]{type} = 'if';
+    $self->{in_filename} = 'myfile1';
 
     my $rv;
     my $stderr = PrimitiveCapture::capture_stderr(sub {

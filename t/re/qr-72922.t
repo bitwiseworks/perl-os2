@@ -2,16 +2,19 @@
 use strict;
 
 BEGIN {
+    chdir 't' if -d 't';
     require './test.pl';
-    skip_all_if_miniperl("no dynamic loading on miniperl, no Scalar::Util");
-    plan(tests => 14);
 }
+
+no warnings 'experimental::builtin';
+use builtin 'weaken';
+
+plan(tests => 14);
 
 # [perl 72922]: A 'copy' of a Regex object which has magic should not crash
 # When a Regex object was copied and the copy weaken then the original regex object
 # could no longer be 'copied' with qr//
 
-use Scalar::Util 'weaken';
 sub s1 {
     my $re = qr/abcdef/;
     my $re_copy1 = $re;
@@ -27,11 +30,11 @@ sub s1 {
     my $refcnt_start = Internals::SvREFCNT($$re_weak_copy);
 
     undef $re;
-    is(Internals::SvREFCNT($$re_weak_copy), $refcnt_start - 1, "refcnt decreased");
+    refcount_is $re_weak_copy, $refcnt_start - 1, "refcnt decreased";
     is("$re_weak_copy", $str_re, "weak copy still equals original");
 
     undef $re_copy2;
-    is(Internals::SvREFCNT($$re_weak_copy), $refcnt_start - 1, "refcnt not decreased");
+    refcount_is $re_weak_copy, $refcnt_start - 1, "refcnt not decreased";
     is("$re_weak_copy", $str_re, "weak copy still equals original");
 }
 s1();

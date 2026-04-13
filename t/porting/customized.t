@@ -10,7 +10,10 @@ BEGIN {
         # XXX that should be fixed
 
     chdir '..' unless -d 't';
-    @INC = qw(lib Porting);
+    @INC = qw(lib Porting t);
+    require 'test.pl';
+    skip_all("pre-computed SHA1 won't match under EBCDIC") if $::IS_EBCDIC;
+    skip_all("This distro may have modified some files in cpan/. Skipping validation.") if $ENV{'PERL_BUILD_PACKAGING'};
 }
 
 use strict;
@@ -25,9 +28,12 @@ sub filter_customized {
     return @files
         unless my $customized = $Modules{$m}{CUSTOMIZED};
 
-    my ($pat) = map { qr/$_/ } join '|' => map {
-        ref $_ ? $_ : qr/\b\Q$_\E$/
-    } @{ $customized };
+    my ($pat) = map { qr/$_/ }
+        join ( '|' =>
+            map { ref $_ ? $_ : qr/\b\Q$_\E$/ } @{ $customized },
+            # https://github.com/Perl/perl5/issues/20228
+            qr/pod\/perlfilter\.pod/
+        );
 
     return grep { $_ =~ $pat } @files;
 }
@@ -70,11 +76,17 @@ EOF
 my $data_fh;
 
 if ( $regen ) {
-  open $data_fh, '>:bytes', $customised or die "Can't open $customised";
+  open $data_fh, '>:raw', $customised or die "Can't open $customised";
+  print $data_fh <<'#';
+# Regenerate this file using:
+#     cd t
+#     ./perl -I../lib porting/customized.t --regen
+#
 }
 else {
-  open $data_fh, '<:bytes', $customised or die "Can't open $customised";
+  open $data_fh, '<:raw', $customised or die "Can't open $customised";
   while (<$data_fh>) {
+    next if /^#/;
     chomp;
     my ($module,$file,$sha) = split ' ';
     $customised{ $module }->{ $file } = $sha;
@@ -82,8 +94,9 @@ else {
   close $data_fh;
 }
 
-foreach my $module ( keys %Modules ) {
+foreach my $module ( sort keys %Modules ) {
   next unless my $files = $Modules{ $module }{CUSTOMIZED};
+  next unless @{ $files };
   my @perl_files = my_get_module_files( $module );
   foreach my $file ( @perl_files ) {
     my $digest = Digest->new( $digest_type );
@@ -99,21 +112,16 @@ foreach my $module ( keys %Modules ) {
       next;
     }
     my $should_be = $customised{ $module }->{ $file };
-    if ( $id ne $should_be ) {
-       print  "not ok ".++$TestCounter." - SHA for $file does not match stashed SHA\n";
-    }
-    else {
-       print  "ok ".++$TestCounter." - SHA for $file matched\n";
-    }
+    is( $id, $should_be, "SHA for $file matches stashed SHA" );
   }
 }
 
 if ( $regen ) {
-  print "ok ".++$TestCounter." - regenerated data file\n";
+  pass( "regenerated data file" );
   close $data_fh;
 }
 
-print "1..".$TestCounter."\n";
+done_testing();
 
 =pod
 
@@ -129,7 +137,7 @@ customized.t - Test that CUSTOMIZED files in Maintainers.pl have not been overwr
 =head1 DESCRIPTION
 
 customized.t checks that files listed in C<Maintainers.pl> that have been C<CUSTOMIZED>
-are not accidently overwritten by CPAN module updates.
+are not accidentally overwritten by CPAN module updates.
 
 =head1 OPTIONS
 

@@ -105,6 +105,14 @@ case "$osvers" in
 	;;
 esac
 
+case "$osvers" in
+10.*)
+	# dtrace on 10.x needs libelf symbols, but we don't know if the
+	# user is going to request usedtrace and there's no .cbu for usedtrace
+	libswanted="$libswanted elf"
+	;;
+esac
+
 # Dynamic Loading flags have not changed much, so they are separated
 # out here to avoid duplicating them everywhere.
 case "$osvers" in
@@ -199,7 +207,7 @@ $define|true|[yY]*)
 	0.*|1.*|2.0*|2.1*)   cat <<EOM >&4
 I did not know that FreeBSD $osvers supports POSIX threads.
 
-Feel free to tell perlbug@perl.org otherwise.
+Feel free to report that at https://github.com/Perl/perl5/issues otherwise.
 EOM
 	      exit 1
 	      ;;
@@ -304,8 +312,70 @@ esac
 # XXX Under FreeBSD 6.0 (and probably most other similar versions)
 # Perl_die(NULL) generates a warning:
 #    pp_sys.c:491: warning: null format string
-# Configure supposedely tests for this, but apparently the test doesn't
+# Configure supposedly tests for this, but apparently the test doesn't
 # work.  Volunteers with FreeBSD are needed to improving the Configure test.
 # Meanwhile, the following workaround should be safe on all versions
 # of FreeBSD.
 d_printf_format_null='undef'
+
+# See [perl #128867]
+# Interpreting: https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=211743#c10
+# khw workaround no longer needed in the following FREEBSD_KERNEL_VERSIONs
+#1200004 and up
+#1100502 >= version < 1200000
+#1003507 >= version < 1100000
+# Experiments have shown that this doesn't fully work.  The first kernel we know it works is 1200056
+
+FREEBSD_KERNEL_VERSION=`uname -U`
+#if  [ $FREEBSD_KERNEL_VERSION -lt 1003507 ] || \
+#    [ $FREEBSD_KERNEL_VERSION -ge 1100000 ] && [ $FREEBSD_KERNEL_VERSION -lt 1100502 ] || \
+#    [ $FREEBSD_KERNEL_VERSION -ge 1200000 ] && [ $FREEBSD_KERNEL_VERSION -lt 1200004 ]
+if  [ $FREEBSD_KERNEL_VERSION -lt 1200056 ]     # But other bugs remain; see below
+then
+    d_uselocale='undef'
+fi
+
+# See https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=265950
+# localeconv() is supposed to be thread-safe when used with this, so when
+# freebsd fixes this, may want to find a way to tell that to the code in
+# locale.c that assumes that function isn't thread-safe.
+ccflags="${ccflags} -DNO_POSIX_2008_LOCALE"
+
+# https://github.com/Perl/perl5/issues/15984
+# Reported in 11.0-CURRENT with g++-4.8.5:
+# If using g++, the Configure scan for dlopen() fails.
+# Easier for now to just to forcibly set it.
+case "$cc" in
+*g++*)
+  d_dlopen='define'
+  ;;
+esac
+
+case `uname -p` in
+arm|mips)
+  ;;
+*)
+  test "$optimize" || optimize='-O2'
+  ;;
+esac
+
+# don't modify a supplied -Darchname
+case "$archname" in
+'')
+  cat > UU/archname.cbu <<'EOCBU'
+unamem=`uname -m`
+case "$archname" in
+"$unamem"-*)
+  arch=`uname -p`
+  archname=`echo "$archname" | sed -e "s/^$unamem-/$arch-/"`
+  ;;
+esac
+EOCBU
+  ;;
+esac
+
+# This function on this box has weird behavior.  See
+# https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=255646
+# This has allegedly been fixed, but we can't be sure because of
+# https://bugs.freebsd.org/bugzilla/show_bug.cgi?id=265950
+#d_querylocale='undef'

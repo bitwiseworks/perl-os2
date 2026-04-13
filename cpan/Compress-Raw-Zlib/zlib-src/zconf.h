@@ -1,5 +1,5 @@
 /* zconf.h -- configuration of the zlib compression library
- * Copyright (C) 1995-2010 Jean-loup Gailly.
+ * Copyright (C) 1995-2026 Jean-loup Gailly, Mark Adler
  * For conditions of distribution and use, see copyright notice in zlib.h
  */
 
@@ -8,6 +8,8 @@
 #ifndef ZCONF_H
 #define ZCONF_H
 
+#include <stddef.h>         /* Compress::Raw::Zlib change -- Needed for NULL */
+
 /*
  * If you *really* need a unique prefix for all types and library functions,
  * compile with -DZ_PREFIX. The "standard" zlib should be compiled without it.
@@ -15,119 +17,165 @@
  * this permanently in zconf.h using "./configure --zprefix".
  */
 #ifdef Z_PREFIX     /* may be set to #if 1 by ./configure */
+#  define Z_PREFIX_SET
 
-/* all linked symbols */
-#  define _dist_code            z__dist_code
-#  define _length_code          z__length_code
-#  define _tr_align             z__tr_align
-#  define _tr_flush_block       z__tr_flush_block
-#  define _tr_init              z__tr_init
-#  define _tr_stored_block      z__tr_stored_block
-#  define _tr_tally             z__tr_tally
-#  define adler32               z_adler32
-#  define adler32_combine       z_adler32_combine
-#  define adler32_combine64     z_adler32_combine64
-#  define compress              z_compress
-#  define compress2             z_compress2
-#  define compressBound         z_compressBound
-#  define crc32                 z_crc32
-#  define crc32_combine         z_crc32_combine
-#  define crc32_combine64       z_crc32_combine64
-#  define deflate               z_deflate
-#  define deflateBound          z_deflateBound
-#  define deflateCopy           z_deflateCopy
-#  define deflateEnd            z_deflateEnd
-#  define deflateInit2_         z_deflateInit2_
-#  define deflateInit_          z_deflateInit_
-#  define deflateParams         z_deflateParams
-#  define deflatePrime          z_deflatePrime
-#  define deflateReset          z_deflateReset
-#  define deflateSetDictionary  z_deflateSetDictionary
-#  define deflateSetHeader      z_deflateSetHeader
-#  define deflateTune           z_deflateTune
-#  define deflate_copyright     z_deflate_copyright
-#  define get_crc_table         z_get_crc_table
-#  define gz_error              z_gz_error
-#  define gz_intmax             z_gz_intmax
-#  define gz_strwinerror        z_gz_strwinerror
-#  define gzbuffer              z_gzbuffer
-#  define gzclearerr            z_gzclearerr
-#  define gzclose               z_gzclose
-#  define gzclose_r             z_gzclose_r
-#  define gzclose_w             z_gzclose_w
-#  define gzdirect              z_gzdirect
-#  define gzdopen               z_gzdopen
-#  define gzeof                 z_gzeof
-#  define gzerror               z_gzerror
-#  define gzflush               z_gzflush
-#  define gzgetc                z_gzgetc
-#  define gzgets                z_gzgets
-#  define gzoffset              z_gzoffset
-#  define gzoffset64            z_gzoffset64
-#  define gzopen                z_gzopen
-#  define gzopen64              z_gzopen64
-#  define gzprintf              z_gzprintf
-#  define gzputc                z_gzputc
-#  define gzputs                z_gzputs
-#  define gzread                z_gzread
-#  define gzrewind              z_gzrewind
-#  define gzseek                z_gzseek
-#  define gzseek64              z_gzseek64
-#  define gzsetparams           z_gzsetparams
-#  define gztell                z_gztell
-#  define gztell64              z_gztell64
-#  define gzungetc              z_gzungetc
-#  define gzwrite               z_gzwrite
-#  define inflate               z_inflate
-#  define inflateBack           z_inflateBack
-#  define inflateBackEnd        z_inflateBackEnd
-#  define inflateBackInit_      z_inflateBackInit_
-#  define inflateCopy           z_inflateCopy
-#  define inflateEnd            z_inflateEnd
-#  define inflateGetHeader      z_inflateGetHeader
-#  define inflateInit2_         z_inflateInit2_
-#  define inflateInit_          z_inflateInit_
-#  define inflateMark           z_inflateMark
-#  define inflatePrime          z_inflatePrime
-#  define inflateReset          z_inflateReset
-#  define inflateReset2         z_inflateReset2
-#  define inflateSetDictionary  z_inflateSetDictionary
-#  define inflateSync           z_inflateSync
-#  define inflateSyncPoint      z_inflateSyncPoint
-#  define inflateUndermine      z_inflateUndermine
-#  define inflate_copyright     z_inflate_copyright
-#  define inflate_fast          z_inflate_fast
-#  define inflate_table         z_inflate_table
-#  define uncompress            z_uncompress
-#  define zError                z_zError
-#  define zcalloc               z_zcalloc
-#  define zcfree                z_zcfree
-#  define zlibCompileFlags      z_zlibCompileFlags
-#  define zlibVersion           z_zlibVersion
+/* all linked symbols and init macros */
+#  define _dist_code            Perl_crz__dist_code
+#  define _length_code          Perl_crz__length_code
+#  define _tr_align             Perl_crz__tr_align
+#  define _tr_flush_bits        Perl_crz__tr_flush_bits
+#  define _tr_flush_block       Perl_crz__tr_flush_block
+#  define _tr_init              Perl_crz__tr_init
+#  define _tr_stored_block      Perl_crz__tr_stored_block
+#  define _tr_tally             Perl_crz__tr_tally
+#  define adler32               Perl_crz_adler32
+#  define adler32_combine       Perl_crz_adler32_combine
+#  define adler32_combine64     Perl_crz_adler32_combine64
+#  define adler32_z             Perl_crz_adler32_z
+#  ifndef Z_SOLO
+#    define compress              z_compress
+#    define compress2             z_compress2
+#    define compress_z            z_compress_z
+#    define compress2_z           z_compress2_z
+#    define compressBound         z_compressBound
+#    define compressBound_z       z_compressBound_z
+#  endif
+#  define crc32                 Perl_crz_crc32
+#  define crc32_combine         Perl_crz_crc32_combine
+#  define crc32_combine64       Perl_crz_crc32_combine64
+#  define crc32_combine_gen     Perl_crz_crc32_combine_gen
+#  define crc32_combine_gen64   Perl_crz_crc32_combine_gen64
+#  define crc32_combine_op      Perl_crz_crc32_combine_op
+#  define crc32_z               Perl_crz_crc32_z
+#  define deflate               Perl_crz_deflate
+#  define deflateBound          Perl_crz_deflateBound
+#  define deflateBound_z        Perl_crz_deflateBound_z
+#  define deflateCopy           Perl_crz_deflateCopy
+#  define deflateEnd            Perl_crz_deflateEnd
+#  define deflateGetDictionary  Perl_crz_deflateGetDictionary
+#  define deflateInit           Perl_crz_deflateInit
+#  define deflateInit2          Perl_crz_deflateInit2
+#  define deflateInit2_         Perl_crz_deflateInit2_
+#  define deflateInit_          Perl_crz_deflateInit_
+#  define deflateParams         Perl_crz_deflateParams
+#  define deflatePending        Perl_crz_deflatePending
+#  define deflatePrime          Perl_crz_deflatePrime
+#  define deflateReset          Perl_crz_deflateReset
+#  define deflateResetKeep      Perl_crz_deflateResetKeep
+#  define deflateSetDictionary  Perl_crz_deflateSetDictionary
+#  define deflateSetHeader      Perl_crz_deflateSetHeader
+#  define deflateTune           Perl_crz_deflateTune
+#  define deflateUsed           Perl_crz_deflateUsed
+#  define deflate_copyright     Perl_crz_deflate_copyright
+#  define get_crc_table         Perl_crz_get_crc_table
+#  ifndef Z_SOLO
+#    define gz_error              z_gz_error
+#    define gz_intmax             z_gz_intmax
+#    define gz_strwinerror        z_gz_strwinerror
+#    define gzbuffer              z_gzbuffer
+#    define gzclearerr            z_gzclearerr
+#    define gzclose               z_gzclose
+#    define gzclose_r             z_gzclose_r
+#    define gzclose_w             z_gzclose_w
+#    define gzdirect              z_gzdirect
+#    define gzdopen               z_gzdopen
+#    define gzeof                 z_gzeof
+#    define gzerror               z_gzerror
+#    define gzflush               z_gzflush
+#    define gzfread               z_gzfread
+#    define gzfwrite              z_gzfwrite
+#    define gzgetc                z_gzgetc
+#    define gzgetc_               z_gzgetc_
+#    define gzgets                z_gzgets
+#    define gzoffset              z_gzoffset
+#    define gzoffset64            z_gzoffset64
+#    define gzopen                z_gzopen
+#    define gzopen64              z_gzopen64
+#    ifdef _WIN32
+#      define gzopen_w              z_gzopen_w
+#    endif
+#    define gzprintf              z_gzprintf
+#    define gzputc                z_gzputc
+#    define gzputs                z_gzputs
+#    define gzread                z_gzread
+#    define gzrewind              z_gzrewind
+#    define gzseek                z_gzseek
+#    define gzseek64              z_gzseek64
+#    define gzsetparams           z_gzsetparams
+#    define gztell                z_gztell
+#    define gztell64              z_gztell64
+#    define gzungetc              z_gzungetc
+#    define gzvprintf             z_gzvprintf
+#    define gzwrite               z_gzwrite
+#  endif
+#  define inflate               Perl_crz_inflate
+#  define inflateBack           Perl_crz_inflateBack
+#  define inflateBackEnd        Perl_crz_inflateBackEnd
+#  define inflateBackInit       Perl_crz_inflateBackInit
+#  define inflateBackInit_      Perl_crz_inflateBackInit_
+#  define inflateCodesUsed      Perl_crz_inflateCodesUsed
+#  define inflateCopy           Perl_crz_inflateCopy
+#  define inflateEnd            Perl_crz_inflateEnd
+#  define inflateGetDictionary  Perl_crz_inflateGetDictionary
+#  define inflateGetHeader      Perl_crz_inflateGetHeader
+#  define inflateInit           Perl_crz_inflateInit
+#  define inflateInit2          Perl_crz_inflateInit2
+#  define inflateInit2_         Perl_crz_inflateInit2_
+#  define inflateInit_          Perl_crz_inflateInit_
+#  define inflateMark           Perl_crz_inflateMark
+#  define inflatePrime          Perl_crz_inflatePrime
+#  define inflateReset          Perl_crz_inflateReset
+#  define inflateReset2         Perl_crz_inflateReset2
+#  define inflateResetKeep      Perl_crz_inflateResetKeep
+#  define inflateSetDictionary  Perl_crz_inflateSetDictionary
+#  define inflateSync           Perl_crz_inflateSync
+#  define inflateSyncPoint      Perl_crz_inflateSyncPoint
+#  define inflateUndermine      Perl_crz_inflateUndermine
+#  define inflateValidate       Perl_crz_inflateValidate
+#  define inflate_copyright     Perl_crz_inflate_copyright
+#  define inflate_fast          Perl_crz_inflate_fast
+#  define inflate_table         Perl_crz_inflate_table
+#  define inflate_fixed         Perl_crz_inflate_fixed
+#  ifndef Z_SOLO
+#    define uncompress            z_uncompress
+#    define uncompress2           z_uncompress2
+#    define uncompress_z          z_uncompress_z
+#    define uncompress2_z         z_uncompress2_z
+#  endif
+#  define zError                Perl_crz_zError
+#  define z_errmsg              Perl_crz_errmsg
+#  ifndef Z_SOLO
+#    define zcalloc               z_zcalloc
+#    define zcfree                z_zcfree
+#  endif
+#  define zlibCompileFlags      Perl_crz_zlibCompileFlags
+#  define zlibVersion           Perl_crz_zlibVersion
 
 /* all zlib typedefs in zlib.h and zconf.h */
-#  define Byte                  z_Byte
-#  define Bytef                 z_Bytef
-#  define alloc_func            z_alloc_func
-#  define charf                 z_charf
-#  define free_func             z_free_func
-#  define gzFile                z_gzFile
-#  define gz_header             z_gz_header
-#  define gz_headerp            z_gz_headerp
-#  define in_func               z_in_func
-#  define intf                  z_intf
-#  define out_func              z_out_func
-#  define uInt                  z_uInt
-#  define uIntf                 z_uIntf
-#  define uLong                 z_uLong
-#  define uLongf                z_uLongf
-#  define voidp                 z_voidp
-#  define voidpc                z_voidpc
-#  define voidpf                z_voidpf
+#  define Byte                  Perl_crz_Byte
+#  define Bytef                 Perl_crz_Bytef
+#  define alloc_func            Perl_crz_alloc_func
+#  define charf                 Perl_crz_charf
+#  define free_func             Perl_crz_free_func
+#  ifndef Z_SOLO
+#    define gzFile                z_gzFile
+#  endif
+#  define gz_header             Perl_crz_gPerl_crz_header
+#  define gz_headerp            Perl_crz_gPerl_crz_headerp
+#  define in_func               Perl_crz_in_func
+#  define intf                  Perl_crz_intf
+#  define out_func              Perl_crz_out_func
+#  define uInt                  Perl_crz_uInt
+#  define uIntf                 Perl_crz_uIntf
+#  define uLong                 Perl_crz_uLong
+#  define uLongf                Perl_crz_uLongf
+#  define voidp                 Perl_crz_voidp
+#  define voidpc                Perl_crz_voidpc
+#  define voidpf                Perl_crz_voidpf
 
 /* all zlib structs in zlib.h and zconf.h */
-#  define gz_header_s           z_gz_header_s
-#  define internal_state        z_internal_state
+#  define gz_header_s           Perl_crz_gz_header_s
+#  define internal_state        Perl_crz_internal_state
 
 #endif
 
@@ -197,9 +245,31 @@
 #  endif
 #endif
 
-/* Some Mac compilers merge all .h files incorrectly: */
-#if defined(__MWERKS__)||defined(applec)||defined(THINK_C)||defined(__SC__)
-#  define NO_DUMMY_DECL
+#ifndef z_const
+#  ifdef ZLIB_CONST
+#    define z_const const
+#  else
+#    define z_const
+#  endif
+#endif
+
+#ifdef Z_SOLO
+#  ifdef _WIN64
+     typedef unsigned long long z_size_t;
+#  else
+     typedef unsigned long z_size_t;
+#  endif
+#else
+#  define z_longlong long long
+#  if defined(NO_SIZE_T)
+     typedef unsigned NO_SIZE_T z_size_t;
+#  elif defined(STDC)
+#    include <stddef.h>
+     typedef size_t z_size_t;
+#  else
+     typedef unsigned long z_size_t;
+#  endif
+#  undef z_longlong
 #endif
 
 /* Maximum value for memLevel in deflateInit2 */
@@ -229,7 +299,7 @@
  Of course this will generally degrade compression (there's no free lunch).
 
    The memory requirements for inflate are (in bytes) 1 << windowBits
- that is, 32K for windowBits=15 (default value) plus a few kilobytes
+ that is, 32K for windowBits=15 (default value) plus about 7 kilobytes
  for small objects.
 */
 
@@ -290,6 +360,9 @@
 #  ifdef ZLIB_WINAPI
 #    ifdef FAR
 #      undef FAR
+#    endif
+#    ifndef WIN32_LEAN_AND_MEAN
+#      define WIN32_LEAN_AND_MEAN
 #    endif
 #    include <windows.h>
      /* No need for _export, use ZLIB.DEF instead. */
@@ -356,12 +429,47 @@ typedef uLong FAR uLongf;
    typedef Byte       *voidp;
 #endif
 
-#ifdef HAVE_UNISTD_H    /* may be set to #if 1 by ./configure */
+#if !defined(Z_U4) && !defined(Z_SOLO) && defined(STDC)
+#  include <limits.h>
+#  if (UINT_MAX == 0xffffffffUL)
+#    define Z_U4 unsigned
+#  elif (ULONG_MAX == 0xffffffffUL)
+#    define Z_U4 unsigned long
+#  elif (USHRT_MAX == 0xffffffffUL)
+#    define Z_U4 unsigned short
+#  endif
+#endif
+
+#ifdef Z_U4
+   typedef Z_U4 z_crc_t;
+#else
+   typedef unsigned long z_crc_t;
+#endif
+
+#if HAVE_UNISTD_H-0     /* may be set to #if 1 by ./configure */
 #  define Z_HAVE_UNISTD_H
 #endif
 
+#if HAVE_STDARG_H-0     /* may be set to #if 1 by ./configure */
+#  define Z_HAVE_STDARG_H
+#endif
+
 #ifdef STDC
-#  include <sys/types.h>    /* for off_t */
+#  ifndef Z_SOLO
+#    include <sys/types.h>      /* for off_t */
+#  endif
+#endif
+
+#if defined(STDC) || defined(Z_HAVE_STDARG_H)
+#  ifndef Z_SOLO
+#    include <stdarg.h>         /* for va_list */
+#  endif
+#endif
+
+#ifdef _WIN32
+#  ifndef Z_SOLO
+#    include <stddef.h>         /* for wchar_t */
+#  endif
 #endif
 
 /* a little trick to accommodate both "#define _LARGEFILE64_SOURCE" and
@@ -370,42 +478,60 @@ typedef uLong FAR uLongf;
  * both "#undef _LARGEFILE64_SOURCE" and "#define _LARGEFILE64_SOURCE 0" as
  * equivalently requesting no 64-bit operations
  */
-#if -_LARGEFILE64_SOURCE - -1 == 1
+#if defined(_LARGEFILE64_SOURCE) && -_LARGEFILE64_SOURCE - -1 == 1
 #  undef _LARGEFILE64_SOURCE
 #endif
 
-#if defined(Z_HAVE_UNISTD_H) || defined(_LARGEFILE64_SOURCE)
-#  include <unistd.h>       /* for SEEK_* and off_t */
-#  ifdef VMS
-#    include <unixio.h>     /* for off_t */
+#ifndef Z_HAVE_UNISTD_H
+#  if defined(__WATCOMC__) || defined(__GO32__) || \
+      (defined(_LARGEFILE64_SOURCE) && !defined(_WIN32))
+#    define Z_HAVE_UNISTD_H
 #  endif
-#  ifndef z_off_t
-#    define z_off_t off_t
+#endif
+#ifndef Z_SOLO
+#  if defined(Z_HAVE_UNISTD_H)
+#    include <unistd.h>         /* for SEEK_*, off_t, and _LFS64_LARGEFILE */
+#    ifdef VMS
+#      include <unixio.h>       /* for off_t */
+#    endif
+#    ifndef z_off_t
+#      define z_off_t off_t
+#    endif
 #  endif
 #endif
 
-#ifndef SEEK_SET
+#if defined(_LFS64_LARGEFILE) && _LFS64_LARGEFILE-0
+#  define Z_LFS64
+#endif
+
+#if defined(_LARGEFILE64_SOURCE) && defined(Z_LFS64)
+#  define Z_LARGE64
+#endif
+
+#if defined(_FILE_OFFSET_BITS) && _FILE_OFFSET_BITS-0 == 64 && defined(Z_LFS64)
+#  define Z_WANT64
+#endif
+
+#if !defined(SEEK_SET) && !defined(Z_SOLO)
 #  define SEEK_SET        0       /* Seek from beginning of file.  */
 #  define SEEK_CUR        1       /* Seek from current position.  */
 #  define SEEK_END        2       /* Set file pointer to EOF plus "offset" */
 #endif
 
 #ifndef z_off_t
-#  define z_off_t long
+#  define z_off_t long long
 #endif
 
-#if defined(_LARGEFILE64_SOURCE) && _LFS64_LARGEFILE-0
+#if !defined(_WIN32) && defined(Z_LARGE64)
 #  define z_off64_t off64_t
+#elif defined(__MINGW32__)
+#  define z_off64_t long long
+#elif defined(_WIN32) && !defined(__GNUC__)
+#  define z_off64_t __int64
+#elif defined(__GO32__)
+#  define z_off64_t offset_t
 #else
 #  define z_off64_t z_off_t
-#endif
-
-#if defined(__OS400__)
-#  define NO_vsnprintf
-#endif
-
-#if defined(__MVS__)
-#  define NO_vsnprintf
 #endif
 
 /* MVS linker does not support external names larger than 8 bytes */

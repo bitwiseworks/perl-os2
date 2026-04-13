@@ -32,15 +32,54 @@
  * documentation and/or software.
  */
 
-#ifdef __cplusplus
-extern "C" {
-#endif
 #define PERL_NO_GET_CONTEXT     /* we want efficiency */
 #include "EXTERN.h"
 #include "perl.h"
 #include "XSUB.h"
-#ifdef __cplusplus
+
+#ifndef PERL_UNUSED_VAR
+# define PERL_UNUSED_VAR(x) ((void)x)
+#endif
+
+#ifndef PERL_MAGIC_ext
+# define PERL_MAGIC_ext '~'
+#endif
+
+#ifndef Newxz
+# define Newxz(v,n,t) Newz(0,v,n,t)
+#endif
+
+#ifndef SvMAGIC_set
+# define SvMAGIC_set(sv, mg) (SvMAGIC(sv) = (mg))
+#endif
+
+#ifndef sv_magicext
+# define sv_magicext(sv, obj, type, vtbl, name, namlen) \
+    THX_sv_magicext(aTHX_ sv, obj, type, vtbl, name, namlen)
+static MAGIC *THX_sv_magicext(pTHX_ SV *sv, SV *obj, int type,
+    MGVTBL const *vtbl, char const *name, I32 namlen)
+{
+    MAGIC *mg;
+    if (obj || namlen)
+	/* exceeded intended usage of this reserve implementation */
+	return NULL;
+    Newxz(mg, 1, MAGIC);
+    mg->mg_virtual = (MGVTBL*)vtbl;
+    mg->mg_type = type;
+    mg->mg_ptr = (char *)name;
+    mg->mg_len = -1;
+    (void) SvUPGRADE(sv, SVt_PVMG);
+    mg->mg_moremagic = SvMAGIC(sv);
+    SvMAGIC_set(sv, mg);
+    SvMAGICAL_off(sv);
+    mg_magical(sv);
+    return mg;
 }
+#endif
+
+#if PERL_VERSION < 8
+# undef SvPVbyte
+# define SvPVbyte(sv, lp) (sv_utf8_downgrade((sv), 0), SvPV((sv), (lp)))
 #endif
 
 /* Perl does not guarantee that U32 is exactly 32 bits.  Some system
@@ -61,20 +100,6 @@ extern "C" {
  * values.  The following macros (and functions) allow us to convert
  * between native integers and such values.
  */
-#undef BYTESWAP
-#ifndef U32_ALIGNMENT_REQUIRED
- #if BYTEORDER == 0x1234      /* 32-bit little endian */
-  #define BYTESWAP(x) (x)     /* no-op */
-
- #elif BYTEORDER == 0x4321    /* 32-bit big endian */
-  #define BYTESWAP(x) 	((((x)&0xFF)<<24)	\
-			|(((x)>>24)&0xFF)	\
-			|(((x)&0x0000FF00)<<8)	\
-			|(((x)&0x00FF0000)>>8)	)
- #endif
-#endif
-
-#ifndef BYTESWAP
 static void u2s(U32 u, U8* s)
 {
     *s++ = (U8)(u         & 0xFF);
@@ -87,9 +112,8 @@ static void u2s(U32 u, U8* s)
                         ((U32)(*(s+1)) << 8)  |  \
                         ((U32)(*(s+2)) << 16) |  \
                         ((U32)(*(s+3)) << 24))
-#endif
 
-/* This stucture keeps the current state of algorithm.
+/* This structure keeps the current state of algorithm.
  */
 typedef struct {
   U32 A, B, C, D;  /* current digest */
@@ -98,7 +122,7 @@ typedef struct {
   U8 buffer[128];  /* collect complete 64 byte blocks */
 } MD5_CTX;
 
-#ifdef USE_ITHREADS
+#if defined(USE_ITHREADS) && defined(MGf_DUP)
 STATIC int dup_md5_ctx(pTHX_ MAGIC *mg, CLONE_PARAMS *params)
 {
     MD5_CTX *new_ctx;
@@ -110,26 +134,29 @@ STATIC int dup_md5_ctx(pTHX_ MAGIC *mg, CLONE_PARAMS *params)
 }
 #endif
 
-STATIC MGVTBL vtbl_md5 = {
+#if defined(MGf_DUP) && defined(USE_ITHREADS)
+STATIC const MGVTBL vtbl_md5 = {
     NULL, /* get */
     NULL, /* set */
     NULL, /* len */
     NULL, /* clear */
     NULL, /* free */
-#ifdef MGf_COPY
     NULL, /* copy */
-#endif
-#ifdef MGf_DUP
-# ifdef USE_ITHREADS
-    dup_md5_ctx,
-# else
-    NULL, /* dup */
-# endif
-#endif
-#ifdef MGf_LOCAL
+    dup_md5_ctx, /* dup */
     NULL /* local */
-#endif
 };
+#else
+/* declare as 5 member, not normal 8 to save image space*/
+STATIC const struct {
+	int (*svt_get)(SV* sv, MAGIC* mg);
+	int (*svt_set)(SV* sv, MAGIC* mg);
+	U32 (*svt_len)(SV* sv, MAGIC* mg);
+	int (*svt_clear)(SV* sv, MAGIC* mg);
+	int (*svt_free)(SV* sv, MAGIC* mg);
+} vtbl_md5 = {
+	NULL, NULL, NULL, NULL, NULL
+};
+#endif
 
 
 /* Padding is added at the end of the message in order to fill a
@@ -231,29 +258,16 @@ MD5Transform(MD5_CTX* ctx, const U8* buf, STRLEN blocks)
     U32 C = ctx->C;
     U32 D = ctx->D;
 
-#ifndef U32_ALIGNMENT_REQUIRED
-    const U32 *x = (U32*)buf;  /* really just type casting */
-#endif
-
     do {
 	U32 a = A;
 	U32 b = B;
 	U32 c = C;
 	U32 d = D;
 
-#if BYTEORDER == 0x1234 && !defined(U32_ALIGNMENT_REQUIRED)
-	const U32 *X = x;
-        #define NEXTx  (*x++)
-#else
-	U32 X[16];      /* converted values, used in round 2-4 */
+	U32 X[16];      /* little-endian values, used in round 2-4 */
 	U32 *uptr = X;
 	U32 tmp;
- #ifdef BYTESWAP
-        #define NEXTx  (tmp=*x++, *uptr++ = BYTESWAP(tmp))
- #else
         #define NEXTx  (s2u(buf,tmp), buf += 4, *uptr++ = tmp)
- #endif
-#endif
 
 #ifdef MD5_DEBUG
 	if (buf == ctx->buffer)
@@ -265,7 +279,7 @@ MD5Transform(MD5_CTX* ctx, const U8* buf, STRLEN blocks)
 	    int i;
 	    fprintf(stderr,"[");
 	    for (i = 0; i < 16; i++) {
-		fprintf(stderr,"%x,", x[i]);
+		fprintf(stderr,"%x,", x[i]); /* FIXME */
 	    }
 	    fprintf(stderr,"]\n");
 	}
@@ -420,30 +434,18 @@ MD5Final(U8* digest, MD5_CTX *ctx)
 
     bits_low = ctx->bytes_low << 3;
     bits_high = (ctx->bytes_high << 3) | (ctx->bytes_low  >> 29);
-#ifdef BYTESWAP
-    *(U32*)(ctx->buffer + fill) = BYTESWAP(bits_low);    fill += 4;
-    *(U32*)(ctx->buffer + fill) = BYTESWAP(bits_high);   fill += 4;
-#else
     u2s(bits_low,  ctx->buffer + fill);   fill += 4;
     u2s(bits_high, ctx->buffer + fill);   fill += 4;
-#endif
 
     MD5Transform(ctx, ctx->buffer, fill >> 6);
 #ifdef MD5_DEBUG
     fprintf(stderr,"       Result: %s\n", ctx_dump(ctx));
 #endif
 
-#ifdef BYTESWAP
-    *(U32*)digest = BYTESWAP(ctx->A);  digest += 4;
-    *(U32*)digest = BYTESWAP(ctx->B);  digest += 4;
-    *(U32*)digest = BYTESWAP(ctx->C);  digest += 4;
-    *(U32*)digest = BYTESWAP(ctx->D);
-#else
     u2s(ctx->A, digest);
     u2s(ctx->B, digest+4);
     u2s(ctx->C, digest+8);
     u2s(ctx->D, digest+12);
-#endif
 }
 
 #ifndef INT2PTR
@@ -458,7 +460,8 @@ static MD5_CTX* get_md5_ctx(pTHX_ SV* sv)
 	croak("Not a reference to a Digest::MD5 object");
 
     for (mg = SvMAGIC(SvRV(sv)); mg; mg = mg->mg_moremagic) {
-	if (mg->mg_type == PERL_MAGIC_ext && mg->mg_virtual == &vtbl_md5) {
+	if (mg->mg_type == PERL_MAGIC_ext
+	    && mg->mg_virtual == (const MGVTBL *)&vtbl_md5) {
 	    return (MD5_CTX *)mg->mg_ptr;
 	}
     }
@@ -480,9 +483,9 @@ static SV * new_md5_ctx(pTHX_ MD5_CTX *context, const char *klass)
 #ifdef USE_ITHREADS
     mg =
 #endif
-	sv_magicext(sv, NULL, PERL_MAGIC_ext, &vtbl_md5, (const char *)context, 0);
+	sv_magicext(sv, NULL, PERL_MAGIC_ext, (const MGVTBL *)&vtbl_md5, (const char *)context, 0);
 
-#ifdef USE_ITHREADS
+#if defined(USE_ITHREADS) && defined(MGf_DUP)
     mg->mg_flags |= MGf_DUP;
 #endif
 
@@ -555,7 +558,7 @@ static SV* make_mortal_sv(pTHX_ const unsigned char *src, int type)
 	len = 22;
 	break;
     default:
-	croak("Bad convertion type (%d)", type);
+	croak("Bad conversion type (%d)", type);
 	break;
     }
     return sv_2mortal(newSVpv(ret,len));
@@ -686,6 +689,49 @@ digest(context)
         XSRETURN(1);
 
 void
+context(ctx, ...)
+	MD5_CTX* ctx
+    PREINIT:
+	char out[16];
+        U32 w;
+    PPCODE:
+	if (items > 2) {
+	    STRLEN len;
+	    unsigned long blocks = SvUV(ST(1));
+	    unsigned char *buf = (unsigned char *)(SvPV(ST(2), len));
+	    ctx->A = buf[ 0] | (buf[ 1]<<8) | (buf[ 2]<<16) | (buf[ 3]<<24);
+	    ctx->B = buf[ 4] | (buf[ 5]<<8) | (buf[ 6]<<16) | (buf[ 7]<<24);
+	    ctx->C = buf[ 8] | (buf[ 9]<<8) | (buf[10]<<16) | (buf[11]<<24);
+	    ctx->D = buf[12] | (buf[13]<<8) | (buf[14]<<16) | (buf[15]<<24);
+	    ctx->bytes_low = blocks << 6;
+	    ctx->bytes_high = blocks >> 26;
+	    if (items == 4) {
+		buf = (unsigned char *)(SvPV(ST(3), len));
+		MD5Update(ctx, buf, len);
+	    }
+	    XSRETURN(1); /* ctx */
+	} else if (items != 1) {
+	    XSRETURN(0);
+	}
+
+        w=ctx->A; out[ 0]=(char)w; out[ 1]=(char)(w>>8); out[ 2]=(char)(w>>16); out[ 3]=(char)(w>>24);
+        w=ctx->B; out[ 4]=(char)w; out[ 5]=(char)(w>>8); out[ 6]=(char)(w>>16); out[ 7]=(char)(w>>24);
+        w=ctx->C; out[ 8]=(char)w; out[ 9]=(char)(w>>8); out[10]=(char)(w>>16); out[11]=(char)(w>>24);
+        w=ctx->D; out[12]=(char)w; out[13]=(char)(w>>8); out[14]=(char)(w>>16); out[15]=(char)(w>>24);
+
+	EXTEND(SP, 3);
+	ST(0) = sv_2mortal(newSVuv(ctx->bytes_high << 26 |
+				   ctx->bytes_low >> 6));
+	ST(1) = sv_2mortal(newSVpv(out, 16));
+
+	if ((ctx->bytes_low & 0x3F) == 0)
+	    XSRETURN(2);
+
+	ST(2) = sv_2mortal(newSVpv((char *)ctx->buffer,
+				   ctx->bytes_low & 0x3F));
+	XSRETURN(3);
+
+void
 md5(...)
     ALIAS:
 	Digest::MD5::md5        = F_BIN
@@ -700,12 +746,14 @@ md5(...)
     PPCODE:
 	MD5Init(&ctx);
 
-	if (PL_dowarn & G_WARN_ON) {
+	if ((PL_dowarn & G_WARN_ON) || ckWARN(WARN_SYNTAX)) {
             const char *msg = 0;
 	    if (items == 1) {
 		if (SvROK(ST(0))) {
                     SV* sv = SvRV(ST(0));
-		    if (SvOBJECT(sv) && strEQ(HvNAME(SvSTASH(sv)), "Digest::MD5"))
+                    char *name;
+		    if (SvOBJECT(sv) && (name = HvNAME(SvSTASH(sv)))
+                                     && strEQ(name, "Digest::MD5"))
 		        msg = "probably called as method";
 		    else
 			msg = "called with reference argument";
@@ -718,7 +766,9 @@ md5(...)
 		}
 		else if (SvROK(ST(0))) {
 		    SV* sv = SvRV(ST(0));
-		    if (SvOBJECT(sv) && strEQ(HvNAME(SvSTASH(sv)), "Digest::MD5"))
+                    char *name;
+		    if (SvOBJECT(sv) && (name = HvNAME(SvSTASH(sv)))
+                                     && strEQ(name, "Digest::MD5"))
 		        msg = "probably called as method";
 		}
 	    }

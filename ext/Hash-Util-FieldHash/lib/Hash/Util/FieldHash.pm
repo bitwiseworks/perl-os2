@@ -1,14 +1,13 @@
 package Hash::Util::FieldHash;
 
-use 5.009004;
 use strict;
 use warnings;
-use Scalar::Util qw( reftype);
+no warnings 'experimental::builtin';
+use builtin qw(reftype);
 
-our $VERSION = '1.10';
+our $VERSION = '1.27';
 
-require Exporter;
-our @ISA = qw(Exporter);
+use Exporter 'import';
 our %EXPORT_TAGS = (
     'all' => [ qw(
         fieldhash
@@ -103,7 +102,8 @@ Returns the reference address of a reference $obj.  If $obj is
 not a reference, returns $obj.
 
 This function is a stand-in replacement for
-L<Scalar::Util::refaddr|Scalar::Util/refaddr EXPR>, that is, it returns
+L<Scalar::Util::refaddr|Scalar::Util/refaddr>,
+that is, it returns
 the reference address of its argument as a numeric value.  The only
 difference is that C<refaddr()> returns C<undef> when given a
 non-reference while C<id()> returns its argument unchanged.
@@ -323,7 +323,7 @@ make things work, but the functions or methods used by the hooks
 must be provided by each inside-out class.
 
 A general solution to the serialization problem would require another
-level of registry, one that that associates I<classes> and fields.
+level of registry, one that associates I<classes> and fields.
 So far, the functions of C<Hash::Util::FieldHash> are unaware of
 any classes, which I consider a feature.  Therefore C<Hash::Util::FieldHash>
 doesn't address the serialization problems.
@@ -522,8 +522,8 @@ to a file F<Example.pm>.
     use strict; use warnings;
 
     {
-        package Name_hash; # standard implementation: the object is a hash
-
+        package Name_hash;  # standard implementation: the
+                            # object is a hash
         sub init {
             my $obj = shift;
             my ($first, $last) = @_;
@@ -714,7 +714,7 @@ incompatibility of object bodies.
 
     {
         package Name;
-        use base 'Name_id';      # define here which implementation to run
+        use parent 'Name_id';  # define here which implementation to run
     }
 
 
@@ -737,8 +737,8 @@ incompatibility of object bodies.
 
     # Definition of NamedFile
     package NamedFile;
-    use base 'Name';
-    use base 'IO::File';
+    use parent 'Name';
+    use parent 'IO::File';
 
     sub init {
         my $obj = shift;

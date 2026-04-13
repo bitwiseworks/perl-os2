@@ -6,17 +6,21 @@
 # not-a-number ...), of the effects of locale, and of features
 # specific to multi-byte characters (under the utf8 pragma and such).
 
+# For tests that do not fit this format, use sprintf2.t.
+
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
+    require './test.pl';
+    set_up_inc(qw '../lib ../cpan/version/lib');
 }
 use warnings;
 use version;
 use Config;
 use strict;
 
+
 my @tests = ();
-my ($i, $template, $data, $result, $comment, $w, $x, $evalData, $n, $p);
+my ($template, $data, $result, $comment, $w, $x, $evalData, $n, $p);
 
 my $Is_VMS_VAX = 0;
 # We use HW_MODEL since ARCH_NAME was not in VMS V5.*
@@ -26,11 +30,21 @@ if ($^O eq 'VMS') {
     $Is_VMS_VAX = $hw_model < 1024 ? 1 : 0;
 }
 
-# No %Config.
-my $Is_Ultrix_VAX = $^O eq 'ultrix' && `uname -m` =~ /^VAX$/;
+# The most generic VAX catcher.
+my $Is_VAX_Float = (pack("d", 1) =~ /^[\x80\x10]\x40/);
+
+our $IS_EBCDIC = $::IS_EBCDIC;  # Solely to avoid the 'used once' warning
+our $IS_ASCII = $::IS_ASCII;   # Solely to avoid the 'used once' warning
 
 while (<DATA>) {
-    s/^\s*>//; s/<\s*$//;
+    s/<\s*$//;
+
+    # An initial 'a' or 'e' marks the test as being only for ASCII or EBCDIC
+    # platforms respectively.
+    s/^\s* ( [ae] )? >//x;
+    next if defined $1 && $1 eq 'a' && $::IS_EBCDIC;
+    next if defined $1 && $1 eq 'e' && $::IS_ASCII;
+
     ($template, $data, $result, $comment) = split(/<\s*>/, $_, 4);
     if ($^O eq 'os390' || $^O eq 's390') { # non-IEEE (s390 is UTS)
         $data   =~ s/([eE])96$/${1}63/;      # smaller exponents
@@ -38,10 +52,10 @@ while (<DATA>) {
         $data   =~ s/([eE])\-101$/${1}-56/;  # larger exponents
         $result =~ s/([eE])\-102$/${1}-57/;  #  "       "
     }
-    if ($Is_VMS_VAX || $Is_Ultrix_VAX) {
+    if ($Is_VMS_VAX || $Is_VAX_Float) {
 	# VAX DEC C 5.3 at least since there is no
 	# ccflags =~ /float=ieee/ on VAX.
-	# AXP is unaffected whether or not it's using ieee.
+	# AXP is unaffected whether or not it is using ieee.
         $data   =~ s/([eE])96$/${1}26/;      # smaller exponents
         $result =~ s/([eE]\+)102$/${1}32/;   #  "       "
         $data   =~ s/([eE])\-101$/${1}-24/;  # larger exponents
@@ -53,7 +67,7 @@ while (<DATA>) {
     push @tests, [$template, $evalData, $result, $comment, $data];
 }
 
-print '1..', scalar @tests, "\n";
+plan(scalar @tests);
 
 $SIG{__WARN__} = sub {
     if ($_[0] =~ /^Invalid conversion/) {
@@ -62,13 +76,17 @@ $SIG{__WARN__} = sub {
 	$w .= ' UNINIT';
     } elsif ($_[0] =~ /^Missing argument/) {
 	$w .= ' MISSING';
+    } elsif ($_[0] =~ /^Redundant argument/) {
+	$w .= ' REDUNDANT';
+    } elsif ($_[0]=~/^vector argument not supported with alpha versions/) {
+	$w .= ' ALPHA';
     } else {
 	warn @_;
     }
 };
 
-for ($i = 1; @tests; $i++) {
-    ($template, $evalData, $result, $comment, $data) = @{shift @tests};
+for (@tests) {
+    ($template, $evalData, $result, $comment, $data) = @$_;
     $w = undef;
     $x = sprintf($template, @$evalData);
     $x = ">$x<" if defined $x;
@@ -94,43 +112,58 @@ for ($i = 1; @tests; $i++) {
     if ($comment =~ s/\s+skip:\s*(.*)//) {
 	my $os  = $1;
 	my $osv = exists $Config{osvers} ? $Config{osvers} : "0";
+	my $archname = $Config{archname};
 	# >comment skip: all<
-	if ($os =~ /\ball\b/i) {
-	    $skip = 1;
-	# >comment skip: VMS hpux:10.20<
-	} elsif ($os =~ /\b$^O(?::(\S+))?\b/i) {
-	    my $vsn = defined $1 ? $1 : "0";
-	    # Only compare on the the first pair of digits, as numeric
-	    # compares don't like 2.6.10-3mdksmp or 2.6.8-24.10-default
-	    s/^(\d+(\.\d+)?).*/$1/ for $osv, $vsn;
-	    $skip = $vsn ? ($osv <= $vsn ? 1 : 0) : 1;
+	# >comment skip: solaris<
+        # >comment skip: x86_64-linux-ld<
+	if ($os =~ /\b(?:all|\Q$^O\E|\Q$archname\E)\b/i) {
+            $skip = 1;
+	} elsif ($os =~ /\b\Q$^O\E(?::(\S+))\b/i) {
+            # We can have the $^O followed by an optional condition.
+            # The condition, if present, can be one of:
+            # (1) starts with a digit...
+            #     the first pair of dot-separated digits is
+            #     tested numerically against $Config{osvers}
+            # (2) otherwise...
+            #     tested as a \b/i regex against $Config{archname}
+            my $cond = $1;
+            if ($cond =~ /^\d/) {
+                # >comment skip: hpux:10.20<
+                my $vsn = $cond;
+                # Only compare on the first pair of digits, as numeric
+                # compares do not like 2.6.10-3mdksmp or 2.6.8-24.10-default
+                s/^(\d+(\.\d+)?).*/$1/ for $osv, $vsn;
+                $skip = $vsn ? ($osv <= $vsn ? 1 : 0) : 1;
+            } else {
+                # >comment skip: netbsd:vax-netbsd<
+                $skip = $archname =~ /\b\Q$cond\E\b/i;
+            }
 	}
-	$skip and $comment =~ s/$/, failure expected on $^O $osv/;
+	$skip and $comment =~ s/$/, failure expected on $^O $osv $archname/;
     }
 
     if ($x eq ">$result<") {
-        print "ok $i\n";
+        ok(1, join ' ', grep length, ">$result<", $comment);
     }
     elsif ($skip) {
-	print "ok $i # skip $comment\n";
+      SKIP: { skip($comment, 1) }
     }
     elsif ($y eq ">$result<")	# Some C libraries always give
     {				# three-digit exponent
-		print("ok $i # >$result< $x three-digit exponent accepted\n");
+		ok(1, ">$result< $x three-digit exponent accepted");
     }
 	elsif ($result =~ /[-+]\d{3}$/ &&
 		   # Suppress tests with modulo of exponent >= 100 on platforms
-		   # which can't handle such magnitudes (or where we can't tell).
+		   # which cannot handle such magnitudes (or where we cannot tell).
 		   ((!eval {require POSIX}) || # Costly: only do this if we must!
 			(length(&POSIX::DBL_MAX) - rindex(&POSIX::DBL_MAX, '+')) == 3))
 	{
-		print("ok $i # >$template< >$data< >$result<",
-			  " Suppressed: exponent out of range?\n");
+        ok(1,
+         ">$template< >$data< >$result< Suppressed: exponent out of range?\n");
 	}
     else {
-	$y = ($x eq $y ? "" : " => $y");
-	print("not ok $i >$template< >$data< >$result< $x$y",
-	    $comment ? " # $comment\n" : "\n");
+        $y = ($x eq $y ? "" : " => $y");
+        ok(0, ">$template< >$data< >$result< $x$y $comment");
     }
 }
 
@@ -147,9 +180,11 @@ for ($i = 1; @tests; $i++) {
 #
 # Tests that are expected to fail on a certain OS can be marked as such
 # by trailing the comment with a skip: section. Skips are tags separated
-# bu space consisting of a $^O optionally trailed with :osvers. In the
-# latter case, all os-levels below that are expected to fail. A special
-# tag 'all' is allowed for todo tests that should fail on any system
+# by space consisting of a $^O optionally trailed with :osvers or :archname.
+# In the osvers case, all os-levels below that are expected to fail.
+# In the archname case, an exact match is expected, unless the archname
+# begins (and ends) with a "/", in which case a regexp is expected.
+# A special tag 'all' is allowed for todo tests that should fail on any system
 #
 # >%G<   >1234567e96<  >1.23457E+102<   >exponent too big skip: os390<
 # >%.0g< >-0.0<        >-0<             >No minus skip: MSWin32 VMS hpux:10.20<
@@ -173,7 +208,7 @@ __END__
 >%6. 6s<    >''<          >%6. 6s INVALID< >(See use of $w in code above)<
 >%6 .6s<    >''<          >%6 .6s INVALID<
 >%6.6 s<    >''<          >%6.6 s INVALID<
->%A<        >''<          >%A INVALID<
+>%A<        >0<           ><	 >%A tested in sprintf2.t skip: all<
 >%B<        >2**32-1<     >11111111111111111111111111111111<
 >%+B<       >2**32-1<     >11111111111111111111111111111111<
 >%#B<       >2**32-1<     >0B11111111111111111111111111111111<
@@ -207,7 +242,7 @@ __END__
 >%#X<       >2**32-1<     >0XFFFFFFFF<
 >%Y<        >''<          >%Y INVALID<
 >%Z<        >''<          >%Z INVALID<
->%a<        >''<          >%a INVALID<
+>%a<        >0<           ><	 >%a tested in sprintf2.t skip: all<
 >%b<        >2**32-1<     >11111111111111111111111111111111<
 >%+b<       >2**32-1<     >11111111111111111111111111111111<
 >%#b<       >2**32-1<     >0b11111111111111111111111111111111<
@@ -292,6 +327,11 @@ __END__
 >%+.*d<     >[-2,0]<      >+0<
 >% .*d<     >[-2,0]<      > 0<
 >%0.*d<     >[-2,0]<      >0<
+>%.*2$d<    >[5,3]<       >005<           >reordered precision arg<
+>%4.*2$d<   >[5,3]<       > 005<          >width with reordered precision<
+>%*3$.*2$d< >[5,3,4]<     > 005<          >reordered width with reordered precision<
+>%3$*2$.*1$d< >[3,4,5]<   > 005<          >reordered param, width, precision<
+>%*1$.*f<   >[4, 5, 10]<  >5.0000<        >perl #125956: reordered param, width, precision, floating point<
 >%d<        >-1<          >-1<
 >%-d<       >-1<          >-1<
 >%+d<       >-1<          >-1<
@@ -384,8 +424,8 @@ __END__
 >%.0f<      >0<           >0<
 >%.0f<      >2**38<       >274877906944<   >Should have exact int'l rep'n<
 >%.0f<      >0.1<         >0<
->%.0f<      >0.6<         >1<              >Known to fail with sfio, (irix|nonstop-ux|powerux); -DHAS_LDBL_SPRINTF_BUG may fix<
->%.0f<      >-0.6<        >-1<             >Known to fail with sfio, (irix|nonstop-ux|powerux); -DHAS_LDBL_SPRINTF_BUG may fix<
+>%.0f<      >0.6<         >1<              >Known to fail with (irix|nonstop-ux); -DHAS_LDBL_SPRINTF_BUG may fix<
+>%.0f<      >-0.6<        >-1<             >Known to fail with (irix|nonstop-ux); -DHAS_LDBL_SPRINTF_BUG may fix<
 >%.0f<      >1.6<         >2<
 >%.0f<      >-1.6<        >-2<
 >%.0f<      >1<           >1<
@@ -399,7 +439,7 @@ __END__
 > %.0g<     >[]<          > 0 MISSING<
 >%.2g<      >[]<          >0 MISSING<
 >%.2gC<      >[]<          >0C MISSING<
->%.0g<      >-0.0<        >-0<		   >C99 standard mandates minus sign but C89 does not skip: MSWin32 VMS hpux:10.20 openbsd netbsd:1.5 irix darwin<
+>%.0g<      >-0.0<        >-0<		   >C99 standard mandates minus sign but C89 does not skip: MSWin32 VMS netbsd:vax-netbsd hpux:10.20 openbsd netbsd:1.5 irix darwin freebsd:4.9 android<
 >%.0g<      >12345.6789<  >1e+04<
 >%#.0g<     >12345.6789<  >1.e+04<
 >%.2g<      >12345.6789<  >1.2e+04<
@@ -505,7 +545,7 @@ __END__
 >%#06.4o<   >18<          >  0022<        >0 flag with precision: no effect<
 >%d< >$p=sprintf('%p',$p);$p=~/^[0-9a-f]+$/< >1< >Coarse hack: hex from %p?<
 >%d< >$p=sprintf('%-8p',$p);$p=~/^[0-9a-f]+\s*$/< >1< >Coarse hack: hex from %p?<
->%#p<       >''<          >%#p INVALID<
+>%d< >$p=sprintf('%#p',$p);$p=~/^0x[0-9a-f]+\s*$/< >1< >Coarse hack: hex from %#p<
 >%q<        >''<          >%q INVALID<
 >%r<        >''<          >%r INVALID<
 >%s<        >[]<          > MISSING<
@@ -630,7 +670,8 @@ __END__
 >%y<        >''<          >%y INVALID<
 >%z<        >''<          >%z INVALID<
 >%2$d %1$d<	>[12, 34]<	>34 12<
->%*2$d<		>[12, 3]<	> 12<
+>%*2$d<		>[12, 3]<	> 12<             >RT#125469<
+>%*3$d<		>[12, 9, 3]<	> 12<             >related to RT#125469<
 >%2$d %d<	>[12, 34]<	>34 12<
 >%2$d %d %d<	>[12, 34]<	>34 12 34<
 >%3$d %d %d<	>[12, 34, 56]<	>56 12 34<
@@ -645,8 +686,8 @@ __END__
 >%*2$1d<	>[12, 3]<	>%*2$1d INVALID<
 >%0v2.2d<	>''<	><
 >%vc,%d<	>[63, 64, 65]<	>%vc,63 INVALID<
->%v%,%d<	>[63, 64, 65]<	>%v%,63 INVALID<
->%vd,%d<	>["\x1", 2, 3]<	>1,2<
+>%v%,%d<	>[63, 64, 65]<	>%v%,63 INVALID INVALID<
+>%vd,%d<	>["\x1", 2, 3]<	>1,2 REDUNDANT<
 >%vf,%d<	>[1, 2, 3]<	>%vf,1 INVALID<
 >%vF,%d<	>[1, 2, 3]<	>%vF,1 INVALID<
 >%ve,%d<	>[1, 2, 3]<	>%ve,1 INVALID<
@@ -696,20 +737,37 @@ __END__
 >%V-%s<		>["Hello"]<	>%V-Hello INVALID<
 >%K %d %d<	>[13, 29]<	>%K 13 29 INVALID<
 >%*.*K %d<	>[13, 29, 76]<	>%*.*K 13 INVALID<
->%4$K %d<	>[45, 67]<	>%4$K 45 MISSING INVALID<
+>%4$K %d<	>[45, 67]<	>%4$K 45 INVALID<
 >%d %K %d<	>[23, 45]<	>23 %K 45 INVALID<
 >%*v*999\$d %d %d<	>[11, 22, 33]<	>%*v*999\$d 11 22 INVALID<
 >%#b<		>0<	>0<
 >%#o<		>0<	>0<
 >%#x<		>0<	>0<
->%2147483647$v2d<	>''<	><
->%*2147483647$v2d<	>''<	> MISSING<
+>%1073741819$v2d<	>''<	> MISSING<
+>%*1073741819$v2d<	>''<	> MISSING<
 >%.3X<		>[11]<			>00B<		>perl #83194: hex, zero-padded to 3 places<
 >%.*X<		>[3, 11]<		>00B<		>perl #83194: dynamic precision<
->%vX<		>['012']<		>30.31.32<	>perl #83194: vector flag<
->%*vX<		>[':', '012']<		>30:31:32<	>perl #83194: vector flag + custom separator<
->%v.3X<		>['012']<		>030.031.032<	>perl #83194: vector flag + static precision<
->%v.*X<		>[3, '012']<		>030.031.032<	>perl #83194: vector flag + dynamic precision<
->%*v.3X<	>[':', '012']<		>030:031:032<	>perl #83194: vector flag + custom separator + static precision<
->%*v.*X<	>[':', 3, '012']<	>030:031:032<	>perl #83194: vector flag + custom separator + dynamic precision<
->%vd<	>"version"<	>118.101.114.115.105.111.110<	>perl #102586: vector flag + "version"<
+a>%vX<		>['012']<		>30.31.32<	>perl #83194: vector flag<
+e>%vX<		>['012']<		>F0.F1.F2<	>perl #83194: vector flag<
+a>%*vX<		>[':', '012']<		>30:31:32<	>perl #83194: vector flag + custom separator<
+e>%*vX<		>[':', '012']<		>F0:F1:F2<	>perl #83194: vector flag + custom separator<
+a>%v.3X<		>['012']<		>030.031.032<	>perl #83194: vector flag + static precision<
+e>%v.3X<		>['012']<		>0F0.0F1.0F2<	>perl #83194: vector flag + static precision<
+a>%v.*X<		>[3, '012']<		>030.031.032<	>perl #83194: vector flag + dynamic precision<
+e>%v.*X<		>[3, '012']<		>0F0.0F1.0F2<	>perl #83194: vector flag + dynamic precision<
+a>%*v.3X<	>[':', '012']<		>030:031:032<	>perl #83194: vector flag + custom separator + static precision<
+e>%*v.3X<	>[':', '012']<		>0F0:0F1:0F2<	>perl #83194: vector flag + custom separator + static precision<
+a>%*v.*X<	>[':', 3, '012']<	>030:031:032<	>perl #83194: vector flag + custom separator + dynamic precision<
+e>%*v.*X<	>[':', 3, '012']<	>0F0:0F1:0F2<	>perl #83194: vector flag + custom separator + dynamic precision<
+a>%vd<	>"version"<	>118.101.114.115.105.111.110<	>perl #102586: vector flag + "version"<
+e>%vd<   >"version"<    >165.133.153.162.137.150.149<   >perl #102586: vector flag + "version"<
+>%3$*4$v*2$.*1$x<  >[3, 4, "\x11\x22\x33", "/"]< > 011/ 022/ 033< >four reordered args<
+>%*%<	>[]<	>% MISSING<
+>%*1$%<	>[]<	>% MISSING<
+>%*2$d<	>123<	>123 MISSING<
+>%2$vd<>123<	> MISSING<
+>%.f<   >123.432<   >123<   >by tradition, empty precision == 0 <
+>%.001f<   >123.432<   >123.4<   >by tradition, leading zeroes ignored in precison<
+>%.0f<   >[1.2, 3.4]<   >1 REDUNDANT<   >special-cased "%.0f" should check count<
+>%.0f<   >[]<   >0 MISSING<   >special-cased "%.0f" should check count<
+>%53.0f<   >69.0<   >                                                   69<   >#131659<

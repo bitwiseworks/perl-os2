@@ -1,5 +1,5 @@
 BEGIN {
-    require Config; import Config;
+    require Config; Config->import();
     if ($Config{'extensions'} !~ /\bEncode\b/) {
       print "1..0 # Skip: Encode was not built\n";
       exit 0;
@@ -46,7 +46,7 @@ for my $charset (sort keys %Charset){
     my $src_enc = File::Spec->catfile($dir,"$charset.enc");
     my $src_utf = File::Spec->catfile($dir,"$charset.utf");
     my $dst_enc = File::Spec->catfile($dir,"$$.enc");
-    my $dst_utf = File::Spec->catfile($dir,"$$.utf");
+    my $dst_utf = File::Spec->catfile($dir,"$$.utf8");
 
     open $src, "<$src_enc" or die "$src_enc : $!";
     
@@ -57,8 +57,7 @@ for my $charset (sort keys %Charset){
     $txt = join('',<$src>);
     close($src);
     
-    eval{ $uni = $transcoder->decode($txt, 1) }; 
-    $@ and print $@;
+    eval { $uni = $transcoder->decode($txt, 1) } or print $@;
     ok(defined($uni),  "decode $charset"); $seq++;
     is(length($txt),0, "decode $charset completely"); $seq++;
     
@@ -89,8 +88,7 @@ for my $charset (sort keys %Charset){
     close $src;
 
     my $unisave = $uni;
-    eval{ $txt = $transcoder->encode($uni,1) };    
-    $@ and print $@;
+    eval { $txt = $transcoder->encode($uni,1) } or print $@;
     ok(defined($txt),   "encode $charset"); $seq++;
     is(length($uni), 0, "encode $charset completely");  $seq++;
     $uni = $unisave;

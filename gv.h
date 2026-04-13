@@ -12,48 +12,66 @@ struct gp {
     SV *	gp_sv;		/* scalar value */
     struct io *	gp_io;		/* filehandle value */
     CV *	gp_cv;		/* subroutine value */
-    U32		gp_cvgen;	/* generational validity of cached gv_cv */
+    U32		gp_cvgen;	/* generational validity of cached gp_cv */
     U32		gp_refcnt;	/* how many globs point to this? */
     HV *	gp_hv;		/* hash value */
     AV *	gp_av;		/* array value */
     CV *	gp_form;	/* format value */
     GV *	gp_egv;		/* effective gv, if *glob */
-    line_t	gp_line;	/* line first declared at (for -w) */
+    PERL_BITFIELD32 gp_line:31;	/* line first declared at (for -w) */
+    PERL_BITFIELD32 gp_flags:1;
     HEK *	gp_file_hek;	/* file first declared in (for -w) */
 };
+
+/*
+=for apidoc_section $GV
+
+=for apidoc      Am|GV *|GvREFCNT_inc|GV *gv
+=for apidoc_item   |GV *|GvREFCNT_inc_simple|GV *gv
+=for apidoc_item   |GV *|GvREFCNT_inc_simple_NN|GV *gv
+
+These all increment the reference count of the given SV, which must be a GV.
+They are useful when assigning the result into a typed pointer as they avoid
+the need to cast the result to the appropriate type.
+
+=cut
+*/
+
+#define GvREFCNT_inc(gv)            ((GV *)SvREFCNT_inc((SV *)gv))
+#define GvREFCNT_inc_simple(gv)     ((GV *)SvREFCNT_inc_simple((SV *)gv))
+#define GvREFCNT_inc_simple_NN(gv)  ((GV *)SvREFCNT_inc_simple_NN((SV *)gv))
 
 #define GvXPVGV(gv)	((XPVGV*)SvANY(gv))
 
 
-#if defined (DEBUGGING) && defined(__GNUC__) && !defined(PERL_GCC_BRACE_GROUPS_FORBIDDEN) && !defined(__INTEL_COMPILER)
+#if defined (DEBUGGING) && defined(PERL_USE_GCC_BRACE_GROUPS) && !defined(__INTEL_COMPILER)
 #  define GvGP(gv)							\
-	(0+(*({GV *const _gvgp = (GV *) (gv);				\
-	    assert(SvTYPE(_gvgp) == SVt_PVGV || SvTYPE(_gvgp) == SVt_PVLV); \
-	    assert(isGV_with_GP(_gvgp));				\
-	    &((_gvgp)->sv_u.svu_gp);})))
+        ((GP *)(*({GV *const _gvgp = (GV *) (gv);				\
+            assert(SvTYPE(_gvgp) == SVt_PVGV || SvTYPE(_gvgp) == SVt_PVLV); \
+            assert(isGV_with_GP(_gvgp));				\
+            &((_gvgp)->sv_u.svu_gp);})))
 #  define GvGP_set(gv,gp)						\
-	{GV *const _gvgp = (GV *) (gv);				\
-	    assert(SvTYPE(_gvgp) == SVt_PVGV || SvTYPE(_gvgp) == SVt_PVLV); \
-	    assert(isGV_with_GP(_gvgp));				\
-	    (_gvgp)->sv_u.svu_gp = (gp); }
+        {GV *const _gvgp = (GV *) (gv);				\
+            assert(SvTYPE(_gvgp) == SVt_PVGV || SvTYPE(_gvgp) == SVt_PVLV); \
+            assert(isGV_with_GP(_gvgp));				\
+            (_gvgp)->sv_u.svu_gp = (gp); }
 #  define GvFLAGS(gv)							\
-	(*({GV *const _gvflags = (GV *) (gv);				\
-	    assert(SvTYPE(_gvflags) == SVt_PVGV || SvTYPE(_gvflags) == SVt_PVLV); \
-	    assert(isGV_with_GP(_gvflags));				\
-	    &(GvXPVGV(_gvflags)->xpv_cur);}))
+        (*({GV *const _gvflags = (GV *) (gv);				\
+            assert(SvTYPE(_gvflags) == SVt_PVGV || SvTYPE(_gvflags) == SVt_PVLV); \
+            assert(isGV_with_GP(_gvflags));				\
+            &(GvXPVGV(_gvflags)->xpv_cur);}))
 #  define GvSTASH(gv)							\
-	(*({ GV * const _gvstash = (GV *) (gv);				\
-	    assert(isGV_with_GP(_gvstash));				\
-	    assert(SvTYPE(_gvstash) == SVt_PVGV || SvTYPE(_gvstash) >= SVt_PVLV); \
-	    &(GvXPVGV(_gvstash)->xnv_u.xgv_stash);			\
-	 }))
+        (*({ GV * const _gvstash = (GV *) (gv);				\
+            assert(isGV_with_GP(_gvstash));				\
+            assert(SvTYPE(_gvstash) == SVt_PVGV || SvTYPE(_gvstash) >= SVt_PVLV); \
+            &(GvXPVGV(_gvstash)->xnv_u.xgv_stash);			\
+         }))
 #  define GvNAME_HEK(gv)						\
     (*({ GV * const _gvname_hek = (GV *) (gv);				\
-	   assert(isGV_with_GP(_gvname_hek));				\
-	   assert(SvTYPE(_gvname_hek) == SVt_PVGV || SvTYPE(_gvname_hek) >= SVt_PVLV); \
-	   assert(!SvVALID(_gvname_hek));				\
-	   &(GvXPVGV(_gvname_hek)->xiv_u.xivu_namehek);			\
-	 }))
+           assert(isGV_with_GP(_gvname_hek));				\
+           assert(SvTYPE(_gvname_hek) == SVt_PVGV || SvTYPE(_gvname_hek) >= SVt_PVLV); \
+           &(GvXPVGV(_gvname_hek)->xiv_u.xivu_namehek);			\
+         }))
 #  define GvNAME_get(gv)	({ assert(GvNAME_HEK(gv)); (char *)HEK_KEY(GvNAME_HEK(gv)); })
 #  define GvNAMELEN_get(gv)	({ assert(GvNAME_HEK(gv)); HEK_LEN(GvNAME_HEK(gv)); })
 #  define GvNAMEUTF8(gv)	({ assert(GvNAME_HEK(gv)); HEK_UTF8(GvNAME_HEK(gv)); })
@@ -71,17 +89,29 @@ struct gp {
 #define GvNAME(gv)	GvNAME_get(gv)
 #define GvNAMELEN(gv)	GvNAMELEN_get(gv)
 
-#define	GvASSIGN_GENERATION(gv)		(0 + ((XPV*) SvANY(gv))->xpv_len)
-#define	GvASSIGN_GENERATION_set(gv,val)			\
-	STMT_START { assert(SvTYPE(gv) == SVt_PVGV);	\
-		(((XPV*) SvANY(gv))->xpv_len = (val)); } STMT_END
-
 /*
-=head1 GV Functions
-
 =for apidoc Am|SV*|GvSV|GV* gv
 
 Return the SV from the GV.
+
+Prior to Perl v5.9.3, this would add a scalar if none existed.  Nowadays, use
+C<L</GvSVn>> for that, or compile perl with S<C<-DPERL_CREATE_GVSV>>.  See
+L<perl5100delta>.
+
+=for apidoc Am|SV*|GvSVn|GV* gv
+Like C<L</GvSV>>, but creates an empty scalar if none already exists.
+
+=for apidoc Am|AV*|GvAV|GV* gv
+
+Return the AV from the GV.
+
+=for apidoc Am|HV*|GvHV|GV* gv
+
+Return the HV from the GV.
+
+=for apidoc Am|CV*|GvCV|GV* gv
+
+Return the CV from the GV.
 
 =cut
 */
@@ -89,8 +119,8 @@ Return the SV from the GV.
 #define GvSV(gv)	(GvGP(gv)->gp_sv)
 #ifdef PERL_DONT_CREATE_GVSV
 #define GvSVn(gv)	(*(GvGP(gv)->gp_sv ? \
-			 &(GvGP(gv)->gp_sv) : \
-			 &(GvGP(gv_SVadd(gv))->gp_sv)))
+                         &(GvGP(gv)->gp_sv) : \
+                         &(GvGP(gv_SVadd(gv))->gp_sv)))
 #else
 #define GvSVn(gv)	GvSV(gv)
 #endif
@@ -114,23 +144,26 @@ Return the SV from the GV.
 #define GvAV(gv)	(GvGP(gv)->gp_av)
 
 #define GvAVn(gv)	(GvGP(gv)->gp_av ? \
-			 GvGP(gv)->gp_av : \
-			 GvGP(gv_AVadd(gv))->gp_av)
+                         GvGP(gv)->gp_av : \
+                         GvGP(gv_AVadd(gv))->gp_av)
 #define GvHV(gv)	((GvGP(gv))->gp_hv)
 
 #define GvHVn(gv)	(GvGP(gv)->gp_hv ? \
-			 GvGP(gv)->gp_hv : \
-			 GvGP(gv_HVadd(gv))->gp_hv)
+                         GvGP(gv)->gp_hv : \
+                         GvGP(gv_HVadd(gv))->gp_hv)
 
-#define GvCV(gv)	(0+GvGP(gv)->gp_cv)
+#define GvCV(gv)	((CV*)GvGP(gv)->gp_cv)
 #define GvCV_set(gv,cv)	(GvGP(gv)->gp_cv = (cv))
 #define GvCVGEN(gv)	(GvGP(gv)->gp_cvgen)
 #define GvCVu(gv)	(GvGP(gv)->gp_cvgen ? NULL : GvGP(gv)->gp_cv)
 
+#define GvGPFLAGS(gv)	(GvGP(gv)->gp_flags)
+
 #define GvLINE(gv)	(GvGP(gv)->gp_line)
 #define GvFILE_HEK(gv)	(GvGP(gv)->gp_file_hek)
-#define GvFILE(gv)	(GvFILE_HEK(gv) ? HEK_KEY(GvFILE_HEK(gv)) : NULL)
-#define GvFILEGV(gv)	(gv_fetchfile(GvFILE(gv)))
+#define GvFILEx(gv)	HEK_KEY(GvFILE_HEK(gv))
+#define GvFILE(gv)	(GvFILE_HEK(gv) ? GvFILEx(gv) : NULL)
+#define GvFILEGV(gv)	(GvFILE_HEK(gv) ? gv_fetchfile(GvFILEx(gv)) : NULL)
 
 #define GvEGV(gv)	(GvGP(gv)->gp_egv)
 #define GvEGVx(gv)	(isGV_with_GP(gv) ? GvEGV(gv) : NULL)
@@ -140,15 +173,29 @@ Return the SV from the GV.
 #define GvENAME_HEK(gv) GvNAME_HEK(GvEGV(gv) ? GvEGV(gv) : gv)
 #define GvESTASH(gv)	GvSTASH(GvEGV(gv) ? GvEGV(gv) : gv)
 
+/* GVf_INTRO is one-shot flag which indicates that the next assignment
+   of a reference to the glob is to be localised; it distinguishes
+   'local *g = $ref' from '*g = $ref'.
+
+   GVf_MULTI is used to implement the "used only once" warning.  It is
+   always set on a glob when an existing name is referenced, and when
+   a name is created when the warning is disabled.  A post parse scan
+   in gv_check() then reports any names where this isn't set.
+
+   GVf_ONCE_FATAL is set on a glob when it is created and fatal "used
+   only once" warnings are enabled, since PL_curcop no longer has the
+   fatal flag set at the point where the warnings are reported.
+*/
 #define GVf_INTRO	0x01
 #define GVf_MULTI	0x02
 #define GVf_ASSUMECV	0x04
-#define GVf_IN_PAD	0x08
+#define GVf_RESERVED    0x08   /* unused */
 #define GVf_IMPORTED	0xF0
 #define GVf_IMPORTED_SV	  0x10
 #define GVf_IMPORTED_AV	  0x20
 #define GVf_IMPORTED_HV	  0x40
 #define GVf_IMPORTED_CV	  0x80
+#define GVf_ONCE_FATAL	0x100
 
 #define GvINTRO(gv)		(GvFLAGS(gv) & GVf_INTRO)
 #define GvINTRO_on(gv)		(GvFLAGS(gv) |= GVf_INTRO)
@@ -182,11 +229,14 @@ Return the SV from the GV.
 #define GvIMPORTED_CV_on(gv)	(GvFLAGS(gv) |= GVf_IMPORTED_CV)
 #define GvIMPORTED_CV_off(gv)	(GvFLAGS(gv) &= ~GVf_IMPORTED_CV)
 
-#define GvIN_PAD(gv)		(GvFLAGS(gv) & GVf_IN_PAD)
-#define GvIN_PAD_on(gv)		(GvFLAGS(gv) |= GVf_IN_PAD)
-#define GvIN_PAD_off(gv)	(GvFLAGS(gv) &= ~GVf_IN_PAD)
+#define GvONCE_FATAL(gv)	(GvFLAGS(gv) & GVf_ONCE_FATAL)
+#define GvONCE_FATAL_on(gv)	(GvFLAGS(gv) |= GVf_ONCE_FATAL)
+#define GvONCE_FATAL_off(gv)	(GvFLAGS(gv) &= ~GVf_ONCE_FATAL)
 
 #ifndef PERL_CORE
+#  define GvIN_PAD(gv)		0
+#  define GvIN_PAD_on(gv)	NOOP
+#  define GvIN_PAD_off(gv)	NOOP
 #  define Nullgv Null(GV*)
 #endif
 
@@ -203,32 +253,39 @@ Return the SV from the GV.
  * symbol creation flags, for use in gv_fetchpv() and get_*v()
  */
 #define GV_ADD		0x01	/* add, if symbol not already there
-				   For gv_name_set, adding a HEK for the first
-				   time, so don't try to free what's there.  */
+                                   For gv_name_set, adding a HEK for the first
+                                   time, so don't try to free what's there.  */
 #define GV_ADDMULTI	0x02	/* add, pretending it has been added
-				   already; used also by gv_init_* */
+                                   already; used also by gv_init_* */
 #define GV_ADDWARN	0x04	/* add, but warn if symbol wasn't already there */
-#define GV_ADDINEVAL	0x08	/* add, as though we're doing so within an eval */
+                /*	0x08	   UNUSED */
 #define GV_NOINIT	0x10	/* add, but don't init symbol, if type != PVGV */
 /* This is used by toke.c to avoid turing placeholder constants in the symbol
    table into full PVGVs with attached constant subroutines.  */
 #define GV_NOADD_NOINIT	0x20	/* Don't add the symbol if it's not there.
-				   Don't init it if it is there but ! PVGV */
+                                   Don't init it if it is there but ! PVGV */
 #define GV_NOEXPAND	0x40	/* Don't expand SvOK() entries to PVGV */
 #define GV_NOTQUAL	0x80	/* A plain symbol name, not qualified with a
-				   package (so skip checks for :: and ')  */
+                                   package (so skip checks for :: and ')  */
 #define GV_AUTOLOAD	0x100	/* gv_fetchmethod_flags() should AUTOLOAD  */
 #define GV_CROAK	0x200	/* gv_fetchmethod_flags() should croak  */
 #define GV_ADDMG	0x400	/* add if magical */
 #define GV_NO_SVGMAGIC	0x800	/* Skip get-magic on an SV argument;
-				   used only by gv_fetchsv(_nomg) */
+                                   used only by gv_fetchsv(_nomg) */
+#define GV_CACHE_ONLY	0x1000  /* return stash only if found in cache;
+                                   used only in flags parameter to gv_stash* family */
+
+/* Flags for gv_fetchmeth_pvn and gv_autoload_pvn*/
+#define GV_SUPER	0x1000	/* SUPER::method */
+#define GV_NOUNIVERSAL  0x2000  /* Skip UNIVERSAL lookup */
 
 /* Flags for gv_autoload_*/
-#define GV_AUTOLOAD_ISMETHOD 1	/* autoloading a method? */
+#define GV_AUTOLOAD_ISMETHOD 1	/* autoloading a method?  gv_autoload4 will
+                                   break if this is changed from being 1 */
 
 /*      SVf_UTF8 (more accurately the return value from SvUTF8) is also valid
-	as a flag to various gv_* functions, so ensure it lies
-	outside this range.
+        as a flag to various gv_* functions, so ensure it lies
+        outside this range.
 */
 
 #define GV_NOADD_MASK \
@@ -237,18 +294,54 @@ Return the SV from the GV.
    found (with the exception GV_ADDMG, which *might* cause the symbol
    to be added) */
 
+/* gv_fetchfile_flags() */
+#define GVF_NOADD       0x01    /* don't add the glob if it doesn't exist */
+
 #define gv_fullname3(sv,gv,prefix) gv_fullname4(sv,gv,prefix,TRUE)
 #define gv_efullname3(sv,gv,prefix) gv_efullname4(sv,gv,prefix,TRUE)
 #define gv_fetchmethod(stash, name) gv_fetchmethod_autoload(stash, name, TRUE)
+
+/*
+=for apidoc_defn Am|GV *|gv_fetchsv_nomg|SV *name|I32 flags|const svtype sv_type
+=cut
+*/
 #define gv_fetchsv_nomg(n,f,t) gv_fetchsv(n,(f)|GV_NO_SVGMAGIC,t)
+
 #define gv_init(gv,stash,name,len,multi) \
-	gv_init_pvn(gv,stash,name,len,GV_ADDMULTI*!!(multi))
+        gv_init_pvn(gv,stash,name,len,GV_ADDMULTI*cBOOL(multi))
 #define gv_fetchmeth(stash,name,len,level) gv_fetchmeth_pvn(stash, name, len, level, 0)
 #define gv_fetchmeth_autoload(stash,name,len,level) gv_fetchmeth_pvn_autoload(stash, name, len, level, 0)
 #define gv_fetchmethod_flags(stash,name,flags) gv_fetchmethod_pv_flags(stash, name, flags)
-#define gv_autoload4(stash, name, len, method) \
-	gv_autoload_pvn(stash, name, len, !!(method))
+
+/*
+=for apidoc_defn ARmd|GV *|gv_autoload4|NULLOK HV *stash                    \
+                                       |NN const char *name                 \
+                                       |STRLEN len                          \
+                                       |I32 method
+=cut
+
+*/
+#define gv_autoload4(stash, name, len, autoload) \
+        gv_autoload_pvn(stash, name, len, cBOOL(autoload))
 #define newGVgen(pack)  newGVgen_flags(pack, 0)
+#define gv_method_changed(gv)		    \
+    (					     \
+        assert_(isGV_with_GP(gv))	      \
+        GvREFCNT(gv) > 1		       \
+            ? (void)++PL_sub_generation		\
+            : mro_method_changed_in(GvSTASH(gv)) \
+    )
+
+/*
+=for apidoc      gv_AVadd
+=for apidoc_item gv_HVadd
+=for apidoc_item gv_IOadd
+=for apidoc_item gv_SVadd
+
+Make sure there is a slot of the given type (AV, HV, IO, SV) in the GV C<gv>.
+
+=cut
+*/
 
 #define gv_AVadd(gv) gv_add_by_type((gv), SVt_PVAV)
 #define gv_HVadd(gv) gv_add_by_type((gv), SVt_PVHV)
@@ -256,11 +349,5 @@ Return the SV from the GV.
 #define gv_SVadd(gv) gv_add_by_type((gv), SVt_NULL)
 
 /*
- * Local variables:
- * c-indentation-style: bsd
- * c-basic-offset: 4
- * indent-tabs-mode: t
- * End:
- *
- * ex: set ts=8 sts=4 sw=4 noet:
+ * ex: set ts=8 sts=4 sw=4 et:
  */

@@ -38,17 +38,18 @@ you can prevent high-bit characters from being encoded as HTML entities and
 declare the output character set as UTF-8 before parsing, like so:
 
   $psx->html_charset('UTF-8');
-  $psx->html_encode_chars('&<>">');
+use warnings;
+  $psx->html_encode_chars(q{&<>'"});
 
 =cut
 
 package Pod::Simple::XHTML;
 use strict;
-use vars qw( $VERSION @ISA $HAS_HTML_ENTITIES );
-$VERSION = '3.20';
+our $VERSION = '3.45';
 use Pod::Simple::Methody ();
-@ISA = ('Pod::Simple::Methody');
+our @ISA = ('Pod::Simple::Methody');
 
+our $HAS_HTML_ENTITIES;
 BEGIN {
   $HAS_HTML_ENTITIES = eval "require HTML::Entities; 1";
 }
@@ -76,6 +77,33 @@ sub encode_entities {
   return $str;
 }
 
+my %entity_to_char = reverse %entities;
+my ($entity_re) = map qr{$_}, join '|', map quotemeta, sort keys %entity_to_char;
+
+sub decode_entities {
+  my ($self, $string) = @_;
+  return HTML::Entities::decode_entities( $string ) if $HAS_HTML_ENTITIES;
+
+  $string =~ s{&(?:($entity_re)|#x([0123456789abcdefABCDEF]+)|#([0123456789]+));}{
+      defined $1 ? $entity_to_char{$1}
+    : defined $2 ? chr(hex($2))
+    : defined $3 ? chr($3)
+    : die;
+  }ge;
+
+  return $string;
+}
+
+sub encode_url {
+  my ($self, $string) = @_;
+
+  $string =~ s{([^-_.!~*()abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZZ0123456789])}{
+    sprintf('%%%02X', ord($1))
+  }eg;
+
+  return $string;
+}
+
 #~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 =head1 METHODS
@@ -92,7 +120,7 @@ the call to C<parse_file>:
 
 In turning L<Foo::Bar> into http://whatever/Foo%3a%3aBar, what
 to put before the "Foo%3a%3aBar". The default value is
-"http://search.cpan.org/perldoc?".
+"https://metacpan.org/pod/".
 
 =head2 perldoc_url_postfix
 
@@ -132,7 +160,7 @@ A document type tag for the file. This option is not set by default.
 
 =head2 html_charset
 
-The charater set to declare in the Content-Type meta tag created by default
+The character set to declare in the Content-Type meta tag created by default
 for C<html_header_tags>. Note that this option will be ignored if the value of
 C<html_header_tags> is changed. Defaults to "ISO-8859-1".
 
@@ -151,7 +179,7 @@ Add additional meta tags here, or blocks of inline CSS or JavaScript
 A string containing all characters that should be encoded as HTML entities,
 specified using the regular expression character class syntax (what you find
 within brackets in regular expressions). This value will be passed as the
-second argument to the C<encode_entities> fuction of L<HTML::Entities>. IF
+second argument to the C<encode_entities> function of L<HTML::Entities>. If
 L<HTML::Entities> is not installed, then any characters other than C<&<>"'>
 will be encoded numerically.
 
@@ -202,7 +230,7 @@ are output as C<< <dt> >> elements. Disabled by default.
 
 =head2 backlink
 
-Whether to turn every =head1 directive into a link pointing to the top 
+Whether to turn every =head1 directive into a link pointing to the top
 of the page (specifically, the opening body tag).
 
 =cut
@@ -247,11 +275,10 @@ sub new {
   my $self = shift;
   my $new = $self->SUPER::new(@_);
   $new->{'output_fh'} ||= *STDOUT{IO};
-  $new->perldoc_url_prefix('http://search.cpan.org/perldoc?');
+  $new->perldoc_url_prefix('https://metacpan.org/pod/');
   $new->man_url_prefix('http://man.he.net/man');
   $new->html_charset('ISO-8859-1');
   $new->nix_X_codes(1);
-  $new->codes_in_verbatim(1);
   $new->{'scratch'} = '';
   $new->{'to_index'} = [];
   $new->{'output'} = [];
@@ -301,10 +328,26 @@ something like:
       my ($self, $text) = @_;
       if ($self->{'in_foo'}) {
           $self->{'scratch'} .= build_foo_html($text);
-      } else {
-          $self->{'scratch'} .= $text;
+          return;
       }
+      $self->SUPER::handle_text($text);
   }
+
+=head2 handle_code
+
+This method handles the body of text that is marked up to be code.
+You might for instance override this to plug in a syntax highlighter.
+The base implementation just escapes the text.
+
+The callback methods C<start_code> and C<end_code> emits the C<code> tags
+before and after C<handle_code> is invoked, so you might want to override these
+together with C<handle_code> if this wrapping isn't suitable.
+
+Note that the code might be broken into multiple segments if there are
+nested formatting codes inside a C<< CE<lt>...> >> sequence.  In between the
+calls to C<handle_code> other markup tags might have been emitted in that
+case.  The same is true for verbatim sections if the C<codes_in_verbatim>
+option is turned on.
 
 =head2 accept_targets_as_html
 
@@ -328,18 +371,74 @@ sub accept_targets_as_html {
 
 sub handle_text {
     # escape special characters in HTML (<, >, &, etc)
-    $_[0]{'scratch'} .= $_[0]->__in_literal_xhtml_region
-                      ? $_[1]
-                      : $_[0]->encode_entities( $_[1] );
+    my $text = $_[1];
+    my $html;
+    if ($_[0]->__in_literal_xhtml_region) {
+        $html = $text;
+        $text =~ s{<[^>]+?>}{}g;
+        $text = $_[0]->decode_entities($text);
+    }
+    else {
+        $html = $_[0]->encode_entities($text);
+    }
+
+    if ($_[0]{'in_code'} && @{$_[0]{'in_code'}}) {
+        # Intentionally use the raw text in $_[1], even if we're not in a
+        # literal xhtml region, since handle_code calls encode_entities.
+        $_[0]->handle_code( $_[1], $_[0]{'in_code'}[-1] );
+    } else {
+        if ($_[0]->{in_for}) {
+            my $newlines = $_[0]->__in_literal_xhtml_region ? "\n\n" : '';
+            if ($_[0]->{started_for}) {
+                if ($html =~ /\S/) {
+                    delete $_[0]->{started_for};
+                    $_[0]{'scratch'} .= $html . $newlines;
+                }
+                # Otherwise, append nothing until we have something to append.
+            } else {
+                # The parser sometimes preserves newlines and sometimes doesn't!
+                $html =~ s/\n\z//;
+                $_[0]{'scratch'} .= $html . $newlines;
+            }
+        } else {
+            # Just plain text.
+            $_[0]{'scratch'} .= $html;
+        }
+    }
+
+    $_[0]{hhtml} .= $html if $_[0]{'in_head'};
+    $_[0]{htext} .= $text if $_[0]{'in_head'};
+    $_[0]{itext} .= $text if $_[0]{'in_item_text'};
 }
 
-sub start_Para     { $_[0]{'scratch'} = '<p>' }
-sub start_Verbatim { $_[0]{'scratch'} = '<pre><code>' }
+sub start_code {
+    $_[0]{'scratch'} .= '<code>';
+}
 
-sub start_head1 {  $_[0]{'in_head'} = 1 }
-sub start_head2 {  $_[0]{'in_head'} = 2 }
-sub start_head3 {  $_[0]{'in_head'} = 3 }
-sub start_head4 {  $_[0]{'in_head'} = 4 }
+sub end_code {
+    $_[0]{'scratch'} .= '</code>';
+}
+
+sub handle_code {
+    $_[0]{'scratch'} .= $_[0]->encode_entities( $_[1] );
+}
+
+sub start_Para {
+    $_[0]{'scratch'} .= '<p>';
+}
+
+sub start_Verbatim {
+    $_[0]{'scratch'} = '<pre>';
+    push(@{$_[0]{'in_code'}}, 'Verbatim');
+    $_[0]->start_code($_[0]{'in_code'}[-1]);
+}
+
+sub start_head1 {  $_[0]{'in_head'} = 1; $_[0]{htext} = $_[0]{hhtml} = ''; }
+sub start_head2 {  $_[0]{'in_head'} = 2; $_[0]{htext} = $_[0]{hhtml} = ''; }
+sub start_head3 {  $_[0]{'in_head'} = 3; $_[0]{htext} = $_[0]{hhtml} = ''; }
+sub start_head4 {  $_[0]{'in_head'} = 4; $_[0]{htext} = $_[0]{hhtml} = ''; }
+sub start_head5 {  $_[0]{'in_head'} = 5; $_[0]{htext} = $_[0]{hhtml} = ''; }
+sub start_head6 {  $_[0]{'in_head'} = 6; $_[0]{htext} = $_[0]{hhtml} = ''; }
 
 sub start_item_number {
     $_[0]{'scratch'} = "</li>\n" if ($_[0]{'in_li'}->[-1] && pop @{$_[0]{'in_li'}});
@@ -354,6 +453,7 @@ sub start_item_bullet {
 }
 
 sub start_item_text   {
+    $_[0]{'in_item_text'} = 1; $_[0]{itext} = '';
     # see end_item_text
 }
 
@@ -397,7 +497,8 @@ sub end_over_text   {
 
 sub end_Para     { $_[0]{'scratch'} .= '</p>'; $_[0]->emit }
 sub end_Verbatim {
-    $_[0]{'scratch'}     .= '</code></pre>';
+    $_[0]->end_code(pop(@{$_[0]->{'in_code'}}));
+    $_[0]{'scratch'} .= '</pre>';
     $_[0]->emit;
 }
 
@@ -408,28 +509,31 @@ sub _end_head {
     $add = 1 unless defined $add;
     $h += $add - 1;
 
-    my $id = $_[0]->idify($_[0]{scratch});
+    my $id = $_[0]->idify(delete $_[0]{htext});
     my $text = $_[0]{scratch};
-    $_[0]{'scratch'} = $_[0]->backlink && ($h - $add == 0) 
+    my $head = qq{<h$h id="} . $_[0]->encode_entities($id) . qq{">$text</h$h>};
+    $_[0]{'scratch'} = $_[0]->backlink && ($h - $add == 0)
                          # backlinks enabled && =head1
-                         ? qq{<a href="#_podtop_"><h$h id="$id">$text</h$h></a>}
-                         : qq{<h$h id="$id">$text</h$h>};
+                         ? qq{<a href="#_podtop_">$head</a>}
+                         : $head;
     $_[0]->emit;
-    push @{ $_[0]{'to_index'} }, [$h, $id, $text];
+    push @{ $_[0]{'to_index'} }, [$h, $id, delete $_[0]{'hhtml'}];
 }
 
 sub end_head1       { shift->_end_head(@_); }
 sub end_head2       { shift->_end_head(@_); }
 sub end_head3       { shift->_end_head(@_); }
 sub end_head4       { shift->_end_head(@_); }
+sub end_head5       { shift->_end_head(@_); }
+sub end_head6       { shift->_end_head(@_); }
 
 sub end_item_bullet { $_[0]{'scratch'} .= '</p>'; $_[0]->emit }
 sub end_item_number { $_[0]{'scratch'} .= '</p>'; $_[0]->emit }
 
 sub end_item_text   {
     # idify and anchor =item content if wanted
-    my $dt_id = $_[0]{'anchor_items'} 
-                 ? ' id="'. $_[0]->idify($_[0]{'scratch'}) .'"'
+    my $dt_id = $_[0]{'anchor_items'}
+                 ? ' id="'. $_[0]->encode_entities($_[0]->idify($_[0]{'itext'})) .'"'
                  : '';
 
     # reset scratch
@@ -451,20 +555,27 @@ sub start_for {
   my ($self, $flags) = @_;
 
   push @{ $self->{__region_targets} }, $flags->{target_matching};
+  $self->{started_for} = 1;
+  $self->{in_for} = 1;
 
   unless ($self->__in_literal_xhtml_region) {
     $self->{scratch} .= '<div';
     $self->{scratch} .= qq( class="$flags->{target}") if $flags->{target};
-    $self->{scratch} .= '>';
+    $self->{scratch} .= ">\n\n";
   }
-
-  $self->emit;
-
 }
+
 sub end_for {
   my ($self) = @_;
+  delete $self->{started_for};
+  delete $self->{in_for};
 
-  $self->{'scratch'} .= '</div>' unless $self->__in_literal_xhtml_region;
+  if ($self->__in_literal_xhtml_region) {
+    # Remove trailine newlines.
+    $self->{'scratch'} =~ s/\s+\z//s;
+  } else {
+    $self->{'scratch'} .= '</div>';
+  }
 
   pop @{ $self->{__region_targets} };
   $self->emit;
@@ -481,16 +592,17 @@ sub start_Document {
     $title = $self->force_title || $self->title || $self->default_title || '';
     $metatags = $self->html_header_tags || '';
     if (my $css = $self->html_css) {
-        $metatags .= $css;
         if ($css !~ /<link/) {
             # this is required to be compatible with Pod::Simple::BatchHTML
             $metatags .= '<link rel="stylesheet" href="'
                 . $self->encode_entities($css) . '" type="text/css" />';
+        } else {
+            $metatags .= $css;
         }
     }
     if ($self->html_javascript) {
       $metatags .= qq{\n<script type="text/javascript" src="} .
-                    $self->html_javascript . "'></script>";
+                    $self->html_javascript . '"></script>';
     }
     $bodyid = $self->backlink ? ' id="_podtop_"' : '';
     $self->{'scratch'} .= <<"HTML";
@@ -506,47 +618,57 @@ HTML
   }
 }
 
+sub build_index {
+    my ($self, $to_index) = @_;
+
+    my @out;
+    my $level  = 0;
+    my $indent = -1;
+    my $space  = '';
+    my $id     = ' id="index"';
+
+    for my $h (@{ $to_index }, [0]) {
+        my $target_level = $h->[0];
+        # Get to target_level by opening or closing ULs
+        if ($level == $target_level) {
+            $out[-1] .= '</li>';
+        } elsif ($level > $target_level) {
+            $out[-1] .= '</li>' if $out[-1] =~ /^\s+<li>/;
+            while ($level > $target_level) {
+                --$level;
+                push @out, ('  ' x --$indent) . '</li>' if @out && $out[-1] =~ m{^\s+<\/ul};
+                push @out, ('  ' x --$indent) . '</ul>';
+            }
+            push @out, ('  ' x --$indent) . '</li>' if $level;
+        } else {
+            while ($level < $target_level) {
+                ++$level;
+                push @out, ('  ' x ++$indent) . '<li>' if @out && $out[-1]=~ /^\s*<ul/;
+                push @out, ('  ' x ++$indent) . "<ul$id>";
+                $id = '';
+            }
+            ++$indent;
+        }
+
+        next unless $level;
+        $space = '  '  x $indent;
+        my $fragment = $self->encode_entities($self->encode_url($h->[1]));
+        push @out, sprintf '%s<li><a href="#%s">%s</a>',
+            $space, $fragment, $h->[2];
+    }
+
+    return join "\n", @out;
+}
+
 sub end_Document   {
   my ($self) = @_;
   my $to_index = $self->{'to_index'};
   if ($self->index && @{ $to_index } ) {
-      my @out;
-      my $level  = 0;
-      my $indent = -1;
-      my $space  = '';
-      my $id     = ' id="index"';
+      my $index = $self->build_index($to_index);
 
-      for my $h (@{ $to_index }, [0]) {
-          my $target_level = $h->[0];
-          # Get to target_level by opening or closing ULs
-          if ($level == $target_level) {
-              $out[-1] .= '</li>';
-          } elsif ($level > $target_level) {
-              $out[-1] .= '</li>' if $out[-1] =~ /^\s+<li>/;
-              while ($level > $target_level) {
-                  --$level;
-                  push @out, ('  ' x --$indent) . '</li>' if @out && $out[-1] =~ m{^\s+<\/ul};
-                  push @out, ('  ' x --$indent) . '</ul>';
-              }
-              push @out, ('  ' x --$indent) . '</li>' if $level;
-          } else {
-              while ($level < $target_level) {
-                  ++$level;
-                  push @out, ('  ' x ++$indent) . '<li>' if @out && $out[-1]=~ /^\s*<ul/;
-                  push @out, ('  ' x ++$indent) . "<ul$id>";
-                  $id = '';
-              }
-              ++$indent;
-          }
-
-          next unless $level;
-          $space = '  '  x $indent;
-          push @out, sprintf '%s<li><a href="#%s">%s</a>',
-              $space, $h->[1], $h->[2];
-      }
       # Splice the index in between the HTML headers and the first element.
       my $offset = defined $self->html_header ? $self->html_header eq '' ? 0 : 1 : 1;
-      splice @{ $self->{'output'} }, $offset, 0, join "\n", @out;
+      splice @{ $self->{'output'} }, $offset, 0, $index;
   }
 
   if (defined $self->html_footer) {
@@ -568,8 +690,8 @@ sub end_Document   {
 sub start_B { $_[0]{'scratch'} .= '<b>' }
 sub end_B   { $_[0]{'scratch'} .= '</b>' }
 
-sub start_C { $_[0]{'scratch'} .= '<code>' }
-sub end_C   { $_[0]{'scratch'} .= '</code>' }
+sub start_C { push(@{$_[0]{'in_code'}}, 'C'); $_[0]->start_code($_[0]{'in_code'}[-1]); }
+sub end_C   { $_[0]->end_code(pop(@{$_[0]{'in_code'}})); }
 
 sub start_F { $_[0]{'scratch'} .= '<i>' }
 sub end_F   { $_[0]{'scratch'} .= '</i>' }
@@ -616,8 +738,8 @@ sub emit {
 Resolves a POD link target (typically a module or POD file name) and section
 name to a URL. The resulting link will be returned for the above examples as:
 
-  http://search.cpan.org/perldoc?Net::Ping#INSTALL
-  http://search.cpan.org/perldoc?perlpodspec
+  https://metacpan.org/pod/Net::Ping#INSTALL
+  https://metacpan.org/pod/perlpodspec
   #SYNOPSIS
 
 Note that when there is only a section argument the URL will simply be a link
@@ -629,14 +751,15 @@ sub resolve_pod_page_link {
     my ($self, $to, $section) = @_;
     return undef unless defined $to || defined $section;
     if (defined $section) {
-        $section = '#' . $self->idify($self->encode_entities($section), 1);
+        my $id = $self->idify($section, 1);
+        $section = '#' . $self->encode_url($id);
         return $section unless defined $to;
     } else {
         $section = ''
     }
 
     return ($self->perldoc_url_prefix || '')
-        . $self->encode_entities($to) . $section
+        . $to . $section
         . ($self->perldoc_url_postfix || '');
 }
 
@@ -692,6 +815,11 @@ underscores (_), colons (:), and periods (.).
 
 =item *
 
+The final character can't be a hyphen, colon, or period. URLs ending with these
+characters, while allowed by XHTML, can be awkward to extract from plain text.
+
+=item *
+
 Each id must be unique within the document.
 
 =back
@@ -707,12 +835,12 @@ an ID (i.e., if you need to put the "#foo" in C<< <a href="#foo">foo</a> >>.
 sub idify {
     my ($self, $t, $not_unique) = @_;
     for ($t) {
-        s/<[^>]+>//g;            # Strip HTML.
-        s/&[^;]+;//g;            # Strip entities.
+        s/[<>&'"]//g;            # Strip HTML special characters
         s/^\s+//; s/\s+$//;      # Strip white space.
         s/^([^a-zA-Z]+)$/pod$1/; # Prepend "pod" if no valid chars.
         s/^[^a-zA-Z]+//;         # First char must be a letter.
         s/[^-a-zA-Z0-9_:.]+/-/g; # All other chars must be valid.
+        s/[-:.]+$//;             # Strip trailing punctuation.
     }
     return $t if $not_unique;
     my $i = '';
@@ -757,8 +885,8 @@ pod-people@perl.org mail list. Send an empty email to
 pod-people-subscribe@perl.org to subscribe.
 
 This module is managed in an open GitHub repository,
-L<http://github.com/theory/pod-simple/>. Feel free to fork and contribute, or
-to clone L<git://github.com/theory/pod-simple.git> and send patches!
+L<https://github.com/perl-pod/pod-simple/>. Feel free to fork and contribute, or
+to clone L<https://github.com/perl-pod/pod-simple.git> and send patches!
 
 Patches against Pod::Simple are welcome. Please send bug reports to
 <bug-pod-simple@rt.cpan.org>.

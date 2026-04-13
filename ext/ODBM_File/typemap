@@ -12,7 +12,6 @@ SDBM_File		T_PTROBJ
 ODBM_File		T_PTROBJ
 DB_File			T_PTROBJ
 DBZ_File		T_PTROBJ
-FATALFUNC		T_OPAQUEPTR
 
 INPUT
 T_DATUM_K
@@ -43,7 +42,7 @@ T_DATUM_V
 	    $var.dsize = (int)len;
 	}
 	else {
-	    $var.dptr = \"\";
+	    $var.dptr = (char *)\"\";
 	    $var.dsize = 0;
 	}
 T_GDATUM

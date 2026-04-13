@@ -1,49 +1,85 @@
+use strict;
+use warnings;
 use ExtUtils::MakeMaker;
 use File::Spec;
 use Config;
+#   [ src => @deps ]
+our @files = (
+    # compiler files ########################################
+    ['regcomp.c'        => 'dquote.c', 'invlist_inline.h'   ],
+    ['regcomp_invlist.c' => 'invlist_inline.h'              ],
+    ['regcomp_study.c'                                      ],
+    ['regcomp_trie.c'                                       ],
+    ['regcomp_debug.c'                                      ],
+    # execution engine files ################################
+    ['regexec.c'        => 'invlist_inline.h'               ],
+    # misc files ############################################
+    ['dquote.c'                                             ],
+    ['invlist_inline.h'                                     ],
+    #########################################################
+);
 
-my $object = 're_exec$(OBJ_EXT) re_comp$(OBJ_EXT) re$(OBJ_EXT)';
+my @objects = 're$(OBJ_EXT)';
+foreach my $tuple (@files) {
+    my $src_file = $tuple->[0];
+    if ($src_file=~s/reg/re_/ and $src_file=~s/\.c/\$(OBJ_EXT)/) {
+        push @objects, $src_file;
+    }
+}
 
 my $defines = '-DPERL_EXT_RE_BUILD -DPERL_EXT_RE_DEBUG -DPERL_EXT';
+my %args;
+for my $arg (@ARGV) {
+    $args{$1} = $2 if $arg =~ /^(\w+)=(.*)$/;
+}
+if ($args{LINKTYPE} eq "static") {
+    $defines .= ' -DPERL_EXT_RE_STATIC';
+}
 
+my @libs;
+if ($^O eq 'cygwin' && $Config{usequadmath}) {
+    push @libs, qw(quadmath);
+}
 WriteMakefile(
     NAME		=> 're',
+    @libs ? ( 'LIBS' => [ join(" ", map { "-l$_" } @libs) ] ) : (),
     VERSION_FROM	=> 're.pm',
     XSPROTOARG		=> '-noprototypes',
-    OBJECT		=> $object,
+    OBJECT		=> "@objects",
     DEFINE             => $defines,
-    clean		=> { FILES => '*$(OBJ_EXT) *.c ../../lib/re.pm' },
+    clean		=> { FILES => '*$(OBJ_EXT) invlist_inline.h *.c ../../lib/re.pm' },
 );
 
 package MY;
-
 sub upupfile {
     File::Spec->catfile(File::Spec->updir, File::Spec->updir, $_[0]);
 }
 
 sub postamble {
-    my $regcomp_c = upupfile('regcomp.c');
-    my $regexec_c = upupfile('regexec.c');
-    my $dquote_static_c = upupfile('dquote_static.c');
+    my $postamble = "";
 
+    foreach my $tuple (@::files) {
+        my ($file, @deps) = @$tuple;
+        my $src_file = upupfile($file);
+        my $target = $file;
+        $target =~ s/^reg/re_/;
+        $postamble .=
     <<EOF;
-re_comp.c : $regcomp_c
-	- \$(RM_F) re_comp.c
-	\$(CP) $regcomp_c re_comp.c
-
-re_comp\$(OBJ_EXT) : re_comp.c dquote_static.c
-
-re_exec.c : $regexec_c
-	- \$(RM_F) re_exec.c
-	\$(CP) $regexec_c re_exec.c
-
-re_exec\$(OBJ_EXT) : re_exec.c
-
-dquote_static.c : $dquote_static_c
-	- \$(RM_F) dquote_static.c
-	\$(CP) $dquote_static_c dquote_static.c
+$target : $src_file
+	- \$(RM_F) $target
+	\$(CP) $src_file $target
 
 EOF
+        next if $target eq $file;
+        my $base_name = $target;
+        if ($base_name=~s/\.c\z//) {
+            $postamble .= <<EOF
+$base_name\$(OBJ_EXT) : $target @deps
+
+EOF
+        }
+    }
+    return $postamble
 }
 
 sub MY::c_o {

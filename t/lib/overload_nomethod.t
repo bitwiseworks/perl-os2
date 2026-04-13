@@ -1,6 +1,14 @@
+#!./perl
+
+BEGIN {
+    chdir 't' if -d 't';
+    @INC = '../lib';
+    require './test.pl';
+}
+
+plan( tests => 3);
 use warnings;
 use strict;
-use Test::Simple tests => 3;
 
 package Foo;
 use overload
@@ -12,11 +20,11 @@ package main;
 my $foo = Foo->new;
 
 eval {my $val = $foo + 1};
-ok( $@ =~ /unimplemented/ );
+ok( $@ =~ /unimplemented/, "'+'  not implemented; 'nomethod' special key invoked" );
 
 eval {$foo += 1};
-ok( $@ =~ /unimplemented/ );
+ok( $@ =~ /unimplemented/, "'+=' not implemented; 'nomethod' special key invoked"  );
 
 eval {my $val = 0; $val += $foo};
-ok( $@ =~ /unimplemented/ );
+ok( $@ =~ /unimplemented/, "'+=' not implemented; 'nomethod' special key invoked"  );
 

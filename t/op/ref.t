@@ -2,13 +2,17 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = qw(. ../lib);
-    require 'test.pl';
+    require './test.pl';
+    set_up_inc( qw(. ../lib) );
 }
 
 use strict qw(refs subs);
 
-plan(228);
+plan(265);
+
+# Test this first before we extend the stack with other operations.
+# This caused an asan failure due to a bad write past the end of the stack.
+eval { die  1..127, $_=\() };
 
 # Test glob operations.
 
@@ -80,7 +84,7 @@ $refref = \\$x;
 $x = "Good";
 is ($$$refref, 'Good');
 
-# Test nested anonymous lists.
+# Test nested anonymous arrays.
 
 $ref = [[],2,[3,4,5,]];
 is (scalar @$ref, 3);
@@ -119,6 +123,11 @@ is (join(':',@{$spring2{"foo"}}), "1:2:3:4");
     &$subref;
     is ($called, 1);
 }
+is ref eval {\&{""}}, "CODE", 'reference to &{""} [perl #94476]';
+delete $My::{"Foo::"}; 
+is ref \&My::Foo::foo, "CODE",
+  'creating stub with \&deleted_stash::foo [perl #128532]';
+
 
 # Test references to return values of operators (TARGs/PADTMPs)
 {
@@ -159,6 +168,33 @@ SKIP: {
     }
     is ($x, $str, "REGEXP keeps a ref to its mother_re");
     ok (eval { "x" =~ $x }, "REGEXP with mother_re still matches");
+}
+
+# test dereferencing errors
+{
+    format STDERR =
+.
+    my $ref;
+    foreach $ref (*STDOUT{IO}, *STDERR{FORMAT}) {
+	eval q/ $$ref /;
+	like($@, qr/Not a SCALAR reference/, "Scalar dereference");
+	eval q/ @$ref /;
+	like($@, qr/Not an ARRAY reference/, "Array dereference");
+	eval q/ %$ref /;
+	like($@, qr/Not a HASH reference/, "Hash dereference");
+	eval q/ &$ref /;
+	like($@, qr/Not a CODE reference/, "Code dereference");
+    }
+
+    $ref = *STDERR{FORMAT};
+    eval q/ *$ref /;
+    like($@, qr/Not a GLOB reference/, "Glob dereference");
+
+    $ref = *STDOUT{IO};
+    eval q/ *$ref /;
+    is($@, '', "Glob dereference of PVIO is acceptable");
+
+    is($ref, *{$ref}{IO}, "IO slot of the temporary glob is set correctly");
 }
 
 # Test the ref operator.
@@ -223,14 +259,23 @@ like (*STDOUT{IO}, qr/^IO::File=IO\(0x[0-9a-f]+\)$/,
 
 $anonhash = {};
 is (ref $anonhash, 'HASH');
+
+# GH #21478
+$anonhash = { 'one' };
+is scalar keys %$anonhash, 1, 'single value in anonhash creates a key (count)';
+ok exists $anonhash->{one},   'single value in anonhash creates a key (existence)';
+is $anonhash->{one}, undef,   'single value in anonhash creates a key (value)';
+
 $anonhash2 = {FOO => 'BAR', ABC => 'XYZ',};
 is (join('', sort values %$anonhash2), 'BARXYZ');
 
 # Test bless operator.
 
 package MYHASH;
-
-$object = bless $main'anonhash2;
+{
+    no warnings qw(syntax deprecated);
+    $object = bless $main'anonhash2;
+}
 main::is (ref $object, 'MYHASH');
 main::is ($object->{ABC}, 'XYZ');
 
@@ -254,7 +299,10 @@ sub mymethod {
 $string = "bad";
 $object = "foo";
 $string = "good";
-$main'anonhash2 = "foo";
+{
+    no warnings qw(syntax deprecated);
+    $main'anonhash2 = "foo";
+}
 $string = "";
 
 DESTROY {
@@ -271,7 +319,10 @@ package OBJ;
 
 @ISA = ('BASEOBJ');
 
-$main'object = bless {FOO => 'foo', BAR => 'bar'};
+{
+    no warnings qw(syntax deprecated);
+    $main'object = bless {FOO => 'foo', BAR => 'bar'};
+}
 
 package main;
 
@@ -284,10 +335,13 @@ is ($object->doit("BAR"), 'bar');
 $foo = doit $object "FOO";
 main::is ($foo, 'foo');
 
-sub BASEOBJ'doit {
-    local $ref = shift;
-    die "Not an OBJ" unless ref $ref eq 'OBJ';
-    $ref->{shift()};
+{
+    no warnings qw(syntax deprecated);
+    sub BASEOBJ'doit {
+        local $ref = shift;
+        die "Not an OBJ" unless ref $ref eq 'OBJ';
+        $ref->{shift()};
+    }
 }
 
 package UNIVERSAL;
@@ -318,8 +372,10 @@ is (scalar grep(ref($_), @baa), 3);
 is (scalar (@bzz), 3);
 
 # also, it can't be an lvalue
+# (That’s what *you* think!  --sprout)
 eval '\\($x, $y) = (1, 2);';
-like ($@, qr/Can\'t modify.*ref.*in.*assignment/);
+like ($@, qr/Can\'t modify.*ref.*in.*assignment(?x:
+           )|Experimental aliasing via reference not enabled/);
 
 # test for proper destruction of lexical objects
 $test = curr_test();
@@ -407,6 +463,13 @@ is(
  'DESTROY called on closure variable'
 );
 
+# But cursing objects must not result in double frees
+# This caused "Attempt to free unreferenced scalar" in 5.16.
+fresh_perl_is(
+  'bless \%foo::, bar::; bless \%bar::, foo::; print "ok\n"', "ok\n",
+   { stderr => 1 },
+  'no double free when stashes are blessed into each other');
+
 
 # test if refgen behaves with autoviv magic
 {
@@ -479,7 +542,7 @@ is (runperl(
 
 # using a regex in the destructor for STDOUT segfaulted because the
 # REGEX pad had already been freed (ithreads build only). The
-# object is required to trigger the early freeing of GV refs to to STDOUT
+# object is required to trigger the early freeing of GV refs to STDOUT
 
 TODO: {
     local $TODO = "works but output through pipe is mangled" if $^O eq 'VMS';
@@ -609,35 +672,8 @@ is ( (sub {"bar"})[0]->(), "bar", 'code deref from list slice w/ ->' );
 {
     local $@;
     eval { ()[0]{foo} };
-    like ( "$@", "Can't use an undefined value as a HASH reference",
+    like ( "$@", qr/Can't use an undefined value as a HASH reference/,
            "deref of undef from list slice fails" );
-}
-
-# test dereferencing errors
-{
-    format STDERR =
-.
-    my $ref;
-    foreach $ref (*STDOUT{IO}, *STDERR{FORMAT}) {
-	eval q/ $$ref /;
-	like($@, qr/Not a SCALAR reference/, "Scalar dereference");
-	eval q/ @$ref /;
-	like($@, qr/Not an ARRAY reference/, "Array dereference");
-	eval q/ %$ref /;
-	like($@, qr/Not a HASH reference/, "Hash dereference");
-	eval q/ &$ref /;
-	like($@, qr/Not a CODE reference/, "Code dereference");
-    }
-
-    $ref = *STDERR{FORMAT};
-    eval q/ *$ref /;
-    like($@, qr/Not a GLOB reference/, "Glob dereference");
-
-    $ref = *STDOUT{IO};
-    eval q/ *$ref /;
-    is($@, '', "Glob dereference of PVIO is acceptable");
-
-    is($ref, *{$ref}{IO}, "IO slot of the temporary glob is set correctly");
 }
 
 # these will segfault if they fail
@@ -706,16 +742,15 @@ is (runperl(
 # it doesn't trigger a panic with multiple rounds of global cleanup
 # (Perl_sv_clean_all).
 
-SKIP: {
-    skip_if_miniperl('no Scalar::Util under miniperl', 4);
-
+{
     local $ENV{PERL_DESTRUCT_LEVEL} = 2;
 
     # we do all permutations of array/hash, 1ref/2ref, to account
     # for the different way backref magic is stored
 
     fresh_perl_is(<<'EOF', 'ok', { stderr => 1 }, 'array with 1 weak ref');
-use Scalar::Util qw(weaken);
+no warnings 'experimental::builtin';
+use builtin qw(weaken);
 my $r = [];
 Internals::SvREFCNT(@$r, 9);
 my $r1 = $r;
@@ -724,7 +759,8 @@ print "ok";
 EOF
 
     fresh_perl_is(<<'EOF', 'ok', { stderr => 1 }, 'array with 2 weak refs');
-use Scalar::Util qw(weaken);
+no warnings 'experimental::builtin';
+use builtin qw(weaken);
 my $r = [];
 Internals::SvREFCNT(@$r, 9);
 my $r1 = $r;
@@ -735,7 +771,8 @@ print "ok";
 EOF
 
     fresh_perl_is(<<'EOF', 'ok', { stderr => 1 }, 'hash with 1 weak ref');
-use Scalar::Util qw(weaken);
+no warnings 'experimental::builtin';
+use builtin qw(weaken);
 my $r = {};
 Internals::SvREFCNT(%$r, 9);
 my $r1 = $r;
@@ -744,7 +781,8 @@ print "ok";
 EOF
 
     fresh_perl_is(<<'EOF', 'ok', { stderr => 1 }, 'hash with 2 weak refs');
-use Scalar::Util qw(weaken);
+no warnings 'experimental::builtin';
+use builtin qw(weaken);
 my $r = {};
 Internals::SvREFCNT(%$r, 9);
 my $r1 = $r;
@@ -756,12 +794,12 @@ EOF
 
 }
 
-SKIP:{
-    skip_if_miniperl "no Scalar::Util on miniperl", 1;
+{
     my $error;
     *hassgropper::DESTROY = sub {
-        require Scalar::Util;
-        eval { Scalar::Util::weaken($_[0]) };
+        no warnings 'experimental::builtin';
+        use builtin qw(weaken);
+        eval { weaken($_[0]) };
         $error = $@;
         # This line caused a crash before weaken refused to weaken a
         # read-only reference:
@@ -778,6 +816,143 @@ SKIP:{
 
 
 is ref( bless {}, "nul\0clean" ), "nul\0clean", "ref() is nul-clean";
+
+# Test constants and references thereto.
+for (3) {
+    eval { $_ = 4 };
+    like $@, qr/^Modification of a read-only/,
+       'assignment to value aliased to literal number';
+    eval { ${\$_} = 4 };
+    like $@, qr/^Modification of a read-only/,
+       'refgen does not allow assignment to value aliased to literal number';
+}
+for ("4eounthouonth") {
+    eval { $_ = 4 };
+    like $@, qr/^Modification of a read-only/,
+       'assignment to value aliased to literal string';
+    eval { ${\$_} = 4 };
+    like $@, qr/^Modification of a read-only/,
+       'refgen does not allow assignment to value aliased to literal string';
+}
+{
+    my $aref = \123;
+    is \$$aref, $aref,
+	'[perl #109746] referential identity of \literal under threads+mad'
+}
+
+# ref in boolean context
+{
+    my $false = 0;
+    my $true  = 1;
+    my $plain = [];
+    my $obj     = bless {}, "Foo";
+    my $objnull = bless [], "";
+    my $obj0    = bless [], "0";
+    my $obj00   = bless [], "00";
+    my $obj1    = bless [], "1";
+
+    is !ref $false,   1, '!ref $false';
+    is !ref $true,    1, '!ref $true';
+    is !ref $plain,   "", '!ref $plain';
+    is !ref $obj,     "", '!ref $obj';
+    is !ref $objnull, "", '!ref $objnull';
+    is !ref $obj0   , 1, '!ref $obj0';
+    is !ref $obj00,   "", '!ref $obj00';
+    is !ref $obj1,    "", '!ref $obj1';
+
+    is ref $obj || 0,               "Foo",   'ref $obj || 0';
+    is ref $obj // 0,               "Foo",   'ref $obj // 0';
+    is $true && ref $obj,           "Foo",   '$true && ref $obj';
+    is ref $obj ? "true" : "false", "true",  'ref $obj ? "true" : "false"';
+
+    my $r = 2;
+    if (ref $obj) { $r = 1 };
+    is $r, 1, 'if (ref $obj)';
+
+    $r = 2;
+    if (ref $obj0) { $r = 1 };
+    is $r, 2, 'if (ref $obj0)';
+
+    $r = 2;
+    if (ref $obj) { $r = 1 } else { $r = 0 };
+    is $r, 1, 'if (ref $obj) else';
+
+    $r = 2;
+    if (ref $obj0) { $r = 1 } else { $r = 0 };
+    is $r, 0, 'if (ref $obj0) else';
+}
+
+{
+    # RT #78288
+    # if an op returns &PL_sv_zero rather than newSViv(0), the
+    # value should be mutable. So ref (via the PADTMP flag) should
+    # make a mutable copy
+
+    my @a = ();
+    my $r = \ scalar grep $_ == 1, @a;
+    $$r += 10;
+    is $$r, 10, "RT #78288 - mutable PL_sv_zero copy";
+}
+
+
+# RT#130861: heap-use-after-free in pp_rv2sv, from asan fuzzing
+SKIP: {
+    skip_if_miniperl("no dynamic loading on miniperl, so can't load arybase", 1);
+    # this value is critical - its just enough so that the stack gets
+    # grown which loading/calling arybase
+    my $n = 125;
+
+    my $code = <<'EOF';
+$ary = '[';
+my @a = map $$ary, 1..NNN;
+print "@a\n";
+EOF
+    $code =~ s/NNN/$n/g;
+    my @exp = ("0") x $n;
+    fresh_perl_is($code, "@exp", { stderr => 1 },
+                    'rt#130861: heap uaf in pp_rv2sv');
+}
+
+# GH 18669
+# The correct autovivification lvalue ref context should be propagated to
+# both branches of a ?:. So in something like:
+#    @{  $cond ? $h{a} : $h{b} } = ...;
+# the helem ops on *both* sides of the conditional should get the DREFAV
+# flag set, indicating that if the hash element doesn't exist, it should
+# be autovivified as an *array ref*.
+#
+
+{
+    my $x = { arr => undef };
+    eval {
+        push(@{ $x->{ decide } ? $x->{ not_here } : $x->{ new } }, "mana");
+    };
+
+    is($@, "", "GH 18669: push on non-existent hash ref entry: no errors");
+    is(eval {$x->{new}[0] }, 'mana',
+        "GH 18669: push on non-existent hash ref entry: autovivifies"
+    );
+
+    $x = { arr => undef };
+    eval {
+        push(@{ $x->{ decide } ? $x->{ not_here } : $x->{ arr } }, "mana");
+    };
+
+    is($@, "", "GH 18669: push on undef hash ref entry: no errors");
+    is(eval { $x->{arr}[0] }, 'mana',
+        "GH 18669: push on undef hash ref entry: autovivifies"
+    );
+
+    # try both branches
+    for my $cond (0, 1) {
+        my %h;
+        eval { @{ $cond ? $h{p} : $h{q} } = 99; };
+        is($@, "", "GH 18669: array assign on $cond cond: no errors");
+        is($h{$cond ? 'p' : 'q'}[0], 99,
+            "GH 18669: array assign on $cond cond: autovivifies"
+        );
+    }
+}
 
 # Bit of a hack to make test.pl happy. There are 3 more tests after it leaves.
 $test = curr_test();

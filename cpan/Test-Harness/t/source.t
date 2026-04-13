@@ -5,6 +5,7 @@ BEGIN {
 }
 
 use strict;
+use warnings;
 
 use Test::More tests => 45;
 use File::Spec;
@@ -170,10 +171,11 @@ sub ct($) {
             is_dir     => 0,
             is_file    => 1,
             is_symlink => 0,
+
             # Fix for bizarre -k bug in Strawberry Perl
-            sticky     => ( -k $test )[-1] ? 1 : 0,
-            setgid     => -g $test ? 1 : 0,
-            setuid     => -u $test ? 1 : 0,
+            sticky => ( -k $test )[-1] ? 1 : 0,
+            setgid => -g $test         ? 1 : 0,
+            setuid => -u $test         ? 1 : 0,
         },
         '... file->* set'
     );
@@ -234,17 +236,19 @@ sub ct($) {
 SKIP: {
     my $symlink_exists = eval { symlink( '', '' ); 1 };
     $symlink_exists = 0 if $^O eq 'VMS'; # exists but not ready for prime time
+    $symlink_exists = 0 if $^O eq 'msys'; # exists but not ready for prime time
     skip 'symlink not supported on this platform', 9 unless $symlink_exists;
 
     my $test    = File::Spec->catfile( $dir, 'source.t' );
     my $symlink = File::Spec->catfile( $dir, 'source_link.T' );
     my $source  = TAP::Parser::Source->new;
 
-    eval { symlink( File::Spec->rel2abs($test), $symlink ) };
+    my $did_symlink = eval { symlink( File::Spec->rel2abs($test), $symlink ) };
     if ( my $e = $@ ) {
         diag($@);
         die "aborting test";
     }
+    skip "symlink not successful: $!", 9 unless $did_symlink;
 
     $source->raw( \$symlink );
     my $meta = $source->assemble_meta;

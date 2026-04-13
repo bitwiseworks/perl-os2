@@ -4,26 +4,66 @@ perlmod - Perl modules (packages and symbol tables)
 
 =head1 DESCRIPTION
 
+=head2 Is this the document you were after?
+
+There are other documents which might contain the information that you're
+looking for:
+
+=over 2
+
+=item This doc
+
+Perl's packages, namespaces, and some info on classes.
+
+=item L<perlnewmod>
+
+Tutorial on making a new module.
+
+=item L<perlmodstyle>
+
+Best practices for making a new module.
+
+=back
+
 =head2 Packages
 X<package> X<namespace> X<variable, global> X<global variable> X<global>
 
-Perl provides a mechanism for alternative namespaces to protect
-packages from stomping on each other's variables.  In fact, there's
-really no such thing as a global variable in Perl.  The package
-statement declares the compilation unit as being in the given
-namespace.  The scope of the package declaration is from the
+Unlike Perl 4, in which all the variables were dynamic and shared one
+global name space, causing maintainability problems, Perl 5 provides two
+mechanisms for protecting code from having its variables stomped on by
+other code: lexically scoped variables created with C<my> or C<state> and
+namespaced global variables, which are exposed via the C<vars> pragma,
+or the C<our> keyword. Any global variable is considered to
+be part of a namespace and can be accessed via a "fully qualified form".
+Conversely, any lexically scoped variable is considered to be part of
+that lexical-scope, and does not have a "fully qualified form".
+
+In perl namespaces are called "packages" and
+the C<package> declaration tells the compiler which
+namespace to prefix to C<our> variables and unqualified dynamic names.
+This both protects
+against accidental stomping and provides an interface for deliberately
+clobbering global dynamic variables declared and used in other scopes or
+packages, when that is what you want to do.
+
+The scope of the C<package> declaration is from the
 declaration itself through the end of the enclosing block, C<eval>,
-or file, whichever comes first (the same scope as the my() and
-local() operators).  Unqualified dynamic identifiers will be in
-this namespace, except for those few identifiers that if unqualified,
+or file, whichever comes first (the same scope as the my(), our(), state(), and
+local() operators, and also the effect
+of the experimental "reference aliasing," which may change), or until
+the next C<package> declaration.  Unqualified dynamic identifiers will be in
+this namespace, except for those few identifiers that, if unqualified,
 default to the main package instead of the current one as described
-below.  A package statement affects only dynamic variables--including
-those you've used local() on--but I<not> lexical variables created
-with my().  Typically it would be the first declaration in a file
-included by the C<do>, C<require>, or C<use> operators.  You can
-switch into a package in more than one place; it merely influences
-which symbol table is used by the compiler for the rest of that
-block.  You can refer to variables and filehandles in other packages
+below.  A C<package> statement affects only dynamic global
+symbols, including subroutine names, and variables you've used local()
+on, but I<not> lexical variables created with my(), our() or state().
+
+Typically, a C<package> statement is the first declaration in a file
+included in a program by one of the C<do>, C<require>, or C<use> operators.  You can
+switch into a package in more than one place: C<package> has no
+effect beyond specifying which symbol table the compiler will use for
+dynamic symbols for the rest of that block or until the next C<package> statement.
+You can refer to variables and filehandles in other packages
 by prefixing the identifier with the package name and a double
 colon: C<$Package::Variable>.  If the package name is null, the
 C<main> package is assumed.  That is, C<$::sail> is equivalent to
@@ -41,6 +81,13 @@ the $s variable in package C<owner>, which is probably not what you meant.
 Use braces to disambiguate, as in C<"This is ${owner}'s house">.
 X<::> X<'>
 
+
+Use of C<'> as a package delimiter can be disabled with:
+
+  no feature 'apostrophe_as_package_separator';
+
+and is also disabled by C<use v5.42;> or later.
+
 Packages may themselves contain package separators, as in
 C<$OUTER::INNER::var>.  This implies nothing about the order of
 name lookups, however.  There are no relative packages: all symbols
@@ -48,7 +95,8 @@ are either local to the current package, or must be fully qualified
 from the outer package name down.  For instance, there is nowhere
 within package C<OUTER> that C<$INNER::var> refers to
 C<$OUTER::INNER::var>.  C<INNER> refers to a totally
-separate global package.
+separate global package. The custom of treating package names as a
+hierarchy is very strong, but the language in no way enforces it.
 
 Only identifiers starting with letters (or underscore) are stored
 in a package's symbol table.  All other symbols are kept in package
@@ -80,7 +128,9 @@ expressions in the context of the C<main> package (or wherever you came
 from).  See L<perldebug>.
 
 The special symbol C<__PACKAGE__> contains the current package, but cannot
-(easily) be used to construct variable names.
+(easily) be used to construct variable names. After C<my($foo)> has hidden
+package variable C<$foo>, it can still be accessed, without knowing what
+package you are in, as C<${__PACKAGE__.'::foo'}>.
 
 See L<perlsub> for other scoping issues related to my() and local(),
 and L<perlref> regarding closures.
@@ -137,7 +187,7 @@ refer to the same scalar value. This means that the following code:
         print $foo;     # Prints '1'!
     }
 
-Would print '1', because C<$foo> holds a reference to the I<original>
+would print '1', because C<$foo> holds a reference to the I<original>
 C<$bar>. The one that was stuffed away by C<local()> and which will be
 restored when the block ends. Because variables are accessed through the
 typeglob, you can use C<*foo = *bar> to create an alias which can be
@@ -195,7 +245,8 @@ in a subroutine that gets passed typeglobs as arguments:
 
     sub identify_typeglob {
         my $glob = shift;
-        print 'You gave me ', *{$glob}{PACKAGE}, '::', *{$glob}{NAME}, "\n";
+        print 'You gave me ', *{$glob}{PACKAGE},
+            '::', *{$glob}{NAME}, "\n";
     }
     identify_typeglob *foo;
     identify_typeglob *bar::baz;
@@ -301,13 +352,17 @@ X<$?>
 Inside of a C<END> block, the value of C<${^GLOBAL_PHASE}> will be
 C<"END">.
 
+Similar to an C<END> block are C<defer> blocks, though they operate on the
+lifetime of individual block scopes, rather than the program as a whole. They
+are documented in L<perlsyn/defer>.
+
 C<UNITCHECK>, C<CHECK> and C<INIT> code blocks are useful to catch the
 transition between the compilation phase and the execution phase of
 the main program.
 
 C<UNITCHECK> blocks are run just after the unit which defined them has
 been compiled.  The main program file and each module it loads are
-compilation units, as are string C<eval>s, code compiled using the
+compilation units, as are string C<eval>s, run-time code compiled using the
 C<(?{ })> construct in a regex, calls to C<do FILE>, C<require FILE>,
 and code after the C<-e> switch on the command line.
 
@@ -368,20 +423,21 @@ The B<begincheck> program makes it all clear, eventually:
   }
   INIT { print  " 9.   You'll see the difference right away.\n" }
 
-  print         "13.   It merely _looks_ like it should be confusing.\n";
+  print         "13.   It only _looks_ like it should be confusing.\n";
 
   __END__
 
 =head2 Perl Classes
 X<class> X<@ISA>
 
-There is no special class syntax in Perl, but a package may act
+There is no stable class syntax in Perl, but a package may act
 as a class if it provides subroutines to act as methods.  Such a
 package may also derive some of its methods from another class (package)
 by listing the other package name(s) in its global @ISA array (which
 must be a package global, not a lexical).
 
-For more on this, see L<perlootut> and L<perlobj>.
+For more on packages acting as classes, see L<perlootut> and L<perlobj>.
+For more on the not-yet-stable class syntax, see L<perlclass>.
 
 =head2 Perl Modules
 X<module>
@@ -400,24 +456,20 @@ create a file called F<Some/Module.pm> and start with this template:
 
     package Some::Module;  # assumes Some/Module.pm
 
-    use strict;
-    use warnings;
+    use v5.36;
 
-    BEGIN {
-        require Exporter;
+    # Get the import method from Exporter to export functions and
+    # variables
+    use Exporter 5.57 'import';
 
-        # set the version for version checking
-        our $VERSION     = 1.00;
+    # set the version for version checking
+    our $VERSION     = '1.00';
 
-        # Inherit from Exporter to export functions and variables
-        our @ISA         = qw(Exporter);
+    # Functions and variables which are exported by default
+    our @EXPORT      = qw(func1 func2);
 
-        # Functions and variables which are exported by default
-        our @EXPORT      = qw(func1 func2);
-
-        # Functions and variables which can be optionally exported
-        our @EXPORT_OK   = qw($Var1 %Hashit func3);
-    }
+    # Functions and variables which can be optionally exported
+    our @EXPORT_OK   = qw($Var1 %Hashit func3);
 
     # exported package globals go here
     our $Var1    = '';
@@ -443,7 +495,7 @@ create a file called F<Some/Module.pm> and start with this template:
     sub func1      { ... }
     sub func2      { ... }
 
-    # this one isn't exported, but could be called directly
+    # this one isn't always exported, but could be called directly
     # as Some::Module::func3()
     sub func3      { ... }
 
@@ -545,15 +597,14 @@ X<threadsafe> X<thread safe>
 X<module, threadsafe> X<module, thread safe>
 X<CLONE> X<CLONE_SKIP> X<thread> X<threads> X<ithread>
 
-Since 5.6.0, Perl has had support for a new type of threads called
-interpreter threads (ithreads). These threads can be used explicitly
-and implicitly.
+Perl supports a type of threads called interpreter threads (ithreads).
+These threads can be used explicitly and implicitly.
 
 Ithreads work by cloning the data tree so that no data is shared
 between different threads. These threads can be used by using the C<threads>
 module or by doing fork() on win32 (fake fork() support). When a
 thread is cloned all Perl data is cloned, however non-Perl data cannot
-be cloned automatically.  Perl after 5.7.2 has support for the C<CLONE>
+be cloned automatically.  Perl after 5.8.0 has support for the C<CLONE>
 special subroutine.  In C<CLONE> you can do whatever
 you need to do,
 like for example handle the cloning of non-Perl data, if necessary.

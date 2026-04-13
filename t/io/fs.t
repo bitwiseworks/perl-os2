@@ -2,30 +2,43 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
     require "./test.pl";
+    set_up_inc('../lib');
 }
 
 use Config;
 
 my $Is_VMSish = ($^O eq 'VMS');
 
-if (($^O eq 'MSWin32') || ($^O eq 'NetWare')) {
+if ($^O eq 'MSWin32') {
+    # under minitest, buildcustomize sets this to 1, which means
+    # nlinks isn't populated properly, allow our tests to pass
+    ${^WIN32_SLOPPY_STAT} = 0;
+}
+
+if ($^O eq 'MSWin32') {
     $wd = `cd`;
 }
 elsif ($^O eq 'VMS') {
     $wd = `show default`;
+}
+elsif ( $^O =~ /android/ || $^O eq 'nto' ) {
+    # On Android and Blackberry 10, pwd is a shell builtin, so plain `pwd`
+    # won't cut it
+    $wd = `sh -c pwd`;
 }
 else {
     $wd = `pwd`;
 }
 chomp($wd);
 
+die "Can't get current working directory" if(!$wd);
+
 my $has_link            = $Config{d_link};
 
 my $accurate_timestamps =
-    !($^O eq 'MSWin32' || $^O eq 'NetWare' ||
-      $^O eq 'dos'     || $^O eq 'os2'     ||
+    !($^O eq 'MSWin32' ||
+      $^O eq 'os2'     ||
       $^O eq 'cygwin'  || $^O eq 'amigaos' ||
 	  $wd =~ m#$Config{afsroot}/#
      );
@@ -35,27 +48,30 @@ if (defined &Win32::IsWinNT && Win32::IsWinNT()) {
         $has_link            = 1;
         $accurate_timestamps = 1;
     }
+    else {
+        $has_link            = 0;
+    }
 }
 
 if ($^O eq 'os2') {
-            $has_link            = 0;}
+    $has_link = 0;
+}
 
 my $needs_fh_reopen =
-    $^O eq 'dos'
     # Not needed on HPFS, but needed on HPFS386 ?!
-    || $^O eq 'os2';
+    $^O eq 'os2';
 
 $needs_fh_reopen = 1 if (defined &Win32::IsWin95 && Win32::IsWin95());
 
 my $skip_mode_checks =
     $^O eq 'cygwin' && $ENV{CYGWIN} !~ /ntsec/;
 
-plan tests => 51;
+plan tests => 61;
 
 my $tmpdir = tempfile();
 my $tmpdir1 = tempfile();
 
-if (($^O eq 'MSWin32') || ($^O eq 'NetWare')) {
+if ($^O eq 'MSWin32') {
     `rmdir /s /q $tmpdir 2>nul`;
     `mkdir $tmpdir`;
 }
@@ -76,7 +92,7 @@ chdir $tmpdir;
 umask(022);
 
 SKIP: {
-    skip "bogus umask", 1 if ($^O eq 'MSWin32') || ($^O eq 'NetWare') || ($^O eq 'epoc');
+    skip "bogus umask", 1 if ($^O eq 'MSWin32');
 
     is((umask(0)&0777), 022, 'umask'),
 }
@@ -108,19 +124,15 @@ SKIP: {
 
     SKIP: {
         skip "hard links not that hard in $^O", 1 if $^O eq 'amigaos';
-	skip "no mode checks", 1 if $skip_mode_checks;
+        skip "no mode checks", 1 if $skip_mode_checks;
 
-#      if ($^O eq 'cygwin') { # new files on cygwin get rwx instead of rw-
-#          is($mode & 0777, 0777, "mode of triply-linked file");
-#      } else {
-            is(sprintf("0%o", $mode & 0777), 
-               sprintf("0%o", $a_mode & 0777), 
-               "mode of triply-linked file");
-#      }
+        is(sprintf("0%o", $mode & 0777),
+            sprintf("0%o", $a_mode & 0777),
+            "mode of triply-linked file");
     }
 }
 
-$newmode = (($^O eq 'MSWin32') || ($^O eq 'NetWare')) ? 0444 : 0777;
+$newmode = ($^O eq 'MSWin32') ? 0444 : 0777;
 
 is(chmod($newmode,'a'), 1, "chmod succeeding");
 
@@ -174,27 +186,42 @@ SKIP: {
 }
 
 SKIP: {
-    skip "no fchmod", 5 unless ($Config{d_fchmod} || "") eq "define";
-    skip "doesn't work on OS/2", 5 if $^O eq 'os2';
+    skip "no fchmod", 7 unless ($Config{d_fchmod} || "") eq "define";
+    skip "doesn't work on OS/2", 7 if $^O eq 'os2';
     ok(open(my $fh, "<", "a"), "open a");
     is(chmod(0, $fh), 1, "fchmod");
     $mode = (stat "a")[2];
     SKIP: {
         skip "no mode checks", 1 if $skip_mode_checks;
+        skip "chmod(0, FH) means assume user defaults on VMS", 1 if $^O eq 'VMS';
         is($mode & 0777, 0, "perm reset");
     }
     is(chmod($newmode, "a"), 1, "fchmod");
     $mode = (stat $fh)[2];
-    SKIP: { 
+    SKIP: {
         skip "no mode checks", 1 if $skip_mode_checks;
         is($mode & 0777, $newmode, "perm restored");
     }
+
+    # [perl #122703]
+    close $fh;
+    $! = 0;
+    ok(!chmod(0666, $fh), "chmod through closed handle fails");
+    isnt($!+0, 0, "and errno was set");
 }
 
 SKIP: {
-    skip "no fchown", 1 unless ($Config{d_fchown} || "") eq "define";
+    skip "no fchown", 3 unless ($Config{d_fchown} || "") eq "define";
     open(my $fh, "<", "a");
     is(chown(-1, -1, $fh), 1, "fchown");
+
+    # [perl #122703]
+    # chown() behaved correctly, but there was no test for the chown()
+    # on closed handle case
+    close $fh;
+    $! = 0;
+    ok(!chown(-1, -1, $fh), "chown on closed handle fails");
+    isnt($!+0, 0, "and errno was set");
 }
 
 SKIP: {
@@ -221,77 +248,32 @@ is($ino, undef, "ino of renamed file a should be undef");
 $delta = $accurate_timestamps ? 1 : 2;	# Granularity of time on the filesystem
 chmod 0777, 'b';
 
-$foo = (utime 500000000,500000000 + $delta,'b');
+$ut = 500000000;
+
+note("basic check of atime and mtime");
+$foo = (utime $ut,$ut + $delta,'b');
 is($foo, 1, "utime");
-check_utime_result();
+check_utime_result($ut, $accurate_timestamps, $delta);
 
 utime undef, undef, 'b';
 ($atime,$mtime) = (stat 'b')[8,9];
-print "# utime undef, undef --> $atime, $mtime\n";
-isnt($atime, 500000000, 'atime');
-isnt($mtime, 500000000 + $delta, 'mtime');
+note("# utime undef, undef --> $atime, $mtime");
+isnt($atime, $ut,          'atime: utime called with two undefs');
+isnt($mtime, $ut + $delta, 'mtime: utime called with two undefs');
 
 SKIP: {
-    skip "no futimes", 4 unless ($Config{d_futimes} || "") eq "define";
+    skip "no futimes", 6 unless ($Config{d_futimes} || "") eq "define";
+    note("check futimes");
     open(my $fh, "<", 'b');
-    $foo = (utime 500000000,500000000 + $delta, $fh);
+    $foo = (utime $ut,$ut + $delta, $fh);
     is($foo, 1, "futime");
-    check_utime_result();
-}
-
-
-sub check_utime_result {
-    ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,$atime,$mtime,$ctime,
-     $blksize,$blocks) = stat('b');
-
- SKIP: {
-	skip "bogus inode num", 1 if ($^O eq 'MSWin32') || ($^O eq 'NetWare');
-
-	ok($ino,    'non-zero inode num');
-    }
-
- SKIP: {
-	skip "filesystem atime/mtime granularity too low", 2
-	    unless $accurate_timestamps;
-
-	print "# atime - $atime  mtime - $mtime  delta - $delta\n";
-	if($atime == 500000000 && $mtime == 500000000 + $delta) {
-	    pass('atime');
-	    pass('mtime');
-	}
-	else {
-	    if ($^O =~ /\blinux\b/i) {
-		print "# Maybe stat() cannot get the correct atime, ".
-		    "as happens via NFS on linux?\n";
-		$foo = (utime 400000000,500000000 + 2*$delta,'b');
-		my ($new_atime, $new_mtime) = (stat('b'))[8,9];
-		print "# newatime - $new_atime  nemtime - $new_mtime\n";
-		if ($new_atime == $atime && $new_mtime - $mtime == $delta) {
-		    pass("atime - accounted for possible NFS/glibc2.2 bug on linux");
-		    pass("mtime - accounted for possible NFS/glibc2.2 bug on linux");
-		}
-		else {
-		    fail("atime - $atime/$new_atime $mtime/$new_mtime");
-		    fail("mtime - $atime/$new_atime $mtime/$new_mtime");
-		}
-	    }
-	    elsif ($^O eq 'VMS') {
-		# why is this 1 second off?
-		is( $atime, 500000001,          'atime' );
-		is( $mtime, 500000000 + $delta, 'mtime' );
-	    }
-	    elsif ($^O eq 'beos' || $^O eq 'haiku') {
-            SKIP: {
-		    skip "atime not updated", 1;
-		}
-		is($mtime, 500000001, 'mtime');
-	    }
-	    else {
-		fail("atime");
-		fail("mtime");
-	    }
-	}
-    }
+    check_utime_result($ut, $accurate_timestamps, $delta);
+    # [perl #122703]
+    close $fh;
+    $! = 0;
+    ok(!utime($ut,$ut + $delta, $fh),
+       "utime fails on a closed file handle");
+    isnt($!+0, 0, "and errno was set");
 }
 
 SKIP: {
@@ -308,15 +290,15 @@ is(unlink('b'), 1, "unlink b");
 is($ino, undef, "ino of unlinked file b should be undef");
 unlink 'c';
 
-chdir $wd || die "Can't cd back to $wd";
+chdir $wd || die "Can't cd back to '$wd' ($!)";
 
 # Yet another way to look for links (perhaps those that cannot be
 # created by perl?).  Hopefully there is an ls utility in your
 # %PATH%. N.B. that $^O is 'cygwin' on Cygwin.
 
 SKIP: {
-    skip "Win32/Netware specific test", 2
-      unless ($^O eq 'MSWin32') || ($^O eq 'NetWare');
+    skip "Win32 specific test", 2
+      unless ($^O eq 'MSWin32');
     skip "No symbolic links found to test with", 2
       unless  `ls -l perl 2>nul` =~ /^l.*->/;
 
@@ -375,11 +357,6 @@ SKIP: {
 	close (FH); open (FH, ">>$tmpfile") or die "Can't reopen $tmpfile";
     }
 
-    SKIP: {
-        if ($^O eq 'vos') {
-	    skip ("# TODO - hit VOS bug posix-973 - cannot resize an open file below the current file pos.", 5);
-	}
-
 	is(-s $tmpfile, 200, "fh resize to 200 working (filename check)");
 
 	ok(truncate(FH, 0), "fh resize to zero");
@@ -412,7 +389,14 @@ SKIP: {
 	is(-s $tmpfile, 100, "fh resize by IO slot working");
 
 	close FH;
-    }
+
+	my $n = "for_fs_dot_t$$";
+	open FH, ">$n" or die "open $n: $!";
+	print FH "bloh blah bla\n";
+	close FH or die "close $n: $!";
+	eval "truncate $n, 0; 1" or die;
+	ok !-z $n, 'truncate(word) does not fall back to file name';
+	unlink $n;
 }
 
 # check if rename() can be used to just change case of filename
@@ -432,18 +416,23 @@ SKIP: {
     chdir $wd || die "Can't cd back to $wd";
 }
 
-# check if rename() works on directories
-if ($^O eq 'VMS') {
-    # must have delete access to rename a directory
-    `set file $tmpdir.dir/protection=o:d`;
-    ok(rename("$tmpdir.dir", "$tmpdir1.dir"), "rename on directories") ||
-      print "# errno: $!\n";
-}
-else {
-    ok(rename($tmpdir, $tmpdir1), "rename on directories");
-}
+SKIP:
+{
+    $Config{d_rename}
+      or skip "Cannot rename directories with link()", 2;
+    # check if rename() works on directories
+    if ($^O eq 'VMS') {
+        # must have delete access to rename a directory
+        `set file $tmpdir.dir/protection=o:d`;
+        ok(rename("$tmpdir.dir", "$tmpdir1.dir"), "rename on directories") ||
+          print "# errno: $!\n";
+    }
+    else {
+        ok(rename($tmpdir, $tmpdir1), "rename on directories");
+    }
 
-ok(-d $tmpdir1, "rename on directories working");
+    ok(-d $tmpdir1, "rename on directories working");
+}
 
 {
     # Change 26011: Re: A surprising segfault
@@ -456,5 +445,96 @@ ok(-d $tmpdir1, "rename on directories working");
     ok(1, "extend sp in pp_chown");
 }
 
+# Calling unlink on a directory without -U and privileges will always fail, but
+# it should set errno to EISDIR even though unlink(2) is never called.
+SKIP: {
+    if (is_miniperl && !eval 'require Errno') {
+        skip "Errno not built yet", 3;
+    }
+    require Errno;
+
+    my $tmpdir = tempfile();
+    if ($^O eq 'MSWin32') {
+        `mkdir $tmpdir`;
+    }
+    elsif ($^O eq 'VMS') {
+        `create/directory [.$tmpdir]`;
+    }
+    else {
+        `mkdir $tmpdir 2>/dev/null`;
+    }
+
+    # errno should be set even though unlink(2) is not called
+    local $!;
+    is(unlink($tmpdir), 0, "can't unlink directory without -U and privileges");
+    is(0+$!, Errno::EISDIR(), "unlink directory without -U sets errno");
+
+    rmdir $tmpdir;
+
+    # errno should be set by failed lstat(2) call
+    $! = 0;
+    unlink($tmpdir);
+    is(0+$!, Errno::ENOENT(), "unlink non-existent directory without -U sets ENOENT");
+}
+
 # need to remove $tmpdir if rename() in test 28 failed!
 END { rmdir $tmpdir1; rmdir $tmpdir; }
+
+sub check_utime_result {
+    ($ut, $accurate_timestamps, $delta) = @_;
+    ($dev,$ino,$mode,$nlink,$uid,$gid,$rdev,$size,$atime,$mtime,$ctime,
+     $blksize,$blocks) = stat('b');
+
+    SKIP: {
+        skip "bogus inode num", 1 if ($^O eq 'MSWin32');
+        ok($ino,    'non-zero inode num');
+    }
+
+    SKIP: {
+        skip "filesystem atime/mtime granularity too low", 2
+            unless $accurate_timestamps;
+
+        if ($^O eq 'vos') {
+            skip ("# TODO - hit VOS bug posix-2055 - access time does not follow POSIX rules for an open file.", 2);
+        }
+
+        note("# atime - $atime  mtime - $mtime  delta - $delta");
+        if($atime == $ut && $mtime == $ut + $delta) {
+            pass('atime: granularity test');
+            pass('mtime: granularity test');
+        }
+        else {
+            # Operating systems whose filesystems may be mounted with the noatime option
+            # RT 132663
+            my %noatime_oses = map { $_ => 1 } ( qw| haiku netbsd dragonfly | );
+            if ($^O =~ /\blinux\b/i) {
+                note("# Maybe stat() cannot get the correct atime, ".
+                    "as happens via NFS on linux?");
+                $foo = (utime 400000000,$ut + 2*$delta,'b');
+                my ($new_atime, $new_mtime) = (stat('b'))[8,9];
+                note("# newatime - $new_atime  nemtime - $new_mtime");
+                if ($new_atime == $atime && $new_mtime - $mtime == $delta) {
+                    pass("atime - accounted for possible NFS/glibc2.2 bug on linux");
+                    pass("mtime - accounted for possible NFS/glibc2.2 bug on linux");
+                }
+                else {
+                    fail("atime - $atime/$new_atime $mtime/$new_mtime");
+                    fail("mtime - $atime/$new_atime $mtime/$new_mtime");
+                }
+            }
+            elsif ($^O eq 'VMS') {
+                # why is this 1 second off?
+                is( $atime, $ut + 1,      'atime: VMS' );
+                is( $mtime, $ut + $delta, 'mtime: VMS' );
+            }
+            elsif ($noatime_oses{$^O}) {
+                pass("atime not updated");
+                is($mtime, 500000001, 'mtime');
+            }
+            else {
+                fail("atime: default case");
+                fail("mtime: default case");
+            }
+        } # END failed atime mtime 'else' block
+    } # END granularity SKIP block
+}

@@ -1,6 +1,14 @@
+=pod
+
+=encoding UTF-8
+
 =head1 NAME
 
 perlfaq4 - Data Manipulation
+
+=head1 VERSION
+
+version 5.20250619
 
 =head1 DESCRIPTION
 
@@ -66,7 +74,7 @@ are in base 10:
     print $string + 44; # prints 688, certainly not octal!
 
 This problem usually involves one of the Perl built-ins that has the
-same name a Unix command that uses octal numbers as arguments on the
+same name as a Unix command that uses octal numbers as arguments on the
 command line. In this example, C<chmod> on the command line knows that
 its first argument is octal because that's what it does:
 
@@ -124,10 +132,9 @@ need yourself.
 To see why, notice how you'll still have an issue on half-way-point
 alternation:
 
-    for (my $i = 0; $i < 1.01; $i += 0.05) { printf "%.1f ",$i}
+    for (my $i = -5; $i <= 5; $i += 0.5) { printf "%.0f ",$i }
 
-    0.0 0.1 0.1 0.2 0.2 0.2 0.3 0.3 0.4 0.4 0.5 0.5 0.6 0.7 0.7
-    0.8 0.8 0.9 0.9 1.0 1.0
+    -5 -4 -4 -4 -3 -2 -2 -2 -1 -0 0 0 1 2 2 2 3 4 4 4 5
 
 Don't blame Perl. It's the same as in C. IEEE says we have to do
 this. Perl numbers whose absolute values are integers under 2**31 (on
@@ -274,32 +281,63 @@ are left as an exercise to the inclined reader.
 
 =head2 Why doesn't & work the way I want it to?
 
-The behavior of binary arithmetic operators depends on whether they're
-used on numbers or strings. The operators treat a string as a series
-of bits and work with that (the string C<"3"> is the bit pattern
-C<00110011>). The operators work with the binary form of a number
-(the number C<3> is treated as the bit pattern C<00000011>).
+Perl's C<&> bitwise operator works on both numbers and strings,
+sometimes producing surprising results when you expected a number
+but received a string. You probably expected perl to automatically
+convert the operands to numbers like the mathematical operators would.
+Instead, perl treats string operands as bitvectors.
 
-So, saying C<11 & 3> performs the "and" operation on numbers (yielding
-C<3>). Saying C<"11" & "3"> performs the "and" operation on strings
-(yielding C<"1">).
+Consider the bitwise difference between the number 3 and the bitvector
+represented by "3". A number has the bit pattern for its magnitude. The
+number 3 is 0b11 (a 2 and a 1). The bitvector has the bit pattern that
+is the ordinal value for each octet, and that value is unrelated to any
+numeric value that the digit represents. The character "3" is the
+bitvector 0b0011_0011.
 
-Most problems with C<&> and C<|> arise because the programmer thinks
-they have a number but really it's a string or vice versa. To avoid this,
-stringify the arguments explicitly (using C<""> or C<qq()>) or convert them
-to numbers explicitly (using C<0+$arg>). The rest arise because
-the programmer says:
+These operations have different results even though you might think they
+look like the same "number":
 
-    if ("\020\020" & "\101\101") {
-        # ...
-    }
+     11  &  3;   # 0b0000_1011 & 0b0000_0011
+                 #     -> 0b0000_0011   (number 3)
+    "11" & "3";  # 0b0011_0001_0011_0001 & 0b0011_0011
+                 #     -> 0b0011_0001   (ASCII char "1")
 
-but a string consisting of two null bytes (the result of C<"\020\020"
-& "\101\101">) is not a false value in Perl. You need:
+Note that if any operand has a numeric value, perl uses numeric
+semantics (although you should not count on this):
 
-    if ( ("\020\020" & "\101\101") !~ /[^\000]/) {
-        # ...
-    }
+    my($i, $j) = ( 11,   3 );   # $i & $j  # 11  &  3 -> 3
+    my($i, $j) = ("11",  3 );   # $i & $j  # 11  &  3 -> 3
+    my($i, $j) = ("11", "3");   # $i & $j  # "11"  &  "3" -> 1
+
+Remember that a perl scalar can have both string and numeric values at
+the same time. A value that starts as a string and has never encountered
+a numeric operation has no numeric value yet. Perl does this to save
+time and work so it doesn't have to decide a numeric value for a scalar
+it might never use as a number. In that case, string semantics wins. But,
+if there is a numeric value already, numeric semantics win. Force perl
+to compute the numeric value by adding 0:
+
+    my($i, $j) = ("11", "3"); $j += 0;  # $i & $j  # "11"  &  3 -> 3
+
+However, this is not a documented feature, or as L<perlop> says, it "is not
+well defined". One way to ensure numeric semantics is to explicitly
+convert both of values to numbers:
+
+    (0+$i) & (0+$j)
+
+To fix this annoyance, Perl v5.22 separated the string and number
+behavior. The C<bitwise> feature introduced four new operators that
+would work with only string semantics: C<&.>, C<|.>, C<^.>, and C<~.>.
+The original operators, C<&>, C<|>, C<^>, and C<~>, would then apply
+only numeric semantics.
+
+Enable this feature explicitly with L<feature>:
+
+    use feature qw(bitwise);
+
+Or, as of v5.28, require the minimum version of perl with C<use>:
+
+    use v5.28;  # bitwise feature for free
 
 =head2 How do I multiply matrices?
 
@@ -371,15 +409,19 @@ course, living in a state of sin."
 
 Perl relies on the underlying system for the implementation of
 C<rand> and C<srand>; on some systems, the generated numbers are
-not random enough (especially on Windows : see
+not random enough (especially on Windows: see
 L<http://www.perlmonks.org/?node_id=803632>).
 Several CPAN modules in the C<Math> namespace implement better
 pseudorandom generators; see for example
-L<Math::Random::MT> ("Mersenne Twister", fast), or
-L<Math::TrulyRandom> (uses the imperfections in the system's
-timer to generate random numbers, which is rather slow).
+L<Math::Random::MT> ("Mersenne Twister", fast).
 More algorithms for random numbers are described in
 "Numerical Recipes in C" at L<http://www.nr.com/>
+
+There are several modules to sample system sources of random numbers,
+which are useful for security tokens and cryptography. For example,
+L<Crypt::URandom>.
+See the "CPAN Author's Guide to Random Data for Security" at
+L<https://security.metacpan.org/docs/guides/random-data-for-security.html>
 
 =head2 How do I get a random number between X and Y?
 
@@ -398,7 +440,7 @@ random number between 0 and 5 that you can then add to 10.
 
 Hence you derive the following simple function to abstract
 that. It selects a random integer between the two given
-integers (inclusive), For example: C<random_int_between(50,120)>.
+integers (inclusive). For example: C<random_int_between(50,120)>.
 
     sub random_int_between {
         my($min, $max) = @_;
@@ -429,7 +471,7 @@ To get the day of year for any date, use L<POSIX>'s C<mktime> to get
 a time in epoch seconds for the argument to C<localtime>.
 
     use POSIX qw/mktime strftime/;
-    my $week_of_year = strftime "%W",
+    my $day_of_year = strftime "%j",
         localtime( mktime( 0, 0, 0, 18, 11, 87 ) );
 
 You can also use L<Time::Piece>, which comes with Perl and provides a
@@ -471,7 +513,7 @@ millennium.
 You could just store all your dates as a number and then subtract.
 Life isn't always that simple though.
 
-The L<Time::Piece> module, which comes with Perl, replaces L<localtime>
+The L<Time::Piece> module, which comes with Perl, replaces C<localtime>
 with a version that returns an object. It also overloads the comparison
 operators so you can compare them directly:
 
@@ -486,7 +528,7 @@ operators so you can compare them directly:
 You can also get differences with a subtraction, which returns a
 L<Time::Seconds> object:
 
-    my $diff = $date1 - $date2;
+    my $date_diff = $date1 - $date2;
     print "The difference is ", $date_diff->days, " days\n";
 
 If you want to work with formatted dates, the L<Date::Manip>,
@@ -546,7 +588,7 @@ X<timelocal>
 
 To do it correctly, you can use one of the C<Date> modules since they
 work with calendars instead of times. The L<DateTime> module makes it
-simple, and give you the same time of day, only the day before,
+simple, and gives you the same time of day, only the day before,
 despite daylight saving time changes:
 
     use DateTime;
@@ -730,7 +772,7 @@ L<Regexp::Common::balanced> and L<Regexp::Common::delimited>).
 More complex cases will require to write a parser, probably
 using a parsing module from CPAN, like
 L<Regexp::Grammars>, L<Parse::RecDescent>, L<Parse::Yapp>,
-L<Text::Balanced>, or L<Marpa::XS>.
+L<Text::Balanced>, or L<Marpa::R2>.
 
 =head2 How do I reverse a string?
 
@@ -852,39 +894,57 @@ X<Text::Autoformat> X<capitalize> X<case, title> X<case, sentence>
 (contributed by brian d foy)
 
 Damian Conway's L<Text::Autoformat> handles all of the thinking
-for you.
+for you:
 
     use Text::Autoformat;
-    my $x = "Dr. Strangelove or: How I Learned to Stop ".
-      "Worrying and Love the Bomb";
+    my $s = "Going to the desert with a camel";
 
-    print $x, "\n";
+    printf "%-10s %s\n", "original:", $s;
     for my $style (qw( sentence title highlight )) {
-        print autoformat($x, { case => $style }), "\n";
+        printf "%-10s %s\n",
+            "$style:",
+            autoformat($s, { case => $style }) =~ s/\R+\z//r;
     }
 
-How do you want to capitalize those words?
+Each style has a different idea of what it should do with small words:
 
-    FRED AND BARNEY'S LODGE        # all uppercase
-    Fred And Barney's Lodge        # title case
-    Fred and Barney's Lodge        # highlight case
+    original:  Going to the desert with a camel
+    sentence:  Going to the desert with a camel
+    title:     Going To The Desert With A Camel
+    highlight: Going to the Desert with a Camel
 
-It's not as easy a problem as it looks. How many words do you think
-are in there? Wait for it... wait for it.... If you answered 5
-you're right. Perl words are groups of C<\w+>, but that's not what
-you want to capitalize. How is Perl supposed to know not to capitalize
-that C<s> after the apostrophe? You could try a regular expression:
+Trying this yourself in a simple regex has more than a few pitfalls.
+Perl "words" are groups of C<\w+>, but that's not what you want to
+capitalize. Some of those characters aren't even letters. What if you
+used a word boundary, C<\b>?
 
-    $string =~ s/ (
-                 (^\w)    #at the beginning of the line
-                   |      # or
-                 (\s\w)   #preceded by whitespace
-                   )
-                /\U$1/xg;
+    my $string = "A camel's journey";
+    $string =~ s/\b(\w)/\U$1/g;  # A Camel'S Journey
+
+How is Perl supposed to know not to capitalize that C<s>? You could work
+harder to look for preceding whitespace or the beginning of the string:
+
+    $string =~ s/( (?:^|\s) \w ) /\U$1/xg; # A Camel's Journey
+
+Or maybe you match the entire group, lowercase it all (C<L>), then
+uppercase the first letter (C<\u>):
 
     $string =~ s/([\w']+)/\u\L$1/g;
 
-Now, what if you don't want to capitalize that "and"? Just use
+Each of these have their annoying edge cases. Perl v5.22 added fancier
+Unicode word and sentence boundaries to fix this sort of problem. The
+C<\b{wb}> word boundary ignores some things that it doesn't think start
+or end "human" words:
+
+    use v5.22;
+    my $string = "A camel's journey";
+    $string =~ s/\b{wb}(\w)/\U$1/g;  # A Camel's Journey
+
+The details are in Unicode Technical Report #29
+(L<https://unicode.org/reports/tr29/>), and you should make sure that
+its idea of a word boundary corresponds to yours.
+
+Now, what if you don't want to capitalize that "and" or "the"? Just use
 L<Text::Autoformat> and get on with the next problem. :)
 
 =head2 How can I split a [character]-delimited string except when inside [character]?
@@ -1051,7 +1111,7 @@ C<unpack> with the A (ASCII) format. By using a number after the format
 specifier, you can denote the column width. See the C<pack> and C<unpack>
 entries in L<perlfunc> for more details.
 
-    my @fields = unpack( $line, "A8 A8 A8 A16 A4" );
+    my @fields = unpack( "A8 A8 A8 A16 A4", $line );
 
 Note that spaces in the format argument to C<unpack> do not denote literal
 spaces. If you have space separated data, you may want C<split> instead.
@@ -1116,6 +1176,53 @@ signal that I missed something:
         /eg;
 
     print $string;
+
+
+=head2 Does Perl have anything like Ruby's #{} or Python's f string?
+
+Unlike the others, Perl allows you to embed a variable naked in a double
+quoted string, e.g. C<"variable $variable">. When there isn't whitespace or
+other non-word characters following the variable name, you can add braces
+(e.g. C<"foo ${foo}bar">) to ensure correct parsing.
+
+An array can also be embedded directly in a string, and will be expanded
+by default with spaces between the elements. The default
+L<LIST_SEPARATOR|perlvar/$LIST_SEPARATOR> can be changed by assigning a
+different string to the special variable C<$">, such as C<local $" = ', ';>.
+
+Perl also supports references within a string providing the equivalent of
+the features in the other two languages.
+
+C<${\ ... }> embedded within a string will work for most simple statements
+such as an object->method call. More complex code can be wrapped in a do
+block C<${\ do{...} }>.
+
+When you want a list to be expanded per C<$">, use C<@{[ ... ]}>.
+
+    use Time::Piece;
+    use Time::Seconds;
+    my $scalar = 'STRING';
+    my @array = ( 'zorro', 'a', 1, 'B', 3 );
+
+    # Print the current date and time and then Tomorrow
+    my $t = Time::Piece->new;
+    say "Now is: ${\ $t->cdate() }";
+    say "Tomorrow: ${\ do{ my $T=Time::Piece->new + ONE_DAY ; $T->fullday }}";
+
+    # some variables in strings
+    say "This is some scalar I have $scalar, this is an array @array.";
+    say "You can also write it like this ${scalar} @{array}.";
+
+    # Change the $LIST_SEPARATOR
+    local $" = ':';
+    say "Set \$\" to delimit with ':' and sort the Array @{[ sort @array ]}";
+
+You may also want to look at the module
+L<Quote::Code>, and templating tools such as L<Template::Toolkit> and
+L<Mojo::Template>.
+
+See also: L</"How can I expand variables in text strings?"> and
+L</"How do I expand function calls in a string?"> in this FAQ.
 
 =head2 What's wrong with always quoting "$vars"?
 
@@ -1241,6 +1348,10 @@ indentation correctly preserved:
         --Bilbo in /usr/src/perl/pp_ctl.c
     EVER_ON_AND_ON
 
+Beginning with Perl version 5.26, a much simpler and cleaner way to
+write indented here documents has been added to the language: the
+tilde (~) modifier. See L<perlop/"Indented Here-docs"> for details.
+
 =head1 Data: Arrays
 
 =head2 What is the difference between a list and an array?
@@ -1266,8 +1377,8 @@ for list operations, so list operations also work on arrays:
     wash_animals( qw( dog cat bird ) );
     wash_animals( @animals );
 
-Array operations, which change the scalars, rearranges them, or adds
-or subtracts some scalars, only work on arrays. These can't work on a
+Array operations, which change the scalars, rearrange them, or add
+or subtract some scalars, only work on arrays. These can't work on a
 list, which is fixed. Array operations include C<shift>, C<unshift>,
 C<push>, C<pop>, and C<splice>.
 
@@ -1311,8 +1422,8 @@ by a comma:
 Since you're assigning to a scalar, the righthand side is in scalar
 context. The comma operator (yes, it's an operator!) in scalar
 context evaluates its lefthand side, throws away the result, and
-evaluates it's righthand side and returns the result. In effect,
-that list-lookalike assigns to C<$scalar> it's rightmost value. Many
+evaluates its righthand side and returns the result. In effect,
+that list-lookalike assigns to C<$scalar> its rightmost value. Many
 people mess this up because they choose a list-lookalike whose
 last element is also the count they expect:
 
@@ -1374,18 +1485,18 @@ elements.
     my @unique = keys %hash;
 
 If you want to use a module, try the C<uniq> function from
-L<List::MoreUtils>. In list context it returns the unique elements,
+L<List::Util>. In list context it returns the unique elements,
 preserving their order in the list. In scalar context, it returns the
 number of unique elements.
 
-    use List::MoreUtils qw(uniq);
+    use List::Util qw(uniq);
 
-    my @unique = uniq( 1, 2, 3, 4, 4, 5, 6, 5, 7 ); # 1,2,3,4,5,6,7
-    my $unique = uniq( 1, 2, 3, 4, 4, 5, 6, 5, 7 ); # 7
+    my @unique = uniq( 1, 2, 3, 4, 4, 5, 6, 5, 8 ); # 1,2,3,4,5,6,8
+    my $unique = uniq( 1, 2, 3, 4, 4, 5, 6, 5, 8 ); # 7
 
 You can also go through each element and skip the ones you've seen
 before. Use a hash to keep track. The first time the loop sees an
-element, that element has no key in C<%Seen>. The C<next> statement
+element, that element has no key in C<%seen>. The C<next> statement
 creates the key and immediately uses its value, which is C<undef>, so
 the loop continues to the C<push> and increments the value for that
 key. The next time the loop sees that same element, its key exists in
@@ -1415,21 +1526,7 @@ Hearing the word "in" is an I<in>dication that you probably should have
 used a hash, not a list or array, to store your data. Hashes are
 designed to answer this question quickly and efficiently. Arrays aren't.
 
-That being said, there are several ways to approach this. In Perl 5.10
-and later, you can use the smart match operator to check that an item is
-contained in an array or a hash:
-
-    use 5.010;
-
-    if( $item ~~ @array ) {
-        say "The array contains $item"
-    }
-
-    if( $item ~~ %hash ) {
-        say "The hash contains $item"
-    }
-
-With earlier versions of Perl, you have to do a bit more work. If you
+That being said, there are several ways to approach this. If you
 are going to make this query many times over arbitrary string values,
 the fastest way is probably to invert the original array and maintain a
 hash whose keys are the first array's values:
@@ -1447,7 +1544,7 @@ array. This kind of an array will take up less space:
     my @primes = (2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31);
     my @is_tiny_prime = ();
     for (@primes) { $is_tiny_prime[$_] = 1 }
-    # or simply  @istiny_prime[@primes] = (1) x @primes;
+    # or simply  @is_tiny_prime[@primes] = (1) x @primes;
 
 Now you check whether $is_tiny_prime[$some_number].
 
@@ -1465,16 +1562,16 @@ of the original list or array. They only pay off if you have to test
 multiple values against the same array.
 
 If you are testing only once, the standard module L<List::Util> exports
-the function C<first> for this purpose. It works by stopping once it
+the function C<any> for this purpose. It works by stopping once it
 finds the element. It's written in C for speed, and its Perl equivalent
 looks like this subroutine:
 
-    sub first (&@) {
+    sub any (&@) {
         my $code = shift;
         foreach (@_) {
-            return $_ if &{$code}();
+            return 1 if $code->();
         }
-        undef;
+        return 0;
     }
 
 If speed is of little concern, the common idiom uses grep in scalar context
@@ -1506,19 +1603,6 @@ Note that this is the I<symmetric difference>, that is, all elements
 in either A or in B but not in both. Think of it as an xor operation.
 
 =head2 How do I test whether two arrays or hashes are equal?
-
-With Perl 5.10 and later, the smart match operator can give you the answer
-with the least amount of work:
-
-    use 5.010;
-
-    if( @array1 ~~ @array2 ) {
-        say "The arrays are the same";
-    }
-
-    if( %hash1 ~~ %hash2 ) # doesn't check values!  {
-        say "The hash keys are the same";
-    }
 
 The following code works for single-level arrays. It uses a
 stringwise comparison, and does not distinguish defined versus
@@ -1563,7 +1647,7 @@ two different answers:
     cmpStrHard(\%a, \%b) == 0 ? "the same" : "different";
 
 
-The first reports that both those the hashes contain the same data,
+The first reports that both hashes contain the same data,
 while the second reports that they do not. Which you prefer is left as
 an exercise to the reader.
 
@@ -1615,7 +1699,7 @@ such as C<push>, C<pop>, C<shift>, C<unshift>, or C<splice> to do
 that.
 
 Sometimes, however, linked lists can be useful in situations where you
-want to "shard" an array so you have have many small arrays instead of
+want to "shard" an array so you have many small arrays instead of
 a single big array. You can keep arrays longer than Perl's largest
 array index, lock smaller arrays separately in threaded programs,
 reallocate less memory, or quickly insert elements in the middle of
@@ -2012,7 +2096,7 @@ all of the keys of the hash and gives them back to you as a list. You
 can then get the value through the particular key you're processing:
 
     foreach my $key ( keys %hash ) {
-        my $value = $hash{$key}
+        my $value = $hash{$key};
         ...
     }
 
@@ -2021,7 +2105,7 @@ process the hash elements. For instance, you can sort the keys so you
 can process them in lexical order:
 
     foreach my $key ( sort keys %hash ) {
-        my $value = $hash{$key}
+        my $value = $hash{$key};
         ...
     }
 
@@ -2030,7 +2114,7 @@ to deal with the keys that start with C<text:>, you can select just
 those using C<grep>:
 
     foreach my $key ( grep /^text:/, keys %hash ) {
-        my $value = $hash{$key}
+        my $value = $hash{$key};
         ...
     }
 
@@ -2064,7 +2148,7 @@ the original hashes as they were.
 
 If you want to preserve the original hashes, copy one hash (C<%hash1>)
 to a new hash (C<%new_hash>), then add the keys from the other hash
-(C<%hash2> to the new hash. Checking that the key already exists in
+(C<%hash2>) to the new hash. Checking that the key already exists in
 C<%new_hash> gives you a chance to decide what to do with the
 duplicates:
 
@@ -2145,7 +2229,7 @@ This is very similar to "How do I process an entire hash?", also in
 L<perlfaq4>, but a bit simpler in the common cases.
 
 You can use the C<keys()> built-in function in scalar context to find out
-have many entries you have in a hash:
+how many entries you have in a hash:
 
     my $key_count = keys %hash; # must be scalar context!
 
@@ -2174,10 +2258,9 @@ such as C<each()>.
 (contributed by brian d foy)
 
 To sort a hash, start with the keys. In this example, we give the list of
-keys to the sort function which then compares them ASCIIbetically (which
-might be affected by your locale settings). The output list has the keys
-in ASCIIbetical order. Once we have the keys, we can go through them to
-create a report which lists the keys in ASCIIbetical order.
+keys to the sort function which then compares them as strings. The output list
+has the keys in string order. Once we have the keys, we can go through them to
+create a report which lists the keys in string order:
 
     my @keys = sort { $a cmp $b } keys %hash;
 
@@ -2190,9 +2273,15 @@ comparing the keys, we can compute a value with them and use that
 value as the comparison.
 
 For instance, to make our report order case-insensitive, we use
-C<lc> to lowercase the keys before comparing them:
+C<fc> to safely lowercase the keys before comparing them:
 
-    my @keys = sort { lc $a cmp lc $b } keys %hash;
+    use v5.16;
+    my @keys = sort { fc($a) cmp fc($b) } keys %hash;
+
+Earlier versions of this answer used C<lc>, but that could give
+unexpected results with some Unicode strings. See L<perlfunc/fc>
+for the details. The Unicode::UCD module does the same thing for
+earlier perls.
 
 Note: if the computation is expensive or the hash has many elements,
 you may want to look at the Schwartzian Transform to cache the
@@ -2200,17 +2289,18 @@ computation results.
 
 If we want to sort by the hash value instead, we use the hash key
 to look it up. We still get out a list of keys, but this time they
-are ordered by their value.
+are ordered by their value:
 
     my @keys = sort { $hash{$a} <=> $hash{$b} } keys %hash;
 
 From there we can get more complex. If the hash values are the same,
-we can provide a secondary sort on the hash key.
+we can provide a secondary sort on the hash key:
 
+    use v5.16;
     my @keys = sort {
         $hash{$a} <=> $hash{$b}
             or
-        "\L$a" cmp "\L$b"
+        fc($a) cmp fc($b)
     } keys %hash;
 
 =head2 How can I always keep my hash sorted?
@@ -2430,7 +2520,7 @@ Usually a hash ref, perhaps like this:
 References are documented in L<perlref> and L<perlreftut>.
 Examples of complex data structures are given in L<perldsc> and
 L<perllol>. Examples of structures and object-oriented classes are
-in L<perltoot>.
+in L<perlootut>.
 
 =head2 How can I use a reference as a hash key?
 
@@ -2443,7 +2533,7 @@ back the reference from the stringified form, at least without doing
 some extra work on your own.
 
 Remember that the entry in the hash will still be there even if
-the referenced variable  goes out of scope, and that it is entirely
+the referenced variable goes out of scope, and that it is entirely
 possible for Perl to subsequently allocate a different variable at
 the same address. This will mean a new variable might accidentally
 be associated with the value for an old.
@@ -2552,24 +2642,23 @@ some gotchas. See the section on Regular Expressions.
 =head2 How do I determine whether a scalar is a number/whole/integer/float?
 
 Assuming that you don't care about IEEE notations like "NaN" or
-"Infinity", you probably just want to use a regular expression:
+"Infinity", you probably just want to use a regular expression (see also
+L<perlretut> and L<perlre>):
 
     use 5.010;
 
-    given( $number ) {
-        when( /\D/ )
-            { say "\thas nondigits"; continue }
-        when( /^\d+\z/ )
-            { say "\tis a whole number"; continue }
-        when( /^-?\d+\z/ )
-            { say "\tis an integer"; continue }
-        when( /^[+-]?\d+\z/ )
-            { say "\tis a +/- integer"; continue }
-        when( /^-?(?:\d+\.?|\.\d)\d*\z/ )
-            { say "\tis a real number"; continue }
-        when( /^[+-]?(?=\.?\d)\d*\.?\d*(?:e[+-]?\d+)?\z/i)
-            { say "\tis a C float" }
-    }
+    if ( /\D/ )
+        { say "\thas nondigits"; }
+    if ( /^\d+\z/ )
+        { say "\tis a whole number"; }
+    if ( /^-?\d+\z/ )
+        { say "\tis an integer"; }
+    if ( /^[+-]?\d+\z/ )
+        { say "\tis a +/- integer"; }
+    if ( /^-?(?:\d+\.?|\.\d)\d*\z/ )
+        { say "\tis a real number"; }
+    if ( /^[+-]?(?=\.?\d)\d*\.?\d*(?:e[+-]?\d+)?\z/i )
+        { say "\tis a C float" }
 
 There are also some commonly used modules for the task.
 L<Scalar::Util> (distributed with 5.8) provides access to perl's
@@ -2647,7 +2736,7 @@ you wanted to copy.
 You can use the C<UNIVERSAL> class (see L<UNIVERSAL>). However, please
 be very careful to consider the consequences of doing this: adding
 methods to every object is very likely to have unintended
-consequences. If possible, it would be better to have all your object
+consequences. If possible, it would be better to have all your objects
 inherit from some common base class, or to use an object system like
 Moose that supports roles.
 
@@ -2661,7 +2750,7 @@ The arrays.h/arrays.c code in the L<PGPLOT> module on CPAN does just this.
 If you're doing a lot of float or double processing, consider using
 the L<PDL> module from CPAN instead--it makes number-crunching easy.
 
-See L<http://search.cpan.org/dist/PGPLOT> for the code.
+See L<https://metacpan.org/release/PGPLOT> for the code.
 
 
 =head1 AUTHOR AND COPYRIGHT
@@ -2677,3 +2766,5 @@ are hereby placed into the public domain. You are permitted and
 encouraged to use this code in your own programs for fun
 or for profit as you see fit. A simple comment in the code giving
 credit would be courteous but is not required.
+
+=cut

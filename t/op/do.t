@@ -1,65 +1,18 @@
 #!./perl -w
 
-require './test.pl';
+BEGIN {
+    chdir 't' if -d 't';
+    require './test.pl';
+    set_up_inc( '../lib' );
+}
 use strict;
 no warnings 'void';
-
-sub foo1
-{
-    ok($_[0], 'in foo1');
-    'value';
-}
-
-sub foo2
-{
-    shift;
-    ok($_[0], 'in foo2');
-    my $x = 'value';
-    $x;
-}
-
-my $result;
-$_[0] = 0;
-{
-    no warnings 'deprecated';
-    $result = do foo1(1);
-}
-
-is($result, 'value', 'do &sub and proper @_ handling');
-cmp_ok($_[0], '==', 0, 'do &sub and proper @_ handling');
-
-$_[0] = 0;
-{
-    no warnings 'deprecated';
-    $result = do foo2(0,1,0);
-}
-is($result, 'value', 'do &sub and proper @_ handling');
-cmp_ok($_[0], '==', 0, 'do &sub and proper @_ handling');
+use Errno qw(ENOENT EISDIR);
 
 my $called;
-$result = do{ ++$called; 'value';};
+my $result = do{ ++$called; 'value';};
 is($called, 1, 'do block called');
 is($result, 'value', 'do block returns correct value');
-
-my @blathered;
-sub blather {
-    push @blathered, $_ foreach @_;
-}
-
-{
-    no warnings 'deprecated';
-    do blather("ayep","sho nuff");
-    is("@blathered", "ayep sho nuff", 'blathered called with list');
-}
-@blathered = ();
-
-my @x = ("jeepers", "okydoke");
-my @y = ("uhhuh", "yeppers");
-{
-    no warnings 'deprecated';
-    do blather(@x,"noofie",@y);
-    is("@blathered", "@x noofie @y", 'blathered called with arrays too');
-}
 
 unshift @INC, '.';
 
@@ -89,7 +42,7 @@ if (open my $do, '>', $file18) {
 
 do $file18; die $@ if $@;
 
-# bug ID 20010920.007
+# bug ID 20010920.007 (#7713)
 eval qq{ do qq(a file that does not exist); };
 is($@, '', "do on a non-existing file, first try");
 
@@ -127,7 +80,7 @@ is($owww, '', 'last is if not');
 @a = (7);
 my $x = sub { do { return do { @a } }; 2 }->();
 is($x, 1, 'return do { } receives caller scalar context');
-@x = sub { do { return do { @a } }; 2 }->();
+my @x = sub { do { return do { @a } }; 2 }->();
 is("@x", "7", 'return do { } receives caller list context');
 
 @a = (7, 8);
@@ -284,6 +237,84 @@ SKIP: {
   local $SIG{__WARN__} = sub { warn shift; ++$w };
   do '/eval_do' or die $@;
   is($w, undef, 'do STRING does not propagate warning hints');
+}
+
+# RT#113730 - $@ should be cleared on IO error.
+{
+    $@ = "should not see";
+    $! = 0;
+    my $rv = do("some nonexistent file");
+    my $saved_error = $@;
+    my $saved_errno = $!;
+    ok(!$rv,          "do returns false on io errror");
+    ok(!$saved_error, "\$\@ not set on io error");
+    ok($saved_errno == ENOENT, "\$! is ENOENT for nonexistent file");
+}
+
+# do subname should not be do "subname"
+{
+    my $called;
+    sub fungi { $called .= "fungible" }
+    $@ = "scrimptious scrobblings";
+    do fungi;
+    is $called, "fungible", "do-file does not force bareword";
+    isnt $@, "scrimptious scrobblings", "It was interpreted as do-file";
+}
+
+# do CORE () has always been do-file
+{
+    my $called;
+    sub CORE { $called .= "fungible" }
+    $@ = "scromptious scrimblings";
+    do CORE();
+    is $called, "fungible", "do CORE() calls &CORE";
+    isnt $@, "scromptious scrimblings", "It was interpreted as do-file";
+}
+
+# do subname() and $subname() are no longer allowed
+{
+    sub subname { fail('do subname('. ($_[0] || '') .') called') };
+    my $subref = sub { fail('do $subref('. ($_[0] || '') .') called') };
+    foreach my $mode (qw(subname("arg") subname() $subref("arg") $subref())) {
+        eval "do $mode";
+        like $@, qr/\Asyntax error/, "do $mode is syntax error";
+    }
+}
+
+{
+    # follow-up to [perl #91844]: a do should always return a copy,
+    # not the original
+
+    my %foo;
+    $foo{bar} = 7;
+    my $r = \$foo{bar};
+    sub {
+        $$r++;
+        isnt($_[0], $$r, "result of delete(helem) is copied: practical test");
+    }->(do { 1; delete $foo{bar} });
+}
+
+# A do block should FREETMPS on exit
+# RT #124248
+
+{
+    package p124248;
+    my $d = 0;
+    sub DESTROY { $d++ }
+    sub f { ::is($d, 1, "RT 124248"); }
+    f(do { 1; !!(my $x = bless []); });
+}
+
+
+# do file $!s must be correct
+{
+    local @INC = ('.'); #want EISDIR not ENOENT
+    my $rv = do 'op'; # /t/op dir
+    my $saved_error = $@;
+    my $saved_errno = $!+0;
+    ok(!$rv,                    "do dir returns false");
+    ok(!$saved_error,           "\$\@ is false on do dir");
+    ok($saved_errno == EISDIR,  "\$! is EISDIR on do dir");
 }
 
 done_testing();

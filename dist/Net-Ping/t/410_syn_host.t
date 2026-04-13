@@ -2,11 +2,10 @@
 use strict;
 
 BEGIN {
-  if ($ENV{PERL_CORE}) {
-    unless ($ENV{PERL_TEST_Net_Ping}) {
-      print "1..0 # Skip: network dependent test\n";
-        exit;
-    }
+  if ($ENV{NO_NETWORK_TESTING} ||
+      ($ENV{PERL_CORE} && !$ENV{PERL_TEST_Net_Ping})) {
+    print "1..0 # Skip: network dependent test\n";
+    exit;
   }
   unless (eval "require Socket") {
     print "1..0 \# Skip: no Socket\n";
@@ -31,17 +30,19 @@ BEGIN {
 #   connection to remote networks, but you still want the tests
 #   to pass, use the following:
 #
-# $ PERL_CORE=1 make test
+# $ NO_NETWORK_TESTING=1 make test
 
 # Try a few remote servers
 my %webs;
 BEGIN {
-  %webs = (
   # Hopefully this is never a routeable host
-  "172.29.249.249" => 0,
+  my $fail_ip = $ENV{NET_PING_FAIL_IP} || "192.0.2.0";
+
+  %webs = (
+  $fail_ip => 0,
 
   # Hopefully all these web ports are open
-  "www.geocities.com." => 1,
+  "www.google.com." => 1,
   "www.freeservers.com." => 1,
   "yahoo.com." => 1,
   "www.yahoo.com." => 1,
@@ -69,26 +70,34 @@ $SIG{ALRM} = sub {
 
 my $p = new Net::Ping "syn", 10;
 
-isa_ok($p, 'Net::Ping', 'new() worked');
+isa_ok($p, 'Net::Ping', 'new(syn, 10) worked');
 
 # Change to use the more common web port.
 # (Make sure getservbyname works in scalar context.)
-cmp_ok(($p->{port_num} = getservbyname("http", "tcp")), '>', 0, 'vaid port');
+cmp_ok(($p->{port_num} = getservbyname("http", "tcp")), '>', 0, 'valid port');
 
 foreach my $host (keys %webs) {
   # ping() does dns resolution and
   # only sends the SYN at this point
   Alarm(50); # (Plenty for a DNS lookup)
-  is($p->ping($host), 1, "Can reach $host $p->{bad}->{$host}");
+  is($p->ping($host), 1, "Can reach $host [" . ($p->{bad}->{$host} || "") . "]");
 }
 
 Alarm(20);
 foreach my $host (sort keys %webs) {
   my $on = $p->ack($host);
   if ($on) {
-    is($webs{$host}, 1, "supposed to be up: http://$host/");
-  } else {   
-    is($webs{$host}, 0, "supposed to be down: http://$host/ [" . ($p->{bad}->{$host} || "") . "]");
+    if ($webs{$host}) {
+      is($webs{$host}, 1, "ack: supposed to be up http://$host/ [" . ($p->{bad}->{$host} || "") . "]");
+    } else {
+      ok("TODO ack: supposed to be up: http://$host/ [" . ($p->{bad}->{$host} || "") . "]");
+    }
+  } else {
+    if (!$webs{$host}) {
+      is($webs{$host}, 0, "supposed to be down: http://$host/ [" . ($p->{bad}->{$host} || "") . "]");
+    } else {
+      ok("TODO ack: supposed to be down: http://$host/ [" . ($p->{bad}->{$host} || "") . "]");
+    }
   }
   delete $webs{$host};
   Alarm(20);

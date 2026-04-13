@@ -3,7 +3,10 @@
 use Config;
 
 BEGIN {
-    if ($ENV{PERL_CORE} and $Config{'extensions'} !~ /\bIO\b/ && $^O ne 'VMS') {
+    if ($ENV{PERL_CORE}
+        and $Config{'extensions'} !~ /\bIO\b/ && $^O ne 'VMS'
+        or not ${^TAINT}) # not ${^TAINT} => perl without taint support
+    {
 	print "1..0\n";
 	exit 0;
     }
@@ -21,27 +24,27 @@ plan(tests => 5);
 END { unlink "./__taint__$$" }
 
 use IO::File;
-my $x = new IO::File "> ./__taint__$$" || die("Cannot open ./__taint__$$\n");
+my $x = IO::File->new( "> ./__taint__$$" ) || die("Cannot open ./__taint__$$\n");
 print $x "$$\n";
 $x->close;
 
-$x = new IO::File "< ./__taint__$$" || die("Cannot open ./__taint__$$\n");
+$x = IO::File->new( "< ./__taint__$$" ) || die("Cannot open ./__taint__$$\n");
 chop(my $unsafe = <$x>);
 eval { kill 0 * $unsafe };
 SKIP: {
   skip($^O) if $^O eq 'MSWin32' or $^O eq 'NetWare';
-  like($@, '^Insecure');
+  like($@, qr/^Insecure/);
 }
 $x->close;
 
 # We could have just done a seek on $x, but technically we haven't tested
 # seek yet...
-$x = new IO::File "< ./__taint__$$" || die("Cannot open ./__taint__$$\n");
+$x = IO::File->new( "< ./__taint__$$" ) || die("Cannot open ./__taint__$$\n");
 $x->untaint;
 ok(!$?); # Calling the method worked
 chop($unsafe = <$x>);
 eval { kill 0 * $unsafe };
-unlike($@,'^Insecure');
+unlike($@,qr/^Insecure/);
 $x->close;
 
 TODO: {

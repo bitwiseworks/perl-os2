@@ -2,11 +2,13 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = '../lib';
     require './test.pl';
+    set_up_inc(qw '../lib ../cpan/Text-ParseWords/lib');
+    require Config; # load these before we mess with *CORE::GLOBAL::require
+    require 'Config_heavy.pl'; # since runperl will need them
 }
 
-plan tests => 28;
+plan tests => 36;
 
 #
 # This file tries to test builtin override using CORE::GLOBAL
@@ -49,7 +51,6 @@ is( $r, "Foo.pm" );
 eval "use Foo::Bar";
 is( $r, join($dirsep, "Foo", "Bar.pm") );
 
-# use VERSION also loads feature.pm.
 {
     my @r;
     local *CORE::GLOBAL::require = sub { push @r, shift; 1; };
@@ -61,12 +62,6 @@ is( $r, join($dirsep, "Foo", "Bar.pm") );
     local $_ = 'foo.pm';
     require;
     is( $r, 'foo.pm' );
-}
-
-{
-    my $_ = 'bar.pm';
-    require;
-    is( $r, 'bar.pm' );
 }
 
 # localizing *CORE::GLOBAL::foo should revert to finding CORE::foo
@@ -87,14 +82,20 @@ is( <FH>	, 12 );
 is( <$fh>	, 13 );
 my $pad_fh;
 is( <$pad_fh>	, 14 );
+{
+    my $buf = ''; $buf .= <FH>;
+    is( $buf, 15, 'rcatline' );
+}
 
 # Non-global readline() override
 BEGIN { *Rgs::readline = sub (;*) { --$r }; }
 {
     package Rgs;
-    ::is( <FH>	, 13 );
-    ::is( <$fh>	, 12 );
-    ::is( <$pad_fh>	, 11 );
+    ::is( <FH>	, 14 );
+    ::is( <$fh>	, 13 );
+    ::is( <$pad_fh>	, 12 );
+    my $buf = ''; $buf .= <FH>;
+    ::is( $buf, 11, 'rcatline' );
 }
 
 # Global readpipe() override
@@ -140,3 +141,39 @@ BEGIN { *OverridenPop::pop = sub { ::is( $_[0][0], "ok" ) }; }
     };
     is $@, '';
 }
+
+# Constant inlining should not countermand "use subs" overrides
+BEGIN { package other; *::caller = \&::caller }
+sub caller() { 42 }
+caller; # inline the constant
+is caller, 42, 'constant inlining does not undo "use subs" on keywords';
+
+is runperl(prog => 'sub CORE::GLOBAL::do; do file; print qq-ok\n-'),
+  "ok\n",
+  'no crash with CORE::GLOBAL::do stub';
+is runperl(prog => 'sub CORE::GLOBAL::glob; glob; print qq-ok\n-'),
+  "ok\n",
+  'no crash with CORE::GLOBAL::glob stub';
+is runperl(prog => 'sub CORE::GLOBAL::require; require re; print qq-o\n-'),
+  "o\n",
+  'no crash with CORE::GLOBAL::require stub';
+
+like runperl(prog => 'use constant foo=>1; '
+                    .'BEGIN { *{q|CORE::GLOBAL::readpipe|} = \&{q|foo|};1}'
+                    .'warn ``',
+             stderr => 1),
+     qr/Too many arguments/,
+    '`` does not ignore &CORE::GLOBAL::readpipe aliased to a constant';
+like runperl(prog => 'use constant foo=>1; '
+                    .'BEGIN { *{q|CORE::GLOBAL::readline|} = \&{q|foo|};1}'
+                    .'warn <a>',
+             stderr => 1),
+     qr/Too many arguments/,
+    '<> does not ignore &CORE::GLOBAL::readline aliased to a constant';
+
+is runperl(prog => 'use constant t=>42; '
+                  .'BEGIN { *{q|CORE::GLOBAL::time|} = \&{q|t|};1}'
+                  .'print time, chr utf8::unicode_to_native(10)',
+          stderr => 1),
+   "42\n",
+   'keywords respect global constant overrides';

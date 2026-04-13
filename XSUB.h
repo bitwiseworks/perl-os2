@@ -8,99 +8,110 @@
  *
  */
 
-#ifndef _INC_PERL_XSUB_H
-#define _INC_PERL_XSUB_H 1
+#ifndef PERL_XSUB_H_
+#define PERL_XSUB_H_ 1
 
 /* first, some documentation for xsubpp-generated items */
 
 /*
-=head1 Variables created by C<xsubpp> and C<xsubpp> internal functions
+=for apidoc_section $XS
 
-=for apidoc Amn|char*|CLASS
-Variable which is setup by C<xsubpp> to indicate the 
-class name for a C++ XS constructor.  This is always a C<char*>.  See C<THIS>.
+F<xsubpp> compiles XS code into C.  See L<perlutil/xsubpp>.
 
-=for apidoc Amn|(whatever)|RETVAL
-Variable which is setup by C<xsubpp> to hold the return value for an 
-XSUB. This is always the proper type for the XSUB. See 
+=for comment
+Some variables below are flagged with 'u' because Devel::PPPort can't currently
+readily test them as they spring into existence by compiling with xsubpp.
+
+=for apidoc Amnu|char*|CLASS
+Variable which is setup by C<xsubpp> to indicate the
+class name for a C++ XS constructor.  This is always a C<char*>.  See
+C<L</THIS>>.
+
+=for apidoc Amnu|type|RETVAL
+Variable which is setup by C<xsubpp> to hold the return value for an
+XSUB.  This is always the proper type for the XSUB.  See
 L<perlxs/"The RETVAL Variable">.
 
-=for apidoc Amn|(whatever)|THIS
-Variable which is setup by C<xsubpp> to designate the object in a C++ 
-XSUB.  This is always the proper type for the C++ object.  See C<CLASS> and 
+=for apidoc Amnu|type|THIS
+Variable which is setup by C<xsubpp> to designate the object in a C++
+XSUB.  This is always the proper type for the C++ object.  See C<L</CLASS>> and
 L<perlxs/"Using XS With C++">.
 
-=for apidoc Amn|I32|ax
+=for apidoc Amn|Stack_off_t|ax
 Variable which is setup by C<xsubpp> to indicate the stack base offset,
 used by the C<ST>, C<XSprePUSH> and C<XSRETURN> macros.  The C<dMARK> macro
 must be called prior to setup the C<MARK> variable.
 
-=for apidoc Amn|I32|items
-Variable which is setup by C<xsubpp> to indicate the number of 
+=for apidoc Amn|Stack_off_t|items
+Variable which is setup by C<xsubpp> to indicate the number of
 items on the stack.  See L<perlxs/"Variable-length Parameter Lists">.
 
 =for apidoc Amn|I32|ix
-Variable which is setup by C<xsubpp> to indicate which of an 
+Variable which is setup by C<xsubpp> to indicate which of an
 XSUB's aliases was used to invoke it.  See L<perlxs/"The ALIAS: Keyword">.
 
 =for apidoc Am|SV*|ST|int ix
 Used to access elements on the XSUB's stack.
 
-=for apidoc AmU||XS
+=for apidoc Ay||XS|name
 Macro to declare an XSUB and its C parameter list.  This is handled by
-C<xsubpp>. It is the same as using the more explicit XS_EXTERNAL macro.
+C<xsubpp>.  It is the same as using the more explicit C<XS_EXTERNAL> macro; the
+latter is preferred.
 
-=for apidoc AmU||XS_INTERNAL
+=for apidoc Ayu||XS_INTERNAL|name
 Macro to declare an XSUB and its C parameter list without exporting the symbols.
 This is handled by C<xsubpp> and generally preferable over exporting the XSUB
 symbols unnecessarily.
 
-=for apidoc AmU||XS_EXTERNAL
+=for comment
+XS_INTERNAL marked 'u' because declaring a function static within our test
+function doesn't work
+
+=for apidoc Ay||XS_EXTERNAL|name
 Macro to declare an XSUB and its C parameter list explicitly exporting the symbols.
 
-=for apidoc Ams||dAX
+=for apidoc Ay||XSPROTO|name
+Macro used by C<L</XS_INTERNAL>> and C<L</XS_EXTERNAL>> to declare a function
+prototype.  You probably shouldn't be using this directly yourself.
+
+=for apidoc Amn;||dAX
 Sets up the C<ax> variable.
 This is usually handled automatically by C<xsubpp> by calling C<dXSARGS>.
 
-=for apidoc Ams||dAXMARK
+=for apidoc Amn;||dAXMARK
 Sets up the C<ax> variable and stack marker variable C<mark>.
 This is usually handled automatically by C<xsubpp> by calling C<dXSARGS>.
 
-=for apidoc Ams||dITEMS
+=for apidoc Amn;||dITEMS
 Sets up the C<items> variable.
 This is usually handled automatically by C<xsubpp> by calling C<dXSARGS>.
 
-=for apidoc Ams||dXSARGS
-Sets up stack and mark pointers for an XSUB, calling dSP and dMARK.
+=for apidoc Amn;||dXSARGS
+Sets up stack and mark pointers for an XSUB, calling C<dSP> and C<dMARK>.
 Sets up the C<ax> and C<items> variables by calling C<dAX> and C<dITEMS>.
 This is usually handled automatically by C<xsubpp>.
 
-=for apidoc Ams||dXSI32
+=for apidoc Amn;||dXSI32
 Sets up the C<ix> variable for an XSUB which has aliases.  This is usually
 handled automatically by C<xsubpp>.
 
-=for apidoc Ams||dUNDERBAR
-Sets up any variable needed by the C<UNDERBAR> macro. It used to define
-C<padoff_du>, but it is currently a noop. However, it is strongly advised
+=for apidoc Amn;||dUNDERBAR
+Sets up any variable needed by the C<UNDERBAR> macro.  It used to define
+C<padoff_du>, but it is currently a noop.  However, it is strongly advised
 to still use it for ensuring past and future compatibility.
 
-=for apidoc AmU||UNDERBAR
-The SV* corresponding to the $_ variable. Works even if there
-is a lexical $_ in scope.
+=for apidoc AmnU||UNDERBAR
+The SV* corresponding to the C<$_> variable.  Works even if there
+is a lexical C<$_> in scope.
 
 =cut
 */
 
 #ifndef PERL_UNUSED_ARG
-#  if defined(lint) && defined(S_SPLINT_S) /* www.splint.org */
-#    include <note.h>
-#    define PERL_UNUSED_ARG(x) NOTE(ARGUNUSED(x))
-#  else
-#    define PERL_UNUSED_ARG(x) ((void)x)
-#  endif
+#  define PERL_UNUSED_ARG(x) ((void)sizeof(x))
 #endif
 #ifndef PERL_UNUSED_VAR
-#  define PERL_UNUSED_VAR(x) ((void)x)
+#  define PERL_UNUSED_VAR(x) ((void)sizeof(x))
 #endif
 
 #define ST(off) PL_stack_base[ax + (off)]
@@ -111,9 +122,6 @@ is a lexical $_ in scope.
  *     typedef SwigPerlWrapper *SwigPerlWrapperPtr;
  *
  * This code needs to be compilable under both C and C++.
- *
- * Don't forget to change the __attribute__unused__ version of XS()
- * below too if you change XSPROTO() here.
  */
 
 /* XS_INTERNAL is the explicit static-linkage variant of the default
@@ -123,57 +131,55 @@ is a lexical $_ in scope.
  * "STATIC", ie. it exports XSUB symbols. You probably don't want that.
  */
 
-#define XSPROTO(name) void name(pTHX_ CV* cv)
+#define XSPROTO(name) void name(pTHX_ CV* cv __attribute__unused__)
 
 #undef XS
 #undef XS_EXTERNAL
 #undef XS_INTERNAL
 #if defined(__CYGWIN__) && defined(USE_DYNAMIC_LOADING)
 #  define XS_EXTERNAL(name) __declspec(dllexport) XSPROTO(name)
-#  define XS_INTERNAL(name) STATIC XSPROTO(name)
+#elif defined(__cplusplus)
+#  define XS_EXTERNAL(name) extern "C" XSPROTO(name)
+#else
+#  define XS_EXTERNAL(name) XSPROTO(name)
 #endif
-#if defined(__SYMBIAN32__)
-#  define XS_EXTERNAL(name) EXPORT_C XSPROTO(name)
-#  define XS_INTERNAL(name) EXPORT_C STATIC XSPROTO(name)
-#endif
-#ifndef XS_EXTERNAL
-#  if defined(HASATTRIBUTE_UNUSED) && !defined(__cplusplus)
-#    define XS_EXTERNAL(name) void name(pTHX_ CV* cv __attribute__unused__)
-#    define XS_INTERNAL(name) STATIC void name(pTHX_ CV* cv __attribute__unused__)
-#  else
-#    ifdef __cplusplus
-#      define XS_EXTERNAL(name) extern "C" XSPROTO(name)
-#      define XS_INTERNAL(name) static XSPROTO(name)
-#    else
-#      define XS_EXTERNAL(name) XSPROTO(name)
-#      define XS_INTERNAL(name) STATIC XSPROTO(name)
-#    endif
-#  endif
-#endif
+#define XS_INTERNAL(name) STATIC XSPROTO(name)
 
 /* We do export xsub symbols by default for the public XS macro.
  * Try explicitly using XS_INTERNAL/XS_EXTERNAL instead, please. */
 #define XS(name) XS_EXTERNAL(name)
 
-#define dAX const I32 ax = (I32)(MARK - PL_stack_base + 1)
+#define dAX const Stack_off_t ax = (Stack_off_t)(MARK - PL_stack_base + 1)
 
 #define dAXMARK				\
-	I32 ax = POPMARK;	\
-	register SV **mark = PL_stack_base + ax++
+        Stack_off_t ax = POPMARK;	\
+        SV **mark = PL_stack_base + ax++
 
-#define dITEMS I32 items = (I32)(SP - MARK)
+#define dITEMS Stack_off_t items = (Stack_off_t)(SP - MARK)
 
-#if defined(lint) && defined(S_SPLINT_S) /* www.splint.org */
-#  define dXSARGS \
-	NOTE(ARGUNUSED(cv)) \
-	dSP; dAXMARK; dITEMS
-#else
-#  define dXSARGS \
-	dSP; dAXMARK; dITEMS
-#endif
+#define dXSARGS \
+        dSP; dAXMARK; dITEMS
+/* These 3 macros are replacements for dXSARGS macro only in bootstrap.
+   They factor out common code in every BOOT XSUB. Computation of vars mark
+   and items will optimize away in most BOOT functions. Var ax can never be
+   optimized away since BOOT must return &PL_sv_yes by default from xsubpp.
+   Note these macros are not drop in replacements for dXSARGS since they set
+   PL_xsubfilename. */
+#define dXSBOOTARGSXSAPIVERCHK  \
+        Stack_off_t ax = XS_BOTHVERSION_SETXSUBFN_POPMARK_BOOTCHECK;	\
+        SV **mark = PL_stack_base + ax - 1; dSP; dITEMS
+#define dXSBOOTARGSAPIVERCHK  \
+        Stack_off_t ax = XS_APIVERSION_SETXSUBFN_POPMARK_BOOTCHECK;	\
+        SV **mark = PL_stack_base + ax - 1; dSP; dITEMS
+/* dXSBOOTARGSNOVERCHK has no API in xsubpp to choose it so do
+#undef dXSBOOTARGSXSAPIVERCHK
+#define dXSBOOTARGSXSAPIVERCHK dXSBOOTARGSNOVERCHK */
+#define dXSBOOTARGSNOVERCHK  \
+        Stack_off_t ax = XS_SETXSUBFN_POPMARK;  \
+        SV **mark = PL_stack_base + ax - 1; dSP; dITEMS
 
 #define dXSTARG SV * const targ = ((PL_op->op_private & OPpENTERSUB_HASTARG) \
-			     ? PAD_SV(PL_op->op_targ) : sv_newmortal())
+                             ? PAD_SV(PL_op->op_targ) : sv_newmortal())
 
 /* Should be used before final PUSHi etc. if not in PPCODE section. */
 #define XSprePUSH (sp = PL_stack_base + ax - 1)
@@ -192,7 +198,7 @@ is a lexical $_ in scope.
 #define dXSFUNCTION(ret)		XSINTERFACE_CVT(ret,XSFUNCTION)
 #define XSINTERFACE_FUNC(ret,cv,f)     ((XSINTERFACE_CVT_ANON(ret))(f))
 #define XSINTERFACE_FUNC_SET(cv,f)	\
-		CvXSUBANY(cv).any_dxptr = (void (*) (pTHX_ void*))(f)
+                CvXSUBANY(cv).any_dxptr = (void (*) (pTHX_ void*))(f)
 
 #define dUNDERBAR dNOOP
 #define UNDERBAR  find_rundefsv()
@@ -201,7 +207,7 @@ is a lexical $_ in scope.
 /* Typically used to return values from XS functions.       */
 
 /*
-=head1 Stack Manipulation Macros
+=for apidoc_section $stack
 
 =for apidoc Am|void|XST_mIV|int pos|IV iv
 Place an integer into the specified position C<pos> on the stack.  The
@@ -212,8 +218,12 @@ Place a double into the specified position C<pos> on the stack.  The value
 is stored in a new mortal SV.
 
 =for apidoc Am|void|XST_mPV|int pos|char* str
-Place a copy of a string into the specified position C<pos> on the stack. 
+Place a copy of a string into the specified position C<pos> on the stack.
 The value is stored in a new mortal SV.
+
+=for apidoc Am|void|XST_mUV|int pos|UV uv
+Place an unsigned integer into the specified position C<pos> on the stack.  The
+value is stored in a new mortal SV.
 
 =for apidoc Am|void|XST_mNO|int pos
 Place C<&PL_sv_no> into the specified position C<pos> on the
@@ -243,53 +253,52 @@ Return a double from an XSUB immediately.  Uses C<XST_mNV>.
 =for apidoc Am|void|XSRETURN_PV|char* str
 Return a copy of a string from an XSUB immediately.  Uses C<XST_mPV>.
 
-=for apidoc Ams||XSRETURN_NO
+=for apidoc Amn;||XSRETURN_NO
 Return C<&PL_sv_no> from an XSUB immediately.  Uses C<XST_mNO>.
 
-=for apidoc Ams||XSRETURN_YES
+=for apidoc Amn;||XSRETURN_YES
 Return C<&PL_sv_yes> from an XSUB immediately.  Uses C<XST_mYES>.
 
-=for apidoc Ams||XSRETURN_UNDEF
+=for apidoc Amn;||XSRETURN_UNDEF
 Return C<&PL_sv_undef> from an XSUB immediately.  Uses C<XST_mUNDEF>.
 
-=for apidoc Ams||XSRETURN_EMPTY
+=for apidoc Amn;||XSRETURN_EMPTY
 Return an empty list from an XSUB immediately.
-
-=head1 Variables created by C<xsubpp> and C<xsubpp> internal functions
 
 =for apidoc AmU||newXSproto|char* name|XSUBADDR_t f|char* filename|const char *proto
 Used by C<xsubpp> to hook up XSUBs as Perl subs.  Adds Perl prototypes to
 the subs.
 
-=for apidoc AmU||XS_VERSION
+=for apidoc AmnU||XS_VERSION
 The version identifier for an XS module.  This is usually
-handled automatically by C<ExtUtils::MakeMaker>.  See C<XS_VERSION_BOOTCHECK>.
+handled automatically by C<ExtUtils::MakeMaker>.  See
+C<L</XS_VERSION_BOOTCHECK>>.
 
-=for apidoc Ams||XS_VERSION_BOOTCHECK
-Macro to verify that a PM module's $VERSION variable matches the XS
+=for apidoc Amn;||XS_VERSION_BOOTCHECK
+Macro to verify that a PM module's C<$VERSION> variable matches the XS
 module's C<XS_VERSION> variable.  This is usually handled automatically by
 C<xsubpp>.  See L<perlxs/"The VERSIONCHECK: Keyword">.
 
-=for apidoc Ams||XS_APIVERSION_BOOTCHECK
+=for apidoc Amn;||XS_APIVERSION_BOOTCHECK
 Macro to verify that the perl api version an XS module has been compiled against
 matches the api version of the perl interpreter it's being loaded into.
 
-=head1 Simple Exception Handling Macros
+=for apidoc_section $exceptions
 
-=for apidoc Ams||dXCPT
+=for apidoc Amn;||dXCPT
 Set up necessary local variables for exception handling.
 See L<perlguts/"Exception Handling">.
 
-=for apidoc AmU||XCPT_TRY_START
+=for apidoc AmnU||XCPT_TRY_START
 Starts a try block.  See L<perlguts/"Exception Handling">.
 
-=for apidoc AmU||XCPT_TRY_END
+=for apidoc AmnU||XCPT_TRY_END
 Ends a try block.  See L<perlguts/"Exception Handling">.
 
-=for apidoc AmU||XCPT_CATCH
+=for apidoc AmnU||XCPT_CATCH
 Introduces a catch block.  See L<perlguts/"Exception Handling">.
 
-=for apidoc Ams||XCPT_RETHROW
+=for apidoc Amn;||XCPT_RETHROW
 Rethrows a previously caught exception.  See L<perlguts/"Exception Handling">.
 
 =cut
@@ -306,32 +315,77 @@ Rethrows a previously caught exception.  See L<perlguts/"Exception Handling">.
 
 #define XSRETURN(off)					\
     STMT_START {					\
-	const IV tmpXSoff = (off);			\
-	PL_stack_sp = PL_stack_base + ax + (tmpXSoff - 1);	\
-	return;						\
+        const IV tmpXSoff = (off);			\
+        assert(tmpXSoff >= 0);\
+        PL_stack_sp = PL_stack_base + ax + (tmpXSoff - 1);	\
+        return;						\
     } STMT_END
 
-#define XSRETURN_IV(v) STMT_START { XST_mIV(0,v);  XSRETURN(1); } STMT_END
-#define XSRETURN_UV(v) STMT_START { XST_mUV(0,v);  XSRETURN(1); } STMT_END
-#define XSRETURN_NV(v) STMT_START { XST_mNV(0,v);  XSRETURN(1); } STMT_END
-#define XSRETURN_PV(v) STMT_START { XST_mPV(0,v);  XSRETURN(1); } STMT_END
-#define XSRETURN_PVN(v,n) STMT_START { XST_mPVN(0,v,n);  XSRETURN(1); } STMT_END
-#define XSRETURN_NO    STMT_START { XST_mNO(0);    XSRETURN(1); } STMT_END
-#define XSRETURN_YES   STMT_START { XST_mYES(0);   XSRETURN(1); } STMT_END
-#define XSRETURN_UNDEF STMT_START { XST_mUNDEF(0); XSRETURN(1); } STMT_END
-#define XSRETURN_EMPTY STMT_START {                XSRETURN(0); } STMT_END
+#define XSRETURN_IV(v)    STMT_START { XST_mIV(0,v);    XSRETURN(1); } STMT_END
+#define XSRETURN_UV(v)    STMT_START { XST_mUV(0,v);    XSRETURN(1); } STMT_END
+#define XSRETURN_NV(v)    STMT_START { XST_mNV(0,v);    XSRETURN(1); } STMT_END
+#define XSRETURN_PV(v)    STMT_START { XST_mPV(0,v);    XSRETURN(1); } STMT_END
+#define XSRETURN_PVN(v,n) STMT_START { XST_mPVN(0,v,n); XSRETURN(1); } STMT_END
+#define XSRETURN_NO       STMT_START { XST_mNO(0);      XSRETURN(1); } STMT_END
+#define XSRETURN_YES      STMT_START { XST_mYES(0);     XSRETURN(1); } STMT_END
+#define XSRETURN_UNDEF    STMT_START { XST_mUNDEF(0);   XSRETURN(1); } STMT_END
+#define XSRETURN_EMPTY    STMT_START {                  XSRETURN(0); } STMT_END
 
 #define newXSproto(a,b,c,d)	newXS_flags(a,b,c,d,0)
 
 #ifdef XS_VERSION
 #  define XS_VERSION_BOOTCHECK						\
-    Perl_xs_version_bootcheck(aTHX_ items, ax, STR_WITH_LEN(XS_VERSION))
+    Perl_xs_handshake(HS_KEY(FALSE, FALSE, "", XS_VERSION), HS_CXT, __FILE__,	\
+        items, ax, XS_VERSION)
 #else
 #  define XS_VERSION_BOOTCHECK
 #endif
 
 #define XS_APIVERSION_BOOTCHECK						\
-    Perl_xs_apiversion_bootcheck(aTHX_ ST(0), STR_WITH_LEN("v" PERL_API_VERSION_STRING))
+    Perl_xs_handshake(HS_KEY(FALSE, FALSE, "v" PERL_API_VERSION_STRING, ""),	\
+        HS_CXT, __FILE__, items, ax, "v" PERL_API_VERSION_STRING)
+/* public API, this is a combination of XS_VERSION_BOOTCHECK and
+   XS_APIVERSION_BOOTCHECK in 1, and is backportable */
+#ifdef XS_VERSION
+#  define XS_BOTHVERSION_BOOTCHECK						\
+    Perl_xs_handshake(HS_KEY(FALSE, FALSE, "v" PERL_API_VERSION_STRING, XS_VERSION),	\
+        HS_CXT, __FILE__, items, ax, "v" PERL_API_VERSION_STRING, XS_VERSION)
+#else
+/* should this be a #error? if you want both checked, you better supply XS_VERSION right? */
+#  define XS_BOTHVERSION_BOOTCHECK XS_APIVERSION_BOOTCHECK
+#endif
+
+/* private API */
+#define XS_APIVERSION_POPMARK_BOOTCHECK					\
+    Perl_xs_handshake(HS_KEY(FALSE, TRUE, "v" PERL_API_VERSION_STRING, ""),	\
+        HS_CXT, __FILE__, "v" PERL_API_VERSION_STRING)
+#ifdef XS_VERSION
+#  define XS_BOTHVERSION_POPMARK_BOOTCHECK					\
+    Perl_xs_handshake(HS_KEY(FALSE, TRUE, "v" PERL_API_VERSION_STRING, XS_VERSION),	\
+        HS_CXT, __FILE__, "v" PERL_API_VERSION_STRING, XS_VERSION)
+#else
+/* should this be a #error? if you want both checked, you better supply XS_VERSION right? */
+#  define XS_BOTHVERSION_POPMARK_BOOTCHECK XS_APIVERSION_POPMARK_BOOTCHECK
+#endif
+
+#define XS_APIVERSION_SETXSUBFN_POPMARK_BOOTCHECK				\
+    Perl_xs_handshake(HS_KEY(TRUE, TRUE, "v" PERL_API_VERSION_STRING, ""),	\
+        HS_CXT, __FILE__, "v" PERL_API_VERSION_STRING)
+#ifdef XS_VERSION
+#  define XS_BOTHVERSION_SETXSUBFN_POPMARK_BOOTCHECK				  \
+    Perl_xs_handshake(HS_KEY(TRUE, TRUE, "v" PERL_API_VERSION_STRING, XS_VERSION),\
+        HS_CXT, __FILE__, "v" PERL_API_VERSION_STRING, XS_VERSION)
+#else
+/* should this be a #error? if you want both checked, you better supply XS_VERSION right? */
+#  define XS_BOTHVERSION_SETXSUBFN_POPMARK_BOOTCHECK XS_APIVERSION_SETXSUBFN_POPMARK_BOOTCHECK
+#endif
+
+/* For a normal bootstrap without API or XS version checking.
+   Useful for static XS modules or debugging/testing scenarios.
+   If this macro gets heavily used in the future, it should separated into
+   a separate function independent of Perl_xs_handshake for efficiency */
+#define XS_SETXSUBFN_POPMARK \
+    Perl_xs_handshake(HS_KEY(TRUE, TRUE, "", "") | HSf_NOCHK, HS_CXT, __FILE__)
 
 #ifdef NO_XSLOCKS
 #  define dXCPT             dJMPENV; int rEtV = 0
@@ -347,48 +401,49 @@ Rethrows a previously caught exception.  See L<perlguts/"Exception Handling">.
 */
 
 #define DBM_setFilter(db_type,code)				\
-	STMT_START {						\
-	    if (db_type)					\
-	        RETVAL = sv_mortalcopy(db_type) ;		\
-	    ST(0) = RETVAL ;					\
-	    if (db_type && (code == &PL_sv_undef)) {		\
-                SvREFCNT_dec(db_type) ;				\
-	        db_type = NULL ;				\
-	    }							\
-	    else if (code) {					\
-	        if (db_type)					\
-	            sv_setsv(db_type, code) ;			\
-	        else						\
-	            db_type = newSVsv(code) ;			\
-	    }	    						\
-	} STMT_END
+        STMT_START {						\
+            if (db_type)					\
+                RETVAL = sv_mortalcopy(db_type) ;		\
+            ST(0) = RETVAL ;					\
+            if (db_type && (code == &PL_sv_undef)) {		\
+                SvREFCNT_dec_NN(db_type) ;			\
+                db_type = NULL ;				\
+            }							\
+            else if (code) {					\
+                if (db_type)					\
+                    sv_setsv(db_type, code) ;			\
+                else						\
+                    db_type = newSVsv(code) ;			\
+            }	    						\
+        } STMT_END
 
 #define DBM_ckFilter(arg,type,name)				\
-        STMT_START {						\
-	if (db->type) {						\
-	    if (db->filtering) {				\
-	        croak("recursion detected in %s", name) ;	\
-	    }                     				\
-	    ENTER ;						\
-	    SAVETMPS ;						\
-	    SAVEINT(db->filtering) ;				\
-	    db->filtering = TRUE ;				\
-	    SAVE_DEFSV ;					\
+    STMT_START {						\
+        if (db->type) {						\
+            if (db->filtering) {				\
+                croak("recursion detected in %s", name) ;	\
+            }                     				\
+            ENTER ;						\
+            SAVETMPS ;						\
+            SAVEINT(db->filtering) ;				\
+            db->filtering = TRUE ;				\
+            SAVE_DEFSV ;					\
             if (name[7] == 's')                                 \
                 arg = newSVsv(arg);                             \
-	    DEFSV_set(arg) ;					\
-	    SvTEMP_off(arg) ;					\
-	    PUSHMARK(SP) ;					\
-	    PUTBACK ;						\
-	    (void) perl_call_sv(db->type, G_DISCARD); 		\
-	    SPAGAIN ;						\
-	    PUTBACK ;						\
-	    FREETMPS ;						\
-	    LEAVE ;						\
+            DEFSV_set(arg) ;					\
+            SvTEMP_off(arg) ;					\
+            PUSHMARK(SP) ;					\
+            PUTBACK ;						\
+            (void) perl_call_sv(db->type, G_DISCARD); 		\
+            SPAGAIN ;						\
+            PUTBACK ;						\
+            FREETMPS ;						\
+            LEAVE ;						\
             if (name[7] == 's'){                                \
                 arg = sv_2mortal(arg);                          \
             }                                                   \
-	} } STMT_END                                                     
+        }                                                       \
+    } STMT_END
 
 #if 1		/* for compatibility */
 #  define VTBL_sv		&PL_vtbl_sv
@@ -422,9 +477,7 @@ Rethrows a previously caught exception.  See L<perlguts/"Exception Handling">.
 #  define VTBL_amagicelem	&PL_vtbl_amagicelem
 #endif
 
-#include "perlapi.h"
-
-#if defined(PERL_IMPLICIT_CONTEXT) && !defined(PERL_NO_GET_CONTEXT) && !defined(PERL_CORE)
+#if defined(MULTIPLICITY) && !defined(PERL_NO_GET_CONTEXT) && !defined(PERL_CORE)
 #  undef aTHX
 #  undef aTHX_
 #  define aTHX		PERL_GET_THX
@@ -433,15 +486,6 @@ Rethrows a previously caught exception.  See L<perlguts/"Exception Handling">.
 
 #if defined(PERL_IMPLICIT_SYS) && !defined(PERL_CORE)
 #  ifndef NO_XSLOCKS
-# if defined (NETWARE) && defined (USE_STDIO)
-#    define times		PerlProc_times
-#    define setuid		PerlProc_setuid
-#    define setgid		PerlProc_setgid
-#    define getpid		PerlProc_getpid
-#    define pause		PerlProc_pause
-#    define exit		PerlProc_exit
-#    define _exit		PerlProc__exit
-# else
 #    undef closedir
 #    undef opendir
 #    undef stdin
@@ -452,39 +496,9 @@ Rethrows a previously caught exception.  See L<perlguts/"Exception Handling">.
 #    undef fgetpos
 #    undef ioctl
 #    undef getlogin
-#    undef setjmp
 #    undef getc
 #    undef ungetc
 #    undef fileno
-
-/* Following symbols were giving redefinition errors while building extensions - sgp 17th Oct 2000 */
-#ifdef NETWARE
-#	undef readdir
-#	undef fstat
-#	undef stat
-#	undef longjmp
-#	undef endhostent
-#	undef endnetent
-#	undef endprotoent
-#	undef endservent
-#	undef gethostbyaddr
-#	undef gethostbyname
-#	undef gethostent
-#	undef getnetbyaddr
-#	undef getnetbyname
-#	undef getnetent
-#	undef getprotobyname
-#	undef getprotobynumber
-#	undef getprotoent
-#	undef getservbyname
-#	undef getservbyport
-#	undef getservent
-#	undef inet_ntoa
-#	undef sethostent
-#	undef setnetent
-#	undef setprotoent
-#	undef setservent
-#endif	/* NETWARE */
 
 /* to avoid warnings: "xyz" redefined */
 #ifdef WIN32
@@ -561,6 +575,7 @@ Rethrows a previously caught exception.  See L<perlguts/"Exception Handling">.
 #    define utime		PerlLIO_utime
 #    define write		PerlLIO_write
 #    define malloc		PerlMem_malloc
+#    define calloc              PerlMem_calloc
 #    define realloc		PerlMem_realloc
 #    define free		PerlMem_free
 #    define abort		PerlProc_abort
@@ -585,8 +600,6 @@ Rethrows a previously caught exception.  See L<perlguts/"Exception Handling">.
 #    define sleep		PerlProc_sleep
 #    define times		PerlProc_times
 #    define wait		PerlProc_wait
-#    define setjmp		PerlProc_setjmp
-#    define longjmp		PerlProc_longjmp
 #    define signal		PerlProc_signal
 #    define getpid		PerlProc_getpid
 #    define gettimeofday	PerlProc_gettimeofday
@@ -633,32 +646,23 @@ Rethrows a previously caught exception.  See L<perlguts/"Exception Handling">.
 #    define shutdown		PerlSock_shutdown
 #    define socket		PerlSock_socket
 #    define socketpair		PerlSock_socketpair
-#	endif	/* NETWARE && USE_STDIO */
 
-#    ifdef USE_SOCKETS_AS_HANDLES
-#      undef fd_set
-#      undef FD_SET
-#      undef FD_CLR
-#      undef FD_ISSET
-#      undef FD_ZERO
-#      define fd_set		Perl_fd_set
-#      define FD_SET(n,p)	PERL_FD_SET(n,p)
-#      define FD_CLR(n,p)	PERL_FD_CLR(n,p)
-#      define FD_ISSET(n,p)	PERL_FD_ISSET(n,p)
-#      define FD_ZERO(p)	PERL_FD_ZERO(p)
-#    endif	/* USE_SOCKETS_AS_HANDLES */
+#    undef fd_set
+#    undef FD_SET
+#    undef FD_CLR
+#    undef FD_ISSET
+#    undef FD_ZERO
+#    define fd_set		Perl_fd_set
+#    define FD_SET(n,p)		PERL_FD_SET(n,p)
+#    define FD_CLR(n,p)		PERL_FD_CLR(n,p)
+#    define FD_ISSET(n,p)	PERL_FD_ISSET(n,p)
+#    define FD_ZERO(p)		PERL_FD_ZERO(p)
 
 #  endif  /* NO_XSLOCKS */
 #endif  /* PERL_IMPLICIT_SYS && !PERL_CORE */
 
-#endif /* _INC_PERL_XSUB_H */		/* include guard */
+#endif /* PERL_XSUB_H_ */		/* include guard */
 
 /*
- * Local variables:
- * c-indentation-style: bsd
- * c-basic-offset: 4
- * indent-tabs-mode: t
- * End:
- *
- * ex: set ts=8 sts=4 sw=4 noet:
+ * ex: set ts=8 sts=4 sw=4 et:
  */

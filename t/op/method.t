@@ -6,17 +6,45 @@
 
 BEGIN {
     chdir 't' if -d 't';
-    @INC = qw(. ../lib);
-    require "test.pl";
+    require "./test.pl";
+    set_up_inc( qw(. ../lib lib ../dist/base/lib) );
 }
 
 use strict;
 no warnings 'once';
 
-plan(tests => 95);
+plan(tests => 163);
 
-@A::ISA = 'B';
-@B::ISA = 'C';
+{
+    # RT #126042 &{1==1} * &{1==1} would crash
+    # There are two issues here.  Method lookup yields a fake method for
+    # ->import or ->unimport if there's no actual method, for historical
+    # reasons so that "use" doesn't barf if there's no import method.
+    # The first bug, the one which caused the crash, is that the fake
+    # method was broken in scalar context, messing up the stack.  We test
+    # for that on its own.
+    foreach my $meth (qw(import unimport)) {
+	is join(",", map { $_ // "u" } "a", "b", "Unknown"->$meth, "c", "d"), "a,b,c,d", "Unknown->$meth in list context";
+	is join(",", map { $_ // "u" } "a", "b", scalar("Unknown"->$meth), "c", "d"), "a,b,u,c,d", "Unknown->$meth in scalar context";
+    }
+    # The second issue is that the fake method wasn't actually a CV or
+    # anything referencing a CV, but was &PL_sv_yes being used as a magic
+    # placeholder.  That's inconsistent with &PL_sv_yes being a string,
+    # which we'd expect to serve as a symbolic CV ref.  This test must
+    # come before AUTOLOAD gets set up below.
+    foreach my $one (1, !!1) {
+	my @res = eval { no strict "refs"; &$one() };
+	like $@, qr/\AUndefined subroutine \&main::1 called at /;
+	@res = eval { no strict "refs"; local *1 = sub { 123 }; &$one() };
+	is $@, "";
+	is "@res", "123";
+	@res = eval { &$one() };
+	like $@, qr/\ACan't use string \("1"\) as a subroutine ref while "strict refs" in use at /;
+    }
+}
+
+@A::ISA = 'BB';
+@BB::ISA = 'C';
 
 sub C::d {"C::d"}
 sub D::d {"D::d"}
@@ -55,7 +83,7 @@ is(method $obj, "method");
 
 is( A->d, "C::d");		# Update hash table;
 
-*B::d = \&D::d;			# Import now.
+*BB::d = \&D::d;			# Import now.
 is(A->d, "D::d");		# Update hash table;
 
 {
@@ -67,42 +95,42 @@ is(A->d, "D::d");		# Update hash table;
 is(A->d, "D::d");
 
 {
-    local *B::d;
-    eval 'sub B::d {"B::d1"}';	# Import now.
-    is(A->d, "B::d1");	# Update hash table;
-    undef &B::d;
+    local *BB::d;
+    eval 'sub BB::d {"BB::d1"}';	# Import now.
+    is(A->d, "BB::d1");	# Update hash table;
+    undef &BB::d;
     is((eval { A->d }, ($@ =~ /Undefined subroutine/)), 1);
 }
 
 is(A->d, "D::d");		# Back to previous state
 
-eval 'no warnings "redefine"; sub B::d {"B::d2"}';	# Import now.
-is(A->d, "B::d2");		# Update hash table;
+eval 'no warnings "redefine"; sub BB::d {"BB::d2"}';	# Import now.
+is(A->d, "BB::d2");		# Update hash table;
 
 # What follows is hardly guarantied to work, since the names in scripts
-# are already linked to "pruned" globs. Say, 'undef &B::d' if it were
-# after 'delete $B::{d}; sub B::d {}' would reach an old subroutine.
+# are already linked to "pruned" globs. Say, 'undef &BB::d' if it were
+# after 'delete $BB::{d}; sub BB::d {}' would reach an old subroutine.
 
-undef &B::d;
-delete $B::{d};
+undef &BB::d;
+delete $BB::{d};
 is(A->d, "C::d");
 
-eval 'sub B::d {"B::d2.5"}';
+eval 'sub BB::d {"BB::d2.5"}';
 A->d;				# Update hash table;
-my $glob = \delete $B::{d};	# non-void context; hang on to the glob
+my $glob = \delete $BB::{d};	# non-void context; hang on to the glob
 is(A->d, "C::d");		# Update hash table;
 
-eval 'sub B::d {"B::d3"}';	# Import now.
-is(A->d, "B::d3");		# Update hash table;
+eval 'sub BB::d {"BB::d3"}';	# Import now.
+is(A->d, "BB::d3");		# Update hash table;
 
-delete $B::{d};
+delete $BB::{d};
 *dummy::dummy = sub {};		# Mark as updated
 is(A->d, "C::d");
 
-eval 'sub B::d {"B::d4"}';	# Import now.
-is(A->d, "B::d4");		# Update hash table;
+eval 'sub BB::d {"BB::d4"}';	# Import now.
+is(A->d, "BB::d4");		# Update hash table;
 
-delete $B::{d};			# Should work without any help too
+delete $BB::{d};			# Should work without any help too
 is(A->d, "C::d");
 
 {
@@ -119,23 +147,23 @@ my $counter;
 
 eval <<'EOF';
 sub C::e;
-BEGIN { *B::e = \&C::e }	# Shouldn't prevent AUTOLOAD in original pkg
+BEGIN { *BB::e = \&C::e }	# Shouldn't prevent AUTOLOAD in original pkg
 sub Y::f;
 $counter = 0;
 
 @X::ISA = 'Y';
-@Y::ISA = 'B';
+@Y::ISA = 'BB';
 
-sub B::AUTOLOAD {
+sub BB::AUTOLOAD {
   my $c = ++$counter;
-  my $method = $B::AUTOLOAD; 
+  my $method = $BB::AUTOLOAD;
   my $msg = "B: In $method, $c";
   eval "sub $method { \$msg }";
   goto &$method;
 }
 sub C::AUTOLOAD {
   my $c = ++$counter;
-  my $method = $C::AUTOLOAD; 
+  my $method = $C::AUTOLOAD;
   my $msg = "C: In $method, $c";
   eval "sub $method { \$msg }";
   goto &$method;
@@ -157,10 +185,10 @@ is(Y->f(), "B: In Y::f, 3");	# Which sticks
 
 {
 no warnings 'redefine';
-*B::AUTOLOAD = sub {
+*BB::AUTOLOAD = sub {
   use warnings;
   my $c = ++$counter;
-  my $method = $::AUTOLOAD; 
+  my $method = $::AUTOLOAD;
   no strict 'refs';
   *$::AUTOLOAD = sub { "new B: In $method, $c" };
   goto &$::AUTOLOAD;
@@ -169,15 +197,6 @@ no warnings 'redefine';
 
 is(A->eee(), "new B: In A::eee, 4");	# We get a correct $autoload
 is(A->eee(), "new B: In A::eee, 4");	# Which sticks
-
-{
-    no strict 'refs';
-    no warnings 'deprecated';
-    # this test added due to bug discovery (in 5.004_04, fb73857aa0bfa8ed)
-    # Possibly kill this test now that defined @::array is finally properly
-    # deprecated?
-    is(defined(@{"unknown_package::ISA"}) ? "defined" : "undefined", "undefined");
-}
 
 # test that failed subroutine calls don't affect method calls
 {
@@ -207,7 +226,7 @@ my $e;
 
 eval '$e = bless {}, "E::A"; E::A->foo()';
 like ($@, qr/^\QCan't locate object method "foo" via package "E::A" at/);
-eval '$e = bless {}, "E::B"; $e->foo()';  
+eval '$e = bless {}, "E::B"; $e->foo()';
 like ($@, qr/^\QCan't locate object method "foo" via package "E::B" at/);
 eval 'E::C->foo()';
 like ($@, qr/^\QCan't locate object method "foo" via package "E::C" (perhaps /);
@@ -223,7 +242,74 @@ like ($@, qr/^\QCan't locate object method "foo" via package "E::F" at/);
 eval '$e = bless {}, "UNIVERSAL"; $e->E::F::foo()';
 like ($@, qr/^\QCan't locate object method "foo" via package "E::F" at/);
 
-# TODO: we need some tests for the SUPER:: pseudoclass
+# SUPER:: pseudoclass
+@Saab::ISA = "Souper";
+sub Souper::method { @_ }
+@OtherSaab::ISA = "OtherSouper";
+sub OtherSouper::method { "Isidore Ropen, Draft Manager" }
+{
+   my $o = bless [], "Saab";
+   package Saab;
+   my @ret = $o->SUPER::method('whatever');
+   ::is $ret[0], $o, 'object passed to SUPER::method';
+   ::is $ret[1], 'whatever', 'argument passed to SUPER::method';
+   {
+       no warnings qw(syntax deprecated);
+       @ret = $o->SUPER'method('whatever');
+   }
+   ::is $ret[0], $o, "object passed to SUPER'method";
+   ::is $ret[1], 'whatever', "argument passed to SUPER'method";
+   @ret = Saab->SUPER::method;
+   ::is $ret[0], 'Saab', "package name passed to SUPER::method";
+   @ret = OtherSaab->SUPER::method;
+   ::is $ret[0], 'OtherSaab',
+      "->SUPER::method uses current package, not invocant";
+}
+() = *SUPER::;
+{
+   local our @ISA = "Souper";
+   is eval { (main->SUPER::method)[0] }, 'main',
+      'Mentioning *SUPER:: does not stop ->SUPER from working in main';
+}
+{
+    BEGIN {
+        *Mover:: = *Mover2::;
+        *Mover2:: = *foo;
+    }
+    package Mover;
+    no strict;
+    # Not our(@ISA), because the bug we are testing for interacts with an
+    # our() bug that cancels this bug out.
+    @ISA = 'door';
+    sub door::dohtem { 'dohtem' }
+    ::is eval { Mover->SUPER::dohtem; }, 'dohtem',
+        'SUPER inside moved package';
+    undef *door::dohtem;
+    *door::dohtem = sub { 'method' };
+    ::is eval { Mover->SUPER::dohtem; }, 'method',
+        'SUPER inside moved package respects method changes';
+}
+
+package foo120694 {
+    BEGIN { our @ISA = qw(bar120694) }
+
+    sub AUTOLOAD {
+        my $self = shift;
+        local our $recursive = $recursive;
+        return "recursive" if $recursive++;
+        return if our $AUTOLOAD eq 'DESTROY';
+        $AUTOLOAD = "SUPER:" . substr $AUTOLOAD, rindex($AUTOLOAD, ':');
+        return $self->$AUTOLOAD(@_);
+    }
+}
+package bar120694 {
+    sub AUTOLOAD {
+        return "xyzzy";
+    }
+}
+is bless( [] => "foo120694" )->plugh, 'xyzzy',
+    '->SUPER::method autoloading uses parent of current pkg';
+
 
 # failed method call or UNIVERSAL::can() should not autovivify packages
 is( $::{"Foo::"} || "none", "none");  # sanity check 1
@@ -256,7 +342,7 @@ is( Foo->boogie(), "yes, sir!");
 eval 'sub AUTOLOAD { "ok ", shift, "\n"; }';
 ok(1);
 
-# Bug ID 20010902.002
+# Bug ID 20010902.002 (#7609)
 is(
     eval q[
 	my $x = 'x'; # Lexical or package variable, 5.6.1 panics.
@@ -281,7 +367,7 @@ is(
     is($w, '');
 }
 
-# [ID 20020305.025] PACKAGE::SUPER doesn't work anymore
+# [ID 20020305.025 (#8788)] PACKAGE::SUPER doesn't work anymore
 
 package main;
 our @X;
@@ -306,6 +392,7 @@ for my $meth (['Bar', 'Foo::Bar'],
 {
     fresh_perl_is(<<EOT,
 package UNIVERSAL; sub AUTOLOAD { my \$c = shift; print "\$c \$AUTOLOAD\\n" }
+sub DESTROY {} # prevent AUTOLOAD being called on DESTROY
 package Xyz;
 package main; Foo->$meth->[0]();
 EOT
@@ -344,12 +431,12 @@ is $kalled, 1, 'calling a class method via a magic variable';
     eval {
         NulTest->${ \"method\0Whoops" };
     };
-    like $@, qr/Can't locate object method "method\0Whoops" via package "NulTest" at/,
+    like $@, qr/Can't locate object method "method\\0Whoops" via package "NulTest" at/,
             "method lookup is nul-clean";
 
     *NulTest::AUTOLOAD = sub { our $AUTOLOAD; return $AUTOLOAD };
 
-    like(NulTest->${ \"nul\0test" }, "nul\0test", "AUTOLOAD is nul-clean");
+    like(NulTest->${ \"nul\0test" }, qr/nul\0test/, "AUTOLOAD is nul-clean");
 }
 
 
@@ -404,3 +491,270 @@ is $kalled, 1, 'calling a class method via a magic variable';
    }
    { bless {}, "NoSub"; }
 }
+
+{
+    # [perl #124387]
+    my $autoloaded;
+    package AutoloadDestroy;
+    sub AUTOLOAD { $autoloaded = 1 }
+    package main;
+    bless {}, "AutoloadDestroy";
+    ok($autoloaded, "AUTOLOAD called for DESTROY");
+
+    # 127494 - AUTOLOAD for DESTROY was called without setting $AUTOLOAD
+    my %methods;
+    package AutoloadDestroy2;
+    sub AUTOLOAD {
+        our $AUTOLOAD;
+        (my $method = $AUTOLOAD) =~ s/.*:://;
+        ++$methods{$method};
+    }
+    package main;
+    # this cached AUTOLOAD as the DESTROY method
+    bless {}, "AutoloadDestroy2";
+    %methods = ();
+    my $o = bless {}, "AutoloadDestroy2";
+    # this sets $AUTOLOAD to "AutoloadDestroy2::foo"
+    $o->foo;
+    # this would call AUTOLOAD without setting $AUTOLOAD
+    undef $o;
+    ok($methods{DESTROY}, "\$AUTOLOAD set correctly for DESTROY");
+}
+
+eval { () = 3; new {} };
+like $@,
+     qr/^Can't call method "new" without a package or object reference/,
+    'Err msg from new{} when stack contains a number';
+eval { () = "foo"; new {} };
+like $@,
+     qr/^Can't call method "new" without a package or object reference/,
+    'Err msg from new{} when stack contains a word';
+eval { () = undef; new {} };
+like $@,
+     qr/^Can't call method "new" without a package or object reference/,
+    'Err msg from new{} when stack contains undef';
+
+package egakacp {
+  our @ISA = 'ASI';
+  sub ASI::m { shift; "@_" };
+  my @a = (bless([]), 'arg');
+  my $r = SUPER::m{@a};
+  ::is $r, 'arg', 'method{@array}';
+  $r = SUPER::m{}@a;
+  ::is $r, 'arg', 'method{}@array';
+  $r = SUPER::m{@a}"b";
+  ::is $r, 'arg b', 'method{@array}$more_args';
+}
+
+# [perl #114924] SUPER->method
+@SUPER::ISA = "SUPPER";
+sub SUPPER::foo { "supper" }
+is "SUPER"->foo, 'supper', 'SUPER->method';
+
+sub flomp { "flimp" }
+sub main::::flomp { "flump" }
+is "::"->flomp, 'flump', 'method call on ::';
+is "::main"->flomp, 'flimp', 'method call on ::main';
+eval { ""->flomp };
+like $@,
+     qr/^Can't call method "flomp" without a package or object reference/,
+    'method call on empty string';
+is "3foo"->CORE::uc, '3FOO', '"3foo"->CORE::uc';
+{ no strict; @{"3foo::ISA"} = "CORE"; }
+is "3foo"->uc, '3FOO', '"3foo"->uc (autobox style!)';
+
+# *foo vs (\*foo)
+sub myclass::squeak { 'eek' }
+eval { *myclass->squeak };
+like $@,
+     qr/^Can't call method "squeak" without a package or object reference/,
+    'method call on typeglob ignores package';
+eval { (\*myclass)->squeak };
+like $@,
+     qr/^Can't call method "squeak" on unblessed reference/,
+    'method call on \*typeglob';
+*stdout2 = *STDOUT;  # stdout2 now stringifies as *main::STDOUT
+ sub IO::Handle::self { $_[0] }
+# This used to stringify the glob:
+is *stdout2->self, (\*stdout2)->self,
+  '*glob->method is equiv to (\*glob)->method';
+sub { $_[0] = *STDOUT; is $_[0]->self, \$::h{k}, '$pvlv_glob->method' }
+ ->($::h{k});
+
+# Test that PL_stashcache doesn't change the resolution behaviour for file
+# handles and package names.
+SKIP: {
+    skip_if_miniperl('file handles as methods requires loading IO::File', 26);
+    require Fcntl;
+
+    foreach (qw (Count::DATA Count Colour::H1 Color::H1 C3::H1)) {
+	eval qq{
+            package $_;
+
+            sub getline {
+                return "method in $_";
+            }
+
+            1;
+        } or die $@;
+    }
+
+    BEGIN {
+	*The::Count:: = \*Count::;
+    }
+
+    is(Count::DATA->getline(), 'method in Count::DATA',
+       'initial resolution is a method');
+    is(The::Count::DATA->getline(), 'method in Count::DATA',
+       'initial resolution is a method in aliased classes');
+
+    require Count;
+
+    is(Count::DATA->getline(), "one! ha ha ha\n", 'file handles take priority');
+    is(The::Count::DATA->getline(), "two! ha ha ha\n",
+       'file handles take priority in aliased classes');
+
+    eval q{close Count::DATA} or die $!;
+
+    {
+	no warnings 'io';
+	is(Count::DATA->getline(), undef,
+	   "closing a file handle doesn't change object resolution");
+	is(The::Count::DATA->getline(), undef,
+	   "closing a file handle doesn't change object resolution in aliased classes");
+}
+
+    undef *Count::DATA;
+    is(Count::DATA->getline(), 'method in Count::DATA',
+       'undefining the typeglob does change object resolution');
+    is(The::Count::DATA->getline(), 'method in Count::DATA',
+       'undefining the typeglob does change object resolution in aliased classes');
+
+    is(Count->getline(), 'method in Count',
+       'initial resolution is a method');
+    is(The::Count->getline(), 'method in Count',
+       'initial resolution is a method in aliased classes');
+
+    eval q{
+        open Count, '<', $INC{'Count.pm'}
+            or die "Can't open $INC{'Count.pm'}: $!";
+1;
+    } or die $@;
+
+    is(Count->getline(), "# zero! ha ha ha\n", 'file handles take priority');
+    is(The::Count->getline(), 'method in Count', 'but not in an aliased class');
+
+    eval q{close Count} or die $!;
+
+    {
+	no warnings 'io';
+	is(Count->getline(), undef,
+	   "closing a file handle doesn't change object resolution");
+    }
+
+    undef *Count;
+    is(Count->getline(), 'method in Count',
+       'undefining the typeglob does change object resolution');
+
+    open Colour::H1, 'op/method.t' or die $!;
+    while (<Colour::H1>) {
+	last if /^__END__/;
+    }
+    open CLOSED, 'TEST' or die $!;
+    close CLOSED or die $!;
+
+    my $fh_start = tell Colour::H1;
+    my $data_start = tell DATA;
+    is(Colour::H1->getline(), <DATA>, 'read from a file');
+    is(Color::H1->getline(), 'method in Color::H1',
+       'initial resolution is a method');
+
+    *Color::H1 = *Colour::H1{IO};
+
+    is(Colour::H1->getline(), <DATA>, 'read from a file');
+    is(Color::H1->getline(), <DATA>,
+       'file handles take priority after io-to-typeglob assignment');
+
+    *Color::H1 = *CLOSED{IO};
+    {
+	no warnings 'io';
+	is(Color::H1->getline(), undef,
+	   "assigning a closed a file handle doesn't change object resolution");
+    }
+
+    undef *Color::H1;
+    is(Color::H1->getline(), 'method in Color::H1',
+       'undefining the typeglob does change object resolution');
+
+    *Color::H1 = *Colour::H1;
+
+    is(Color::H1->getline(), <DATA>,
+       'file handles take priority after typeglob-to-typeglob assignment');
+
+    seek Colour::H1, $fh_start, Fcntl::SEEK_SET() or die $!;
+    seek DATA, $data_start, Fcntl::SEEK_SET() or die $!;
+
+    is(Colour::H1->getline(), <DATA>, 'read from a file');
+    is(C3::H1->getline(), 'method in C3::H1', 'initial resolution is a method');
+
+    *Copy:: = \*C3::;
+    *C3:: = \*Colour::;
+
+    is(Colour::H1->getline(), <DATA>, 'read from a file');
+    is(C3::H1->getline(), <DATA>,
+       'file handles take priority after stash aliasing');
+
+    *C3:: = \*Copy::;
+
+    is(C3::H1->getline(), 'method in C3::H1',
+       'restoring the stash returns to a method');
+}
+
+# RT #123619 constant class name should be read-only
+
+{
+    sub RT123619::f { chop $_[0] }
+    eval { 'RT123619'->f(); };
+    like ($@, qr/Modification of a read-only value attempted/, 'RT #123619');
+}
+
+{
+    fresh_perl_is(<<'PROG', <<'EXPECT', {}, "don't negative cache NOUNIVERSAL lookups");
+use v5.36;
+
+my $foo;
+
+BEGIN {
+    $foo = bless {}, 'Foo';
+    $foo->isa('Foo') and say "->isa works!";
+ }
+
+# bump PL_sub_generation
+local *Foo::DESTROY = sub {};
+undef &Foo::DESTROY;
+local *Foo::DESTROY = sub {};
+
+$foo isa 'Foo' and say " and isa works!";
+$foo->isa('Foo') and say "->isa works!";
+
+PROG
+->isa works!
+ and isa works!
+->isa works!
+EXPECT
+}
+
+# RT#130496: assertion failure when looking for a method of undefined name
+# on an unblessed reference
+fresh_perl_is('eval { {}->$x }; print $@;',
+              "Can't call method \"\" on unblessed reference at - line 1.",
+              {},
+              "no crash with undef method name on unblessed ref");
+
+__END__
+#FF9900
+#F78C08
+#FFA500
+#FF4D00
+#FC5100
+#FF5D00

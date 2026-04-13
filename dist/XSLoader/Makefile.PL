@@ -5,17 +5,31 @@
 # - Fill in your dependencies in PREREQ_PM
 # Alternatively, you can say the hell with this and use h2xs.
 
+use strict;
+use warnings;
+
+use v5.6;
+
 use ExtUtils::MakeMaker;
+use ExtUtils::MM_Unix;
+
 eval 'use ExtUtils::MakeMaker::Coverage';
 
-$PACKAGE = 'XSLoader';
-($PACKAGE_FILE = $PACKAGE) =~ s|::|/|g;
-$LAST_API_CHANGE = 0;
+my $PACKAGE = 'XSLoader';
+(my $PACKAGE_FILE = $PACKAGE) =~ s|::|/|g;
+my $LAST_API_CHANGE = 0;
+
+my $CURRENT_VERSION;
+{
+    no strict 'refs';
+    $CURRENT_VERSION = ${$PACKAGE.'::VERSION'};
+}
+my $NEW_VERSION     = ExtUtils::MM_Unix->parse_version("XSLoader_pm.PL");
 
 eval "require $PACKAGE";
 
 unless ($@) { # Make sure we did find the module.
-    print <<"CHANGE_WARN" if ${$PACKAGE.'::VERSION'} < $LAST_API_CHANGE;
+    print <<"CHANGE_WARN" if $CURRENT_VERSION < $LAST_API_CHANGE;
 
 NOTE: There have been API changes between this version and any older
 than version $LAST_API_CHANGE!  Please read the Changes file if you
@@ -34,17 +48,43 @@ my $installdirs = $] < 5.011 ? "perl" : "site";
 
 WriteMakefile(
     NAME            => $PACKAGE,
-    ($ExtUtils::MakeMaker::VERSION > 6.30 ?
-     (LICENSE       => 'perl',
-      AUTHOR        => 'Sebastien Aperghis-Tramoni <sebastien@aperghis.net>',
-      ABSTRACT_FROM => 'XSLoader_pm.PL',
-     ) : ()),
+    LICENSE         => 'perl',
+    AUTHOR          => 'Sebastien Aperghis-Tramoni <sebastien@aperghis.net>',
     VERSION_FROM    => 'XSLoader_pm.PL',
+    ABSTRACT_FROM   => 'XSLoader_pm.PL',
     INSTALLDIRS     => $installdirs,
     PL_FILES        => { 'XSLoader_pm.PL'  => 'XSLoader.pm' },
     PM              => { 'XSLoader.pm' => '$(INST_ARCHLIB)/XSLoader.pm' },
     PREREQ_PM       => {
-        'Test::More' => '0.62',
+        # NOTE: If we should require a Test::More version higher than 0.98
+        # (that included with perl 5.14), we need to remove the meta-spec
+        # entry below for EUMM 6.57_02 to 6.57_06 (the buggy versions
+        # included with perl 5.14).  Otherwise installation will break.
+        # See https://github.com/Perl-Toolchain-Gang/CPAN-Meta/issues/118
+        # for details.
+        'Test::More' => '0.47',
+    },
+    META_MERGE      => {
+        'meta-spec'     => { version => 2 },
+        dynamic_config  => 0,
+        resources       => {
+            repository  => {
+                type        => 'git',
+                url         => 'git://perl5.git.perl.org/perl.git',
+            },
+            homepage    => 'https://metacpan.org/module/XSLoader',
+            x_IRC       => 'irc://irc.perl.org/#p5p',
+            x_MailingList => 'http://lists.perl.org/list/perl5-porters.html',
+            bugtracker => {
+                web         => 'https://github.com/Perl/perl5/issues',
+            },
+        },
+        provides    => {
+            'XSLoader'  => {
+                file        => 'XSLoader_pm.PL',
+                version     => $NEW_VERSION,
+            },
+        },
     },
     dist            => { COMPRESS => 'gzip -9f', SUFFIX => 'gz', },
     clean           => { FILES => 'XSLoader-* XSLoader.pm' },
@@ -62,11 +102,7 @@ WriteMakefile(
         my @perls = ($orig_perl);
         push @perls, qw(bleadperl 
                         perl5.6.1
-                        perl5.6.0
-                        perl5.005_03 
-                        perl5.004_05 
-                        perl5.004_04
-                        perl5.004)
+                        perl5.6.0)
           if $ENV{PERL_TEST_ALL};
 
         my $out;
