@@ -1114,7 +1114,7 @@ do_spawn_ve(pTHX_ SV *really, const char **argv, U32 flag, U32 execf, char *inic
 #else
         {
 #endif
-            int type = save_file_type(real_name);
+            int type = safe_file_type(real_name);
           type_again:
             if (type == -1) {		/* Not found */
                 errno = ENOENT;
@@ -1134,7 +1134,7 @@ do_spawn_ve(pTHX_ SV *really, const char **argv, U32 flag, U32 execf, char *inic
                 if (l + 5 <= sizeof tbuf) {
                     strcpy(tbuf, real_name);
                     strcpy(tbuf + l, ".exe");
-                    type = save_file_type(tbuf);
+                    type = safe_file_type(tbuf);
                     if (type >= -3)
                         goto type_again;
                 }
@@ -1405,7 +1405,7 @@ do_spawn_ve(pTHX_ SV *really, const char **argv, U32 flag, U32 execf, char *inic
                               real_name, argv[0]);
                 goto warned;
           } else if (errno == ENOENT) { /* Cannot transfer `real_name' via shell. */
-                if (rc < 0))
+                if (rc < 0)
                     ck_warner(packWARN(WARN_EXEC), "Can't %s `%s' with ARGV[0] being `%s' (looking for executables only, not found)",
                               ((execf != EXECF_EXEC && execf != EXECF_TRUEEXEC)
                                ? "spawn" : "exec"),
@@ -1423,7 +1423,7 @@ do_spawn_ve(pTHX_ SV *really, const char **argv, U32 flag, U32 execf, char *inic
                 goto retry;
             }
         }
-        if (rc < 0))
+        if (rc < 0)
             ck_warner(packWARN(WARN_EXEC), "Can't %s \"%s\": %s\n",
                       ((execf != EXECF_EXEC && execf != EXECF_TRUEEXEC)
                        ? "spawn" : "exec"),

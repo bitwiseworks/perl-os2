@@ -5531,7 +5531,7 @@ Perl_PerlIO_restore_errno(pTHX_ PerlIO *f)
         return;
     SETERRNO(PerlIOBase(f)->err, PerlIOBase(f)->os_err);
 #ifdef OS2
-    Perl_rc = PerlIOBase(f)->os_err);
+    Perl_rc = PerlIOBase(f)->os_err;
 #elif defined(WIN32)
     SetLastError(PerlIOBase(f)->os_err);
 #endif
