@@ -443,7 +443,7 @@ Now a no-op.
 #ifdef HASATTRIBUTE_PURE
 #  define __attribute__pure__               __attribute__((pure))
 #endif
-#ifdef HASATTRIBUTE_UNUSED
+#if defined(HASATTRIBUTE_UNUSED) && !defined(__KLIBC__)
 #  define __attribute__unused__             __attribute__((unused))
 #endif
 #ifdef HASATTRIBUTE_WARN_UNUSED_RESULT
@@ -455,7 +455,7 @@ Now a no-op.
 #    define __attribute__always_inline__      __attribute__((always_inline))
 #  endif
 #endif
-#if defined(HASATTRIBUTE_VISIBILITY) && !defined(_WIN32) && !defined(__CYGWIN__)
+#if defined(HASATTRIBUTE_VISIBILITY) && !defined(_WIN32) && !defined(__CYGWIN__) && !defined(__KLIBC__)
 /* On Windows instead of this, we use __declspec(dllexport) and a .def file
  * Cygwin works by exporting every global symbol, see the definition of ldflags
  * near the end of hints/cygwin.sh and the visibility attribute doesn't appear
@@ -3397,6 +3397,9 @@ typedef struct padname PADNAME;
 #   endif
 #endif
 
+#if defined(__KLIBC__) && !defined(PERL_CALLCONV)
+#  define PERL_CALLCONV  extern
+#endif
 #if defined(OS2)
 #  include "iperlsys.h"
 #endif
