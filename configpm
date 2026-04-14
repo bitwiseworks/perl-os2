@@ -815,6 +815,7 @@ ENDOFEND
 if ($^O eq 'os2') {
     $config_txt .= uncomment <<'ENDOFSET';
 #    my %preconfig;
+ENDOFSET
 #    if ($OS2::is_aout) {
 #        my ($value, $v) = $Config_SH_expanded =~ m/^used_aout='(.*)'\s*$/m;
 #        for (split ' ', $value) {
@@ -823,6 +824,7 @@ if ($^O eq 'os2') {
 #        }
 #    }
 #    $preconfig{d_fork} = undef unless $OS2::can_fork; # Some funny cases can't
+    $config_txt .= uncomment <<'ENDOFSET';
 #    sub TIEHASH { bless {%preconfig} }
 ENDOFSET
     # Extract the name of the DLL from the makefile to avoid duplication
