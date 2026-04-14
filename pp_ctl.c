@@ -4439,7 +4439,7 @@ S_path_is_searchable(const char *name)
     PERL_ARGS_ASSERT_PATH_IS_SEARCHABLE;
 
     if (PERL_FILE_IS_ABSOLUTE(name)
-#ifdef WIN32
+#if defined(WIN32) || defined(__KLIBC__)
         || (*name == '.' && ((name[1] == '/' ||
                              (name[1] == '.' && name[2] == '/'))
                          || (name[1] == '\\' ||
