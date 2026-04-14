@@ -51,7 +51,7 @@ sub _unix_os2_ext {
 
     my $os2 = $^O =~ 'os2';
 
-    if ( os2 and $Config{perllibs} ) {
+    if ( $os2 and $Config{perllibs} ) {
 
         # Dynamic libraries are not transitive, so we may need including
         # the libraries linked against perl.dll/libperl.so again.
