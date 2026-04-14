@@ -51,7 +51,11 @@
 
 
 typedef Signal_t (*Sighandler1_t) (int);
+#ifndef __KLIBC__
 typedef Signal_t (*Sighandler3_t) (int, Siginfo_t*, void*);
+#else
+typedef Signal_t (*Sighandler3_t) (int, siginfo_t*, void*);
+#endif
 
 #ifndef Sighandler_t
 #  ifdef PERL_USE_3ARG_SIGHANDLER
