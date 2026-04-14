@@ -97,7 +97,7 @@ sub copy {
 	$to = _catname($from, $to);
     }
 
-    if ((($Config{d_symlink} && $Config{d_readlink}) || $Config{d_link}) {
+    if (($Config{d_symlink} && $Config{d_readlink}) || $Config{d_link}) {
 	my @fs = stat($from);
 	if (@fs) {
 	    my @ts = stat($to);
