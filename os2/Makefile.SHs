@@ -111,7 +111,8 @@ miniperl.map: miniperl$(EXE_EXT)
 
 miniperl$(EXE_EXT): $(miniperl_objs)
 	$(CC) $(CLDFLAGS) -o $@ $(miniperl_objs) $(libs) -Zmap -Zargs-wild
-	@./miniperl$(EXE_EXT) -w -Ilib -MExporter -e '<?>' || $(MAKE) minitest
+	@./miniperl$(EXE_EXT) -w -Ilib -Idist/Exporter/lib -MExporter -e '<?>' || $(MAKE) minitest
+	$(MINIPERL) -f write_buildcustomize.pl
 
 depend: os2/os2ish.h os2/os2thread.h
 
