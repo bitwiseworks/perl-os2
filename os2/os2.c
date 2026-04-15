@@ -2245,15 +2245,16 @@ mod2fname(pTHX_ SV *sv)
     STRLEN n_a;
 
     if (!SvROK(sv)) Perl_croak_nocontext("Not a reference given to mod2fname");
-    sv = SvRV(sv);
-    if (SvTYPE(sv) != SVt_PVAV) 
+    AV *in_array = (AV *)SvRV(sv);
+    if (SvTYPE(in_array) != SVt_PVAV)
       Perl_croak_nocontext("Not array reference given to mod2fname");
 
-    avlen = av_count((AV*)sv);
+    avlen = av_count(in_array);
     if (avlen == 0)
       Perl_croak_nocontext("Empty array reference given to mod2fname");
 
-    s = SvPV(*av_fetch((AV*)sv, avlen, FALSE), n_a);
+    avlen --;
+    s = SvPV(*av_fetch(in_array, avlen, FALSE), n_a);
     strncpy(fname, s, 8);
     len = strlen(s);
     if (len < 6) pos = len;
@@ -2261,8 +2262,9 @@ mod2fname(pTHX_ SV *sv)
         sum = 33 * sum + *(s++);	/* Checksumming first chars to
                                          * get the capitalization into c.s. */
     }
-    while (avlen > 0) {
-        s = SvPV(*av_fetch((AV*)sv, avlen, FALSE), n_a);
+    avlen --;
+    while (avlen >= 0) {
+        s = SvPV(*av_fetch(in_array, avlen, FALSE), n_a);
         while (*s) {
             sum = 33 * sum + *(s++);	/* 7 is primitive mod 13. */
         }
