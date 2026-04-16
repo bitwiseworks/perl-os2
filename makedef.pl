@@ -1161,6 +1161,7 @@ elsif (PLATFORM eq 'os2') {
 		      CroakWinError
 		      PL_do_undump
 		      os2_fstat
+		      gcvt_os2
 		 ));
 }
 
