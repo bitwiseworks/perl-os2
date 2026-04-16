@@ -126,7 +126,6 @@ sub _write_os2 {
         }
     }
     print $def join("\n  ",@syms, "\n") if @syms;
-    if (%{$data->{IMPORTS}}) {
     _print_imports($def, $data);
     close $def;
 }
