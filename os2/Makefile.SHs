@@ -72,8 +72,8 @@ perl_dll_t: t/$(PERL_DLL)
 t/$(PERL_DLL): $(PERL_DLL)
 	cp -f $(PERL_DLL) t/$(PERL_DLL)
 
-$(PERL_DLL): $(perllib_obj) $(DYNALOADER) perl5.def
-	$(LD) $(LD_OPT) $(LDDLFLAGS) $(PERL_DLL_LD_OPT) -o $@ $(perllib_obj) $(libs) $(DYNALOADER) perl5.def || ( rm $(PERL_DLL) && sh -c false )
+$(PERL_DLL): $(perllib_objs) $(DYNALOADER) perl5.def
+	$(LD) $(LD_OPT) $(LDDLFLAGS) $(PERL_DLL_LD_OPT) -o $@ $(perllib_objs) $(libs) $(DYNALOADER) perl5.def || ( rm $(PERL_DLL) && sh -c false )
 
 perl5.olddef: perl.linkexp
 	echo "LIBRARY '$(PERL_DLL_BASE)' INITINSTANCE TERMINSTANCE"	> $@
