@@ -10,7 +10,7 @@
 #ifndef POLL_H
 #  define POLL_H
 
-#if (defined(HAS_POLL) && defined(I_POLL)) || (defined(POLLWRBAND) && !defined(_WIN32))
+#if (defined(HAS_POLL) && defined(I_POLL) && !defined(__KLIBC__)) || (defined(POLLWRBAND) && !defined(_WIN32))
 #  include <poll.h>
 #elif (defined(HAS_POLL) && defined(I_SYS_POLL))
 #  include <sys/poll.h>
