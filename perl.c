@@ -5280,7 +5280,14 @@ S_incpush_use_sep(pTHX_ const char *p, STRLEN len, U32 flags)
             /* But you'll need to write tests */
             /* av_push(GvAVn(PL_incgv), newSVpvs(".")); */
         } else {
+#ifndef __KLIBC__
             incpush(p, (STRLEN)(s - p), flags);
+#else
+            char path[MAXPATHLEN];
+            strncpy(path, p, s-p);
+            path[s-p] ='\0';
+            incpush(path, strlen(path), flags);
+#endif
         }
         p = s + 1;
     }
