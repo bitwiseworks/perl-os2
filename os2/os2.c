@@ -1212,7 +1212,7 @@ do_spawn_ve(pTHX_ SV *really, const char **argv, U32 flag, U32 execf, char *inic
 #endif 
         if (rc < 0 && pass == 1) {
               do_script:
-          if (real_name == argv[0]) {
+          if (strcmp(real_name, argv[0]) == 0) {
             int err = errno;
 
             if (err == ENOENT || err == ENOEXEC) {
@@ -1373,7 +1373,7 @@ do_spawn_ve(pTHX_ SV *really, const char **argv, U32 flag, U32 execf, char *inic
                             /* XXXX This is good only until we refuse
                                     quoted arguments... */
 
-			    argsp = fargs;
+                            argsp = fargs;
                             argv[0] = inicmd;
                             argv[1] = NULL;
                             nargs = 2;	/* shell -c */
