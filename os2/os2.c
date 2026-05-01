@@ -2096,7 +2096,7 @@ XS(XS_File__Copy_syscopy)
         else 
             realpath( dst, dstFull);
 
-        RETVAL = !CheckOSError(DosCopy(src, dst, flag));
+        RETVAL = !CheckOSError(DosCopy(srcFull, dstFull, flag));
 #endif 
 /* FIXME: this copies EAs as well, including the unix EAs. great. */
         XSprePUSH; PUSHi((IV)RETVAL);
