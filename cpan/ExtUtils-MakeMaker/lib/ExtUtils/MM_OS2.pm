@@ -122,6 +122,21 @@ sub init_linker {
     $self->{EXPORT_LIST} = '$(BASEEXT).def';
 }
 
+=item all_target
+
+Build man pages, too
+
+=cut
+
+sub all_target {
+    my $self = shift;
+
+    return <<'MAKE_EXT';
+all :: pure_all manifypods
+	$(NOECHO) $(NOOP)
+MAKE_EXT
+}
+
 =item os_flavor
 
 OS/2 is OS/2
